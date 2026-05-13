@@ -2,7 +2,7 @@
 
 Файл `config.json` в `%LOCALAPPDATA%\fis-monitor\`.
 Изменения подхватываются через file-watch без рестарта (см. [[decisions-log]]).
-Полный пример: [[monitoring-plan]] → раздел «Конфиг».
+Полный пример: [[product/monitoring-plan]] → раздел «Конфиг».
 
 ## Таблица ключей
 
@@ -39,7 +39,7 @@
 (таблица `smtp_credentials`), **не в `config.json`**. См. [[decisions-log]] → «SMTP-пароль
 хранится в state.db» и [[data-model]] → `SmtpCredentials`. Pydantic-схема `config.json`
 этих полей не содержит. Изменяются через `PUT /api/notifiers/email`
-(см. [[api-reference]]).
+(см. [[web/api-reference]]).
 
 ## Секреты
 
@@ -47,7 +47,7 @@
 Общая политика обращения с секретами:
 - В ответе `GET /api/config` и `GET /api/notifiers` пароли маскируются `***`.
 - В `PUT /api/notifiers/email` пустое значение пароля = «не менять текущее».
-- При экспорте через `GET /api/export/diagnostic` — обнуляются (см. [[api-reference]]).
+- При экспорте через `GET /api/export/diagnostic` — обнуляются (см. [[web/api-reference]]).
 - На диске `state.db` лежит под ACL `%LOCALAPPDATA%` — достаточно для нашей threat model
   ([[notifications]] → «Хранение секретов», [[decisions-log]] → «SMTP-пароль plain в state.db»).
 
@@ -73,7 +73,7 @@
 
 ## См. также
 
-- [[monitoring-plan]] — полный пример `config.json` и структура папки
+- [[product/monitoring-plan]] — полный пример `config.json` и структура папки
 - [[decisions-log]] — обоснование решений (Pydantic v2, file-watch, секреты)
 - [[notifications]] — детали каналов и хранения секретов
-- [[api-reference]] — эндпоинты `GET/PUT /api/config`
+- [[web/api-reference]] — эндпоинты `GET/PUT /api/config`

@@ -9,7 +9,7 @@ because they trigger different recovery paths:
   version → lazy reparse (no user-facing alert).
 
 Mixing the two via inheritance would break `except` semantics in
-`MonitorCycleService` (R3-ADR — see decisions-log).
+`MonitorCycleService` (R3-ADR — see docs/decisions-log.md MOC).
 """
 
 from __future__ import annotations

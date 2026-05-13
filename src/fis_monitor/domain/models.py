@@ -87,7 +87,7 @@ _DOMAIN_MODEL_CONFIG = ConfigDict(
 class Lot(BaseModel):
     """The canonical lot DTO. Mirrors the `lots` table.
 
-    Field order matches data-model.md §Lot.
+    Field order matches docs/data-model/lot.md §Lot.
     """
 
     model_config = _DOMAIN_MODEL_CONFIG
@@ -213,7 +213,7 @@ class LotUserDTO(LotPublicDTO):
 # SMTP credentials (state.db) — secret handling per ADR-017
 # ---------------------------------------------------------------------------
 class SmtpCredentials(BaseModel):
-    """SMTP login + password. Canon shape per docs/data-model.md:101-108.
+    """SMTP login + password. Canon shape per docs/data-model/settings.md §SmtpCredentials.
 
     `smtp_password` is `SecretStr` — never leaks via `__repr__` / `__str__` /
     `model_dump` (ADR-017).
@@ -239,7 +239,7 @@ class SmtpCredentials(BaseModel):
 class SseCycleError(BaseModel):
     """Critical event: monitor cycle failed.
 
-    Canon shape per docs/data-model.md. Free-form error `message` goes to
+    Canon shape per docs/data-model/lot.md §CycleResult. Free-form error `message` goes to
     `app.jsonl` (structured log), NOT to SSE — typed `error_category` is the
     only error signal allowed in fan-out (PII fail-closed).
     """
@@ -258,8 +258,9 @@ class SseCycleError(BaseModel):
 class SseSmtpFailed(BaseModel):
     """Critical event: SMTP delivery failed.
 
-    Canon shape per docs/data-model.md. `channel_id` is an FK into the
-    channel-table; the plaintext recipient address is NEVER sent on the bus.
+    Canon shape per docs/data-model/notifications.md §NotificationRecord.
+    `channel_id` is an FK into the channel-table; the plaintext recipient
+    address is NEVER sent on the bus.
     `recipient_hash` and `message_id` live in the `notifications` table for
     dedup — they are NOT part of the SSE payload (PII / MTA-leak vectors).
     """
@@ -336,7 +337,7 @@ class SsePayloadSchema:
 
 
 # ---------------------------------------------------------------------------
-# Settings — `config.json` full tree (data-model.md §Settings)
+# Settings — `config.json` full tree (docs/data-model/settings.md §Settings)
 # ---------------------------------------------------------------------------
 #
 # All sub-models share the domain policy (frozen + extra=forbid + no auto-strip).
@@ -436,7 +437,7 @@ class MonitoringConfig(BaseModel):
 
 
 class Settings(BaseModel):
-    """Root `config.json` Pydantic model. Canon shape per data-model.md.
+    """Root `config.json` Pydantic model. Canon shape per docs/data-model/settings.md.
 
     `interval_minutes=0` means continuous (no idle between cycles).
     """
@@ -454,7 +455,7 @@ class Settings(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# LotUserState — per-lot user data (data-model.md §LotUserState)
+# LotUserState — per-lot user data (docs/data-model/settings.md §LotUserState)
 # ---------------------------------------------------------------------------
 class LotUserState(BaseModel):
     """Per-lot user-state. Survives parser-reparse (separate `lot_user_state`
@@ -495,7 +496,7 @@ class OnboardingState(StrEnum):
 
 
 # ---------------------------------------------------------------------------
-# CycleResult — one monitor-cycle row (data-model.md §CycleResult)
+# CycleResult — one monitor-cycle row (docs/data-model/lot.md §CycleResult)
 # ---------------------------------------------------------------------------
 class CycleResult(BaseModel):
     """A single completed monitor cycle. Mirrors the `cycles` table.
@@ -561,7 +562,7 @@ class NotificationRecord(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# NotifierConfig — plugin base (data-model.md §NotifierConfig)
+# NotifierConfig — plugin base (docs/data-model/notifications.md §NotifierConfig)
 # ---------------------------------------------------------------------------
 class NotifierConfig(BaseModel):
     """Base class for channel-plugin configs.
@@ -576,7 +577,7 @@ class NotifierConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Parser outputs (architecture.md §3.2)
+# Parser outputs (docs/architecture/03-protocols.md §3.2)
 # ---------------------------------------------------------------------------
 #
 # Parser invariant (R3-minor): absent / empty fields → `None`, NEVER `""`.
@@ -624,14 +625,16 @@ class ParsedDetail(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# NotifyResult — Notifier Result-pattern (architecture.md §3.3, notifications.md)
+# NotifyResult — Notifier Result-pattern
+# (docs/architecture/03-protocols.md §3.3, docs/notifications.md)
 # ---------------------------------------------------------------------------
 @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class NotifyResult:
     """Return of `Notifier.send()` / `Notifier.test()`.
 
-    Result-pattern is used ONLY for notifiers (architecture.md §0/Q2). The
-    rest of the codebase raises `UpstreamError(category=...)` / `DomainError`.
+    Result-pattern is used ONLY for notifiers
+    (docs/architecture/00-open-questions-resolved.md Q2). The rest of the
+    codebase raises `UpstreamError(category=...)` / `DomainError`.
 
     Log-only contract for `detail`:
       * Written to `app.jsonl` and the `notifications.detail` column by
@@ -664,7 +667,7 @@ class NotifyResult:
 
 
 # ---------------------------------------------------------------------------
-# LoginOutcome / SessionStatus — auth seams (architecture.md §3.4)
+# LoginOutcome / SessionStatus — auth seams (docs/architecture/03-protocols.md §3.4)
 # ---------------------------------------------------------------------------
 #: Closed set of `LoginOutcome.error` hint values.
 #:
@@ -746,7 +749,7 @@ class LockHandle:
 # ---------------------------------------------------------------------------
 #
 # `priority` is a `ClassVar` Literal (OCP — adding a new event type does NOT
-# require touching `EventBus.publish`). See architecture.md §3.5.
+# require touching `EventBus.publish`). See docs/architecture/03-protocols.md §3.5.
 # ---------------------------------------------------------------------------
 class SseSessionExpired(BaseModel):
     """Critical event: stored cookies are no longer valid.
@@ -774,7 +777,7 @@ class SseLotNew(BaseModel):
 
     Carries a `LotPublicDTO` (NOT `LotUserDTO`) — fan-out across multiple
     SSE subscribers MUST NOT leak one tab's user-state into another
-    (multi-user forward-compat, architecture.md §3.6.1).
+    (multi-user forward-compat, docs/architecture/03-protocols.md §3.6.1).
     `LotPublicDTO`'s `model_serializer` strips `raw_json` automatically.
     """
 
@@ -822,7 +825,7 @@ type SseEvent = (
 
 
 # ---------------------------------------------------------------------------
-# Subscription handles — Protocols (architecture.md §3.5)
+# Subscription handles — Protocols (docs/architecture/03-protocols.md §3.5)
 # ---------------------------------------------------------------------------
 #
 # `EventSubscription` (bus events) and `ConfigSubscription` (config-reload
@@ -844,7 +847,7 @@ class EventSubscription[T](Protocol):
     Invariant: `iter()` is a non-blocking generator yielding events as
     they arrive. Concrete bus implementations decide the back-pressure
     policy (drop-from-tail for `normal`, force-unsubscribe for slow
-    consumers of `critical` — see architecture.md §3.5 / R3-C5).
+    consumers of `critical` — see docs/architecture/03-protocols.md §3.5 / R3-C5).
 
     Usage:
 

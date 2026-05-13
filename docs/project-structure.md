@@ -76,8 +76,8 @@ tests/
 - **`db/repository.py`** — все SQL в одном месте. Разделение mirror (можно стереть) и user-state (бережём). См. [[db/schema|db/schema.sql]].
 - **`monitor/cycle.py`** — оркестратор цикла: запросить первую страницу, разобрать, найти новые ID, посчитать backoff при 5xx, записать `cycles`.
 - **`monitor/parser_list.py` / `parser_detail.py`** — парсинг HTML. Изолированы от сетевого слоя, тестируются на фикстурах.
-- **`monitor/sort_strategy.py`** — алгоритм early-exit и защита от регрессии ID (см. [[sort-strategy]] и [[monitoring-plan]] → «Защита от смены ID-схемы»).
-- **`enrichment/worker.py`** — фоновое дозаполнение карточек, очередь с приоритетом ниже монитора, до 10 параллельно. См. [[monitoring-plan]].
+- **`monitor/sort_strategy.py`** — алгоритм early-exit и защита от регрессии ID (см. [[parser/sort-strategy]] и [[product/monitoring-plan]] → «Защита от смены ID-схемы»).
+- **`enrichment/worker.py`** — фоновое дозаполнение карточек, очередь с приоритетом ниже монитора, до 10 параллельно. См. [[product/monitoring-plan]].
 - **`notifiers/*`** — плагин-архитектура. `base.Notifier` — ABC, конкретные каналы регистрируются через `registry`. Идемпотентность по `(lot_id, channel)`. См. [[notifications]].
 - **`auth/playwright_login.py`** — открывает headed Chromium с persistent context, ждёт пока клиент пройдёт ЕСИА сам.
 - **`auth/session.py`** — детектит 302 на login, поднимает флаг «нужен релогин», останавливает enrichment.
@@ -138,7 +138,7 @@ Nuitka не умеет кросс-компиляцию. Сборка обоих 
 - **selectolax 0.4.8** — HTML-парсер (верифицирован на фикстурах 12.05.2026)
 - **playwright 1.58.0** + Chromium 145 (Chrome for Testing). Embedded в FastAPI
   threadpool, не subprocess. Fallback на 1.56.0 если ЕСИА flag-ает CfT
-  (см. [[runbook]] сценарий 9)
+  (см. [[ops/runbook]] сценарий 9)
 - **FastAPI handlers как `def ...`** (sync), не `async def`. FastAPI разносит по
   threadpool сам
 - **CSRF**: своя минимальная middleware в `web/csrf.py` (`Origin` + `Host` +
@@ -156,7 +156,7 @@ Nuitka не умеет кросс-компиляцию. Сборка обоих 
 
 ## См. также
 
-- [[getting-started]]
+- [[ops/getting-started]]
 - [[decisions-log]]
-- [[monitoring-plan]]
-- [[web-ui-architecture]]
+- [[product/monitoring-plan]]
+- [[web/ui-architecture]]

@@ -3,7 +3,7 @@
 This module is the SINGLE source of truth for every structural Protocol
 (typing.Protocol) that separates domain/services from infrastructure.
 
-Layer topology (architecture.md §3, §6):
+Layer topology (docs/architecture/03-protocols.md, docs/architecture/06-notifier-registry.md):
   Layer 0 — core system utilities:  Clock, ConnectionProvider, Locker,
                                      ConfigSource, EventBus
   Layer 1 — persistence repositories: LotRepository, UserStateRepository,
@@ -16,7 +16,7 @@ Layer topology (architecture.md §3, §6):
                                        AutostartManager, MigrationRunner
   Layer 3 — notification plugin:       Notifier
 
-Design rules (enforced by import-linter, ADR-006):
+Design rules (enforced by import-linter, docs/decisions/ADR-006-import-linter-ci.md):
   - This module MUST NOT import from infra / services / web / composition.
   - Only stdlib + pydantic + domain siblings (models, errors) are allowed.
 
@@ -109,7 +109,7 @@ class EventSubscription[T](Protocol):
     Invariant: ``iter()`` is a non-blocking generator yielding events as
     they arrive. Concrete bus implementations decide the back-pressure
     policy (drop-from-tail for ``normal``, force-unsubscribe for slow
-    consumers of ``critical`` — see architecture.md §3.5 / R3-C5).
+    consumers of ``critical`` — see docs/architecture/03-protocols.md §3.5 / R3-C5).
 
     ``unsubscribe()`` MUST be idempotent: calling it after ``__exit__``
     (or twice in a row) is a no-op.
@@ -160,7 +160,7 @@ class Clock(Protocol):
 class ConnectionProvider(Protocol):
     """Per-thread SQLite connection factory.
 
-    NOTE (architecture.md §3 note): ``ConnectionProvider`` is an
+    NOTE (docs/architecture/03-protocols.md §3 note): ``ConnectionProvider`` is an
     infra-internal seam, not a domain concept. It is defined here so that
     repository Protocols can be tested with fake providers, but callers
     outside ``infra/`` MUST NOT cast raw ``sqlite3.Connection`` objects.
@@ -253,7 +253,9 @@ class LotRepository(Protocol):
 
     All read-then-write operations use ``BEGIN IMMEDIATE`` to capture the
     writer-lock before the first ``SELECT`` (eliminates TOCTOU between
-    ``SELECT old`` and ``UPDATE``).  See ADR-016, architecture.md §3.1.
+    ``SELECT old`` and ``UPDATE``).
+    See docs/decisions/ADR-016-repository-invariants-begin-immediate.md,
+    docs/architecture/03-protocols.md §3.1.
     """
 
     def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:

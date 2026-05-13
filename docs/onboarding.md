@@ -139,4 +139,4 @@ Key-value в `state`:
 См. также:
 - [[architecture]] §3.5 (контракт), §11 (ADR-018)
 - [[decisions-log]] (ADR-018)
-- [[data-model.md]] (OnboardingState model)
+- [[data-model]] (OnboardingState model)

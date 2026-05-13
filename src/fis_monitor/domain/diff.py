@@ -2,7 +2,8 @@
 
 Computes the delta between two Lot snapshots for a caller-specified set of
 tracked fields. Results are written to `lots_history` by the repository
-(see ADR-016 / architecture.md §3.1).
+(see docs/decisions/ADR-016-repository-invariants-begin-immediate.md /
+docs/architecture/03-protocols.md §3.1).
 
 Design contract:
 - No I/O, no logging, no mutation.
