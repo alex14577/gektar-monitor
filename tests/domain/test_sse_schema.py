@@ -24,11 +24,15 @@ def test_sse_payload_schema_smtp_failed_exact_whitelist():
 
 
 # ---------------------------------------------------------------------------
-# T11c — session.expired whitelist is EXACT
+# T11c — session.expired whitelist is EXACT (T_SE_1: drop redirect_url PII vector)
 # ---------------------------------------------------------------------------
 def test_sse_payload_schema_session_expired_exact_whitelist():
+    # `redirect_url` is dropped — it is a PII / token-leak vector (the URL
+    # the site redirects to after session expiry can embed return-tokens,
+    # CSRF nonces, or originating cabinet paths).  Whitelist holds only
+    # the literal event discriminator and the bus-stamped timestamp.
     assert SsePayloadSchema.for_event("session.expired") == frozenset(
-        {"timestamp", "redirect_url"}
+        {"timestamp", "event"}
     )
 
 
@@ -65,6 +69,7 @@ def test_sse_payload_schema_no_pii_vectors_anywhere():
         "smtp_code",
         "cookie",
         "token",
+        "redirect_url",
     }
     for evt in ("cycle.error", "smtp.failed", "session.expired"):
         whitelist = SsePayloadSchema.for_event(evt)

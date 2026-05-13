@@ -136,7 +136,7 @@ Whitelist полей для persist'а critical-event в таблицу `state` 
 class SsePayloadSchema:
     """Whitelist полей по типу события — для persist + redactor-логов.
     Поля ВНЕ списка вырезаются перед записью в state и перед logger.warning."""
-    SESSION_EXPIRED = frozenset({"timestamp", "redirect_url"})
+    SESSION_EXPIRED = frozenset({"timestamp", "event"})
     CYCLE_ERROR     = frozenset({"timestamp", "cycle_id", "error_category"})
     SMTP_FAILED     = frozenset({"timestamp", "channel_id", "error_category",
                                  "attempt_no"})
@@ -392,8 +392,13 @@ class SSEStatusUpdate(BaseModel):
     monitor_state: Literal["running", "paused", "dnd"]
 
 
-class SSESessionExpired(BaseModel):
-    event: Literal["expired"]
+class SseSessionExpired(BaseModel):
+    priority: ClassVar[Literal["critical"]] = "critical"
+    timestamp: datetime
+    event: Literal["expired"] = "expired"
+    # ЯВНО БЕЗ: redirect_url, stacktrace, exception_repr — PII/token-leak
+    # vectors. `redirect_url` исключён из SsePayloadSchema.SESSION_EXPIRED
+    # (URL после expire может нести return-токены / CSRF-нонсы).
 ```
 
 ## OnboardingState — FSM

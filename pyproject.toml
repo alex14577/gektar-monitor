@@ -13,7 +13,7 @@ authors = [{ name = "alex", email = "alexanc40@gmail.com" }]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "pydantic>=2.0",
+    "pydantic[email]>=2.0",
     "sse-starlette>=2.1",
     "selectolax==0.4.8",
     "requests>=2.32",

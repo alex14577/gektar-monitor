@@ -18,19 +18,30 @@ used by `EventBus` to scrub PII before persisting critical events.
 from __future__ import annotations
 
 import socket
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, ClassVar, Literal
+from enum import StrEnum
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    Protocol,
+    runtime_checkable,
+)
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    EmailStr,
     Field,
     SecretStr,
     StrictInt,
     model_serializer,
     model_validator,
 )
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 # ---------------------------------------------------------------------------
 # Type aliases (closed Literal-enums)
@@ -298,7 +309,12 @@ class SsePayloadSchema:
     rather than risk leaking PII on a typo, persist nothing.
     """
 
-    SESSION_EXPIRED: ClassVar[frozenset[str]] = frozenset({"timestamp", "redirect_url"})
+    # `redirect_url` is intentionally NOT whitelisted — the URL the site
+    # redirects to after session expiry can embed return-tokens, CSRF
+    # nonces, or originating cabinet paths (PII / token-leak vector). The
+    # SSE consumer needs only the literal event discriminator + the
+    # bus-stamped timestamp to drive the "re-login" UX.
+    SESSION_EXPIRED: ClassVar[frozenset[str]] = frozenset({"timestamp", "event"})
     CYCLE_ERROR: ClassVar[frozenset[str]] = frozenset({"timestamp", "cycle_id", "error_category"})
     SMTP_FAILED: ClassVar[frozenset[str]] = frozenset(
         {"timestamp", "channel_id", "error_category", "attempt_no"}
@@ -317,3 +333,545 @@ class SsePayloadSchema:
         Fail-closed: typos do NOT silently leak fields.
         """
         return cls._BY_EVENT.get(event_type, frozenset())
+
+
+# ---------------------------------------------------------------------------
+# Settings — `config.json` full tree (data-model.md §Settings)
+# ---------------------------------------------------------------------------
+#
+# All sub-models share the domain policy (frozen + extra=forbid + no auto-strip).
+# `smtp_password` / `smtp_user` are intentionally absent — they live in
+# `state.db` (see `SmtpCredentials` above + ADR-020).
+# ---------------------------------------------------------------------------
+class FiltersConfig(BaseModel):
+    """Notify-time RF subject filter; empty list = all from selected macro-regions."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    rf_subjects: list[int] = Field(default_factory=list)
+
+
+class UIConfig(BaseModel):
+    """Local web UI binding & cosmetics."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    bind_host: str = "127.0.0.1"
+    port: Annotated[int, Field(ge=1024, le=65535)] = 8080
+    auto_open_browser: bool = True
+    font_size_px: Literal[14, 16, 18] = 16
+    theme: Literal["auto", "light", "dark"] = "auto"
+
+
+class EmailConfig(BaseModel):
+    """Email-channel config WITHOUT credentials (those live in state.db)."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    enabled: bool = True
+    use_default_smtp: bool = True
+    smtp_host: str = "smtp.yandex.ru"
+    smtp_port: Annotated[int, Field(ge=1, le=65535)] = 587
+    from_address: str | None = None
+    recipients: list[EmailStr] = Field(default_factory=list)
+
+
+class BrowserConfig(BaseModel):
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    enabled: bool = True
+
+
+class HeartbeatConfig(BaseModel):
+    """Optional daily-`all-quiet` digest. Off by default."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    enabled: bool = False
+    time: str = "09:00"  # HH:MM, local TZ
+
+
+class SoundEscalationConfig(BaseModel):
+    """Browser-side escalation steps in seconds (UI consumes the list)."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    enabled: bool = True
+    escalate_at_seconds: list[int] = Field(default_factory=lambda: [60, 120])
+
+
+class DndConfig(BaseModel):
+    """Do-not-disturb until ISO timestamp; `None` = disabled."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    until: str | None = None
+
+
+class CatchupConfig(BaseModel):
+    """Replay missed events after long offline window."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    enabled: bool = True
+    min_offline_minutes: int = 60
+
+
+class NotificationsConfig(BaseModel):
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    email: EmailConfig = Field(default_factory=EmailConfig)
+    browser: BrowserConfig = Field(default_factory=BrowserConfig)
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    sound_escalation: SoundEscalationConfig = Field(default_factory=SoundEscalationConfig)
+    dnd: DndConfig = Field(default_factory=DndConfig)
+    catchup: CatchupConfig = Field(default_factory=CatchupConfig)
+
+
+class MonitoringConfig(BaseModel):
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    full_scan_time: str = "04:00"
+    full_scan_l2_priority_days: int = 7
+
+
+class Settings(BaseModel):
+    """Root `config.json` Pydantic model. Canon shape per data-model.md.
+
+    `interval_minutes=0` means continuous (no idle between cycles).
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    mode: Literal["local", "server"] = "local"
+    interval_minutes: Annotated[int, Field(ge=0, le=60)] = 15
+    timezone: str = "Europe/Moscow"
+    regions: list[int] = Field(default_factory=lambda: [1, 2])
+    filters: FiltersConfig = Field(default_factory=FiltersConfig)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
+    notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
+
+
+# ---------------------------------------------------------------------------
+# LotUserState — per-lot user data (data-model.md §LotUserState)
+# ---------------------------------------------------------------------------
+class LotUserState(BaseModel):
+    """Per-lot user-state. Survives parser-reparse (separate `lot_user_state`
+    table — see db/schema.sql).
+
+    Forward-compat: in multi-user v3 the PK becomes `(user_id, lot_id)`; for
+    MVP single-user `lot_id` alone is the natural key. Callers MUST NOT rely
+    on `lot_id` being unique post-migration.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    lot_id: StrictInt
+    starred: bool = False
+    submitted: bool = False
+    submitted_at: datetime | None = None
+    note: str | None = None
+    seen_at: datetime | None = None
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# OnboardingState — server-side FSM (ADR-018, docs/onboarding.md)
+# ---------------------------------------------------------------------------
+class OnboardingState(StrEnum):
+    """Onboarding FSM. Server is the SSOT — UI mirrors what the server allows.
+
+    Transitions (see docs/onboarding.md):
+
+        not_started → regions_set → smtp_configured → recipients_set → completed
+    """
+
+    NOT_STARTED = "not_started"
+    REGIONS_SET = "regions_set"
+    SMTP_CONFIGURED = "smtp_configured"
+    RECIPIENTS_SET = "recipients_set"
+    COMPLETED = "completed"
+
+
+# ---------------------------------------------------------------------------
+# CycleResult — one monitor-cycle row (data-model.md §CycleResult)
+# ---------------------------------------------------------------------------
+class CycleResult(BaseModel):
+    """A single completed monitor cycle. Mirrors the `cycles` table.
+
+    `error` is a free-form, log-only diagnostic — NEVER published on the
+    bus (PII vector). Typed `error_category` belongs on `SseCycleError`,
+    not here.
+
+    Contract for callers writing `CycleResult.error`:
+      * MUST NOT contain stacktraces, raw exception reprs, URLs with
+        tokens, recipient addresses, cookies, or any PII.
+      * Use the closed `ErrorCategory` enum on `SseCycleError` for the
+        typed fan-out signal — `error` here is human-readable only.
+      * Hard-capped at 200 chars (`max_length=200`) to keep `cycles`
+        rows bounded and to discourage accidental stacktrace dumps.
+      * Logged to `cycles` table; included in `diagnostic.zip` ONLY
+        after PII-redaction (see bd `0t8`).
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    id: StrictInt
+    region: int
+    started_at: datetime
+    finished_at: datetime
+    status: Literal["ok", "error", "aborted"]
+    lots_fetched: int
+    new_lots: int
+    error: Annotated[str, Field(max_length=200)] | None = None
+    id_schema_check: Literal["ok", "anomaly", "confirmed"] = "ok"
+
+
+# ---------------------------------------------------------------------------
+# NotificationRecord — notifications table (ADR-019, notifications.md)
+# ---------------------------------------------------------------------------
+class NotificationRecord(BaseModel):
+    """A row in the `notifications` table. PK `(lot_id, channel, recipient)`.
+
+    State machine (ADR-019):
+
+        pending → sent              (terminal-success)
+        pending → permanent_fail    (terminal-failure, no further retries)
+
+    `sent_at` and `last_attempt_at` are nullable: an `INSERT OR IGNORE`
+    reserve creates the row with `status='pending'`, both timestamps NULL.
+    Only `reserve` / `mark_attempt` / `mark_sent` / `mark_permanent_fail` on
+    `NotificationsRepository` may mutate this row, each inside its own short
+    `BEGIN IMMEDIATE` transaction.
+
+    `recipient='local'` is used for `browser` / `heartbeat` channels which
+    have no addressable target.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    lot_id: StrictInt
+    channel: Literal["email", "browser", "heartbeat"]
+    recipient: str
+    status: Literal["pending", "sent", "permanent_fail"]
+    attempt_no: StrictInt
+    last_attempt_at: datetime | None
+    sent_at: datetime | None
+
+
+# ---------------------------------------------------------------------------
+# NotifierConfig — plugin base (data-model.md §NotifierConfig)
+# ---------------------------------------------------------------------------
+class NotifierConfig(BaseModel):
+    """Base class for channel-plugin configs.
+
+    Concrete subclasses (EmailNotifierConfig, BrowserNotifierConfig, ...)
+    live with their notifier implementations in `infra/notifiers/*`. The
+    base class only fixes the policy (frozen, extra=forbid) so plugins
+    cannot loosen it.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+
+# ---------------------------------------------------------------------------
+# Parser outputs (architecture.md §3.2)
+# ---------------------------------------------------------------------------
+#
+# Parser invariant (R3-minor): absent / empty fields → `None`, NEVER `""`.
+# `compute_changes` normalises `""` → `None` defence-in-depth, but parsers
+# MUST emit `None` to avoid FTS-trigger churn on every upsert.
+# ---------------------------------------------------------------------------
+class ParsedListRow(BaseModel):
+    """One row of the lot-list page. Mirrors list-table columns only.
+
+    Detail-card fields (lat/lon, raw_json, parser_version) live on
+    `ParsedDetail`, NOT here — list parser cannot see them.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    id: StrictInt
+    cadastral_no: str
+    area_sqm: int | None
+    region: str
+    municipality: str | None
+    land_category: str | None
+    permitted_use: str | None
+    ogv: str | None
+    status: str
+    date_create: datetime
+    date_update: datetime | None
+
+
+class ParsedDetail(BaseModel):
+    """One detail-card payload (`cabinet-free-lot-view`).
+
+    Everything that is NOT a typed field goes into `raw_json` — that keeps
+    the parser forward-compatible with new site columns without a schema
+    migration.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    lat: float | None
+    lon: float | None
+    has_boundaries: bool | None
+    date_update: datetime | None
+    raw_json: dict[str, Any]
+    parser_version: StrictInt = 1
+
+
+# ---------------------------------------------------------------------------
+# NotifyResult — Notifier Result-pattern (architecture.md §3.3, notifications.md)
+# ---------------------------------------------------------------------------
+@pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class NotifyResult:
+    """Return of `Notifier.send()` / `Notifier.test()`.
+
+    Result-pattern is used ONLY for notifiers (architecture.md §0/Q2). The
+    rest of the codebase raises `UpstreamError(category=...)` / `DomainError`.
+
+    Log-only contract for `detail`:
+      * Written to `app.jsonl` and the `notifications.detail` column by
+        the Dispatcher.
+      * NEVER published verbatim on the SSE bus — the Dispatcher MUST
+        map it to a closed `ErrorCategory` value (see bd `arl`).
+      * Type-level guarantee: `SseSmtpFailed` has `extra="forbid"`, so a
+        sloppy `event_dict["detail"] = result.detail` will raise at
+        validation time.
+      * Hard-capped at 500 chars to bound `app.jsonl` line size and to
+        defend against a misbehaving notifier smuggling multi-KB MTA
+        responses through the log pipeline.
+
+    Implementation note: this is a `pydantic.dataclasses.dataclass` (NOT
+    a stdlib `@dataclass`) so that `Annotated[..., Field(max_length=500)]`
+    is enforced at construction time. `dataclasses.fields(...)`,
+    `FrozenInstanceError`, and tuple-style positional construction still
+    work identically.
+
+    Fields:
+        ok        — terminal success.
+        detail    — human-readable diagnostic (see contract above).
+        retryable — whether the Dispatcher should retry (network / 5xx)
+                    vs treat as terminal (auth / 4xx).
+    """
+
+    ok: bool
+    detail: Annotated[str, Field(max_length=500)]
+    retryable: bool
+
+
+# ---------------------------------------------------------------------------
+# LoginOutcome / SessionStatus — auth seams (architecture.md §3.4)
+# ---------------------------------------------------------------------------
+#: Closed set of `LoginOutcome.error` hint values.
+#:
+#: Free-form `playwright:<reason>` open form is intentionally REMOVED —
+#: the raw `<reason>` substring is a PII / internal-detail leak vector
+#: (it can carry browser-internal paths, target URLs, etc.). Mapper in
+#: the LoginSession use case translates a Playwright exception into one
+#: of the closed members below; raw diagnostics go to `app.jsonl`.
+LoginErrorHint = Literal[
+    "timeout",
+    "cancelled",
+    "playwright_disconnect",
+    "playwright_timeout",
+    "playwright_other",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class LoginOutcome:
+    """Return of `LoginSession.open_headed_login()`.
+
+    `error` is a closed-set Literal hint, NOT a free-form message:
+    one of `LoginErrorHint` members, or `None` on success. Free-form
+    diagnostics belong in `app.jsonl`.
+    """
+
+    success: bool
+    cookies_updated: bool
+    error: LoginErrorHint | None
+
+
+class SessionStatus(StrEnum):
+    """Result of `SessionProbe.check()` — cookie-validity health-check.
+
+    EXPIRING == less than 10 minutes until session expiry (heuristic; the
+    probe sees a 200 but with a refresh hint in the body).
+    """
+
+    ACTIVE = "active"
+    EXPIRING = "expiring"
+    EXPIRED = "expired"
+
+
+# ---------------------------------------------------------------------------
+# HttpResponse / LockHandle — infra-internal frozen dataclasses
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class HttpResponse:
+    """Return of `HttpClient.get()`. Infra-internal — never crosses the bus.
+
+    `final_url` is required for the `redirect_login` detection (302 on
+    `/login` after session expiry — see `ErrorCategory`).
+    """
+
+    status: int
+    text: str
+    headers: Mapping[str, str]
+    final_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class LockHandle:
+    """Opaque handle returned by `Locker.acquire()` and consumed by
+    `Locker.release(handle)`.
+
+    `pid` is the writer-PID stamped into the lock-file for human inspection
+    (`who holds the lock?`). It is NOT used for arbitration — OS-level
+    lock (`fcntl.flock` / `msvcrt.locking`) is the SSOT.
+
+    `path` is the lock-file path; used by `release()` to unlink.
+    """
+
+    pid: int
+    path: str
+
+
+# ---------------------------------------------------------------------------
+# SSE event payloads — SessionExpired / LotNew / LotStatus
+# ---------------------------------------------------------------------------
+#
+# `priority` is a `ClassVar` Literal (OCP — adding a new event type does NOT
+# require touching `EventBus.publish`). See architecture.md §3.5.
+# ---------------------------------------------------------------------------
+class SseSessionExpired(BaseModel):
+    """Critical event: stored cookies are no longer valid.
+
+    `extra="forbid"` blocks every PII vector at the type level (stacktraces,
+    `redirect_url` with return-tokens, etc. — only `timestamp` and the
+    literal `event` discriminator are permitted).
+
+    `timestamp` matches `SseCycleError` / `SseSmtpFailed` shape so the
+    EventBus persist-slot (`last_critical_event:session`) preserves event
+    ordering and TTL accounting consistently across all critical event
+    types (see `SsePayloadSchema.SESSION_EXPIRED`).
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["critical"]] = "critical"
+
+    timestamp: datetime
+    event: Literal["expired"] = "expired"
+
+
+class SseLotNew(BaseModel):
+    """Normal event: a brand-new lot appeared.
+
+    Carries a `LotPublicDTO` (NOT `LotUserDTO`) — fan-out across multiple
+    SSE subscribers MUST NOT leak one tab's user-state into another
+    (multi-user forward-compat, architecture.md §3.6.1).
+    `LotPublicDTO`'s `model_serializer` strips `raw_json` automatically.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["normal"]] = "normal"
+
+    event: Literal["lot.new"] = "lot.new"
+    lot: LotPublicDTO
+    fragment_template: Literal["poster", "list"]
+
+
+class SseLotStatus(BaseModel):
+    """Normal event: a tracked lot transitioned (gone / status changed).
+
+    Only the lot-id + the new status are broadcast — the full lot row is
+    served via a separate REST call to avoid bloating the bus when many
+    lots churn at once.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["normal"]] = "normal"
+
+    event: Literal["lot.status"] = "lot.status"
+    lot_id: StrictInt
+    new_status: str
+    event_type: Literal["gone", "changed"]
+
+
+# ---------------------------------------------------------------------------
+# SseEvent — closed union over all bus event types
+# ---------------------------------------------------------------------------
+#: All five concrete SSE event DTOs. `EventBus.publish(event: SseEvent)` and
+#: `EventBus.subscribe() -> EventSubscription[SseEvent]` use this alias.
+#: Adding a new event type = extend this union AND register its priority
+#: ClassVar; nothing else changes (OCP).
+type SseEvent = (
+    SseCycleError
+    | SseSmtpFailed
+    | SseSessionExpired
+    | SseLotNew
+    | SseLotStatus
+)
+
+
+# ---------------------------------------------------------------------------
+# Subscription handles — Protocols (architecture.md §3.5)
+# ---------------------------------------------------------------------------
+#
+# `EventSubscription` (bus events) and `ConfigSubscription` (config-reload
+# callbacks) are intentionally DIFFERENT names — they look similar but live
+# on different lifecycles and must not be confused at call-sites.
+#
+# TODO(531.2): move EventSubscription/ConfigSubscription Protocols to
+# domain/interfaces.py — bd issue z9d.
+# ---------------------------------------------------------------------------
+@runtime_checkable
+class EventSubscription[T](Protocol):
+    """Handle returned by `EventBus.subscribe()`. Context-manager + lazy
+    iterator over received events.
+
+    Generic over the event type `T` so call-sites can spell
+    `EventSubscription[SseEvent]` and rely on static type-checking of
+    the iterator yield-type.
+
+    Invariant: `iter()` is a non-blocking generator yielding events as
+    they arrive. Concrete bus implementations decide the back-pressure
+    policy (drop-from-tail for `normal`, force-unsubscribe for slow
+    consumers of `critical` — see architecture.md §3.5 / R3-C5).
+
+    Usage:
+
+        with bus.subscribe() as sub:
+            for event in sub.iter():
+                ...
+        # __exit__ calls unsubscribe()
+
+    `unsubscribe()` MUST be idempotent: calling it after `__exit__` (or
+    twice in a row) is a no-op.
+    """
+
+    def __enter__(self) -> EventSubscription[T]: ...
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None: ...
+    def unsubscribe(self) -> None: ...
+    def iter(self) -> Iterator[T]: ...
+
+
+@runtime_checkable
+class ConfigSubscription(Protocol):
+    """Context-manager handle returned by `ConfigSource.subscribe(cb)`.
+
+    Separate type from `EventSubscription` to keep call-sites unambiguous —
+    config reload and SSE bus events are different lifecycles. Reload
+    delivery is push-based (callback), so this handle has no `iter()`.
+    """
+
+    def __enter__(self) -> ConfigSubscription: ...
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None: ...
+    def unsubscribe(self) -> None: ...
