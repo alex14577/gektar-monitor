@@ -1,5 +1,47 @@
-
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
 .beads-credential-key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Runtime data (created by platformdirs)
+state.db-wal
+state.db-shm
+profile/
+logs/
+app.lock
+config.json
+
+# Local artifacts
+monitor.zip
+*.local
+
+# OS
+.DS_Store
+Thumbs.db

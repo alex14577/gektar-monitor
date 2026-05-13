@@ -1,0 +1,69 @@
+{# ========================================================================
+   _sidebar_filters.html.jinja — view-фильтры (НЕ сохраняются в config.json)
+   POST в /filters/view возвращает обновлённую ленту через hx-swap.
+   ======================================================================== #}
+<form id="filters"
+      hx-post="/filters/view"
+      hx-trigger="change delay:200ms, input changed delay:400ms"
+      hx-target="#feed"
+      hx-swap="outerHTML">
+
+  <div class="sidebar__group">
+    <p class="sidebar__h">Что показывать</p>
+    <a class="sidebar__watched" href="/settings#scope" title="Изменить в Настройках">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/></svg>
+      Наблюдаю: {{ scope.macro_regions | join(', ') }}
+    </a>
+  </div>
+
+  <div class="sidebar__group">
+    <p class="sidebar__h">Субъект РФ</p>
+    <button class="select" type="button"
+            hx-get="/filters/subjects" hx-target="#filter-subjects-menu" hx-swap="innerHTML">
+      <span>
+        {% if filters.subjects %}{{ filters.subjects | length }} выбран{{ 'о' if filters.subjects | length != 1 else '' }}{% else %}Все · {{ scope.subjects_count }}{% endif %}
+      </span>
+      <span class="select__caret">▾</span>
+    </button>
+    <div id="filter-subjects-menu" hidden></div>
+  </div>
+
+  <div class="sidebar__group">
+    <p class="sidebar__h">Площадь, га</p>
+    <input class="range" type="range" name="area_min" min="0" max="100" step="1"
+           value="{{ filters.area_min }}" aria-label="Минимум площади" />
+    <input class="range" type="range" name="area_max" min="0" max="100" step="1"
+           value="{{ filters.area_max }}" aria-label="Максимум площади" />
+    <div style="display:flex; justify-content:space-between; font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted);">
+      <span>{{ filters.area_min_label }}</span>
+      <span>{{ filters.area_max_label }}</span>
+    </div>
+  </div>
+
+  <div class="sidebar__group">
+    <label class="check">
+      <input type="checkbox" name="only_new"      {% if filters.only_new %}checked{% endif %} />
+      <span class="check__label">Только новые с визита</span>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="only_stars"     {% if filters.only_stars %}checked{% endif %} />
+      <span class="check__label">Только избранные ★</span>
+    </label>
+  </div>
+
+  <div class="sidebar__group">
+    <p class="sidebar__h">Плотность</p>
+    <div class="density-toggle" role="group" aria-label="Плотность ленты">
+      <button type="button" data-density-option="auto"    aria-pressed="true">авто</button>
+      <button type="button" data-density-option="compact" aria-pressed="false">плотно</button>
+      <button type="button" data-density-option="poster"  aria-pressed="false">постер</button>
+    </div>
+  </div>
+
+  <div class="sidebar__group">
+    <button class="btn btn--ghost btn--sm btn--full" type="button"
+            hx-post="/filters/clear" hx-target="body">
+      Очистить фильтры
+    </button>
+  </div>
+</form>
