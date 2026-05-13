@@ -102,7 +102,45 @@ class MigrationChainBroken(DomainError):
 
 
 class ParseBugError(DomainError):
-    """HTML/JSON shape diverged from parser expectations — unrecoverable cycle bug."""
+    """DOM-shape сломан — селектор не нашёл ожидаемого узла.
+
+    raise → cycle.error event. ``selector`` и ``context`` — короткие
+    PII-safe строки (никаких raw HTML фрагментов, recipient, email).
+
+    Attributes:
+        selector: CSS selector or field name that failed to match.
+        context:  Short hint about the page/position (PII-free).
+    """
+
+    def __init__(self, selector: str, context: str = "") -> None:
+        """Initialise ParseBugError with a CSS selector and optional context hint.
+
+        Args:
+            selector: The CSS selector or field name that failed to match.
+                      Must be a short, PII-safe string (e.g. ``"tbody.lots-list"``,
+                      ``"date_update"``).
+            context:  Optional short hint about the page/position context.
+                      Must be a short, PII-safe string (e.g. ``"empty rows"``,
+                      ``"missing main block"``).
+
+        **PROHIBITED in ``context`` (and ``selector``) — PII-safety is a
+        caller-responsibility convention, NOT enforced at construction time:**
+
+        * Raw HTML fragments (e.g. ``"<div class=...">``)
+        * URLs or query parameters (e.g. ``"https://…?id=123"``)
+        * Email addresses (e.g. ``"user@example.com"``)
+        * User-supplied input (cadastral numbers, recipient names, etc.)
+
+        These fields propagate to ``logging.exception`` and ``audit.jsonl``.
+        The constructor will accept any string — enforcement is the caller's
+        responsibility.
+        """
+        self.selector = selector
+        self.context = context
+        msg = f"parse bug: selector={selector!r}"
+        if context:
+            msg += f" context={context!r}"
+        super().__init__(msg)
 
 
 class ParserVersionMismatch(DomainError):

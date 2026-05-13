@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from fis_monitor.domain.diff import compute_changes
+from fis_monitor.domain.diff import ALLOWED_TRACKED_FIELDS, compute_changes
 from fis_monitor.domain.interfaces import Clock
 from fis_monitor.domain.models import (
     FieldChange,
@@ -252,6 +252,13 @@ class SqliteLotRepository:
         transaction so there is no TOCTOU window between SELECT-old and
         UPDATE (R3-C2 / ADR-016).
         """
+        # Defence-in-depth: validate tracked fields before acquiring the writer
+        # lock. compute_changes performs the same check inside the tx; this
+        # guard catches callers that bypass static type checking early.
+        for field in tracked:
+            if field not in ALLOWED_TRACKED_FIELDS:
+                raise ValueError(f"Unknown tracked field {field!r}")
+
         conn = self._conn_provider.get_connection()
         conn.execute("BEGIN IMMEDIATE")
         try:

@@ -104,7 +104,8 @@ class SelectolaxListParser:
         tbody = tree.css_first("tbody")
         if tbody is None:
             raise ParseBugError(
-                "Expected <tbody> not found; site DOM may have changed"
+                selector="tbody",
+                context="lot-list page; tbody missing — site DOM may have changed",
             )
 
         rows: list[ParsedListRow] = []

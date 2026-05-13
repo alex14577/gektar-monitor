@@ -180,15 +180,17 @@ def test_missing_main_block_raises_parse_bug_error(
     parser: SelectolaxDetailParser,
 ) -> None:
     html = "<html><body><p>No lot detail here</p></body></html>"
-    with pytest.raises(ParseBugError):
+    with pytest.raises(ParseBugError) as exc_info:
         parser.parse(html)
+    assert exc_info.value.selector == ".request-declaration__block-main"
 
 
 def test_empty_html_raises_parse_bug_error(
     parser: SelectolaxDetailParser,
 ) -> None:
-    with pytest.raises(ParseBugError):
+    with pytest.raises(ParseBugError) as exc_info:
         parser.parse("<html></html>")
+    assert exc_info.value.selector == ".request-declaration__block-main"
 
 
 # ---------------------------------------------------------------------------
@@ -259,3 +261,44 @@ def test_idempotency(
     assert result1.date_update == result2.date_update
     assert result1.parser_version == result2.parser_version
     assert result1.raw_json == result2.raw_json
+
+
+# ---------------------------------------------------------------------------
+# 10. Nested div de-duplication (_extract_kv_pairs direct-child fix)
+# ---------------------------------------------------------------------------
+
+
+def test_nested_divs_inside_value_cell_do_not_produce_duplicates(
+    parser: SelectolaxDetailParser,
+) -> None:
+    """When a kv-pair value cell contains nested divs, raw_json must not
+    contain duplicate keys or unexpected entries produced by the nested
+    structure being treated as additional kv-pairs.
+    """
+    # Build synthetic HTML: one kv-pair where the value div contains a
+    # nested div (e.g. a tooltip / badge inside the value).
+    html = (
+        "<html><body>"
+        '<div class="request-declaration__block-main">'
+        '<div class="request-domain__key-value">'
+        # Pair 1: Label="Cadastral", Value cell has a nested div inside
+        "<div>"
+        "<div>Cadastral</div>"
+        "<div>79:99:9999999:1<div>nested-badge</div></div>"
+        "</div>"
+        # Pair 2: plain kv-pair (no nested divs)
+        "<div>"
+        "<div>Region</div>"
+        "<div>TestRegion</div>"
+        "</div>"
+        "</div>"
+        "</div>"
+        "</body></html>"
+    )
+    result = parser.parse(html)
+
+    # There must be exactly 2 keys (Cadastral + Region), not more
+    assert list(result.raw_json.keys()).count("Cadastral") == 1
+    assert list(result.raw_json.keys()).count("Region") == 1
+    # The nested-badge text must not appear as a standalone key
+    assert "nested-badge" not in result.raw_json

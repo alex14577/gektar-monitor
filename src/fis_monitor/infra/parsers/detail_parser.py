@@ -96,15 +96,24 @@ def _text_or_none(node: Node | None) -> str | None:
 def _extract_kv_pairs(container: Node) -> dict[str, str]:
     """Extract key-value pairs from a .request-domain__key-value container.
 
-    Each pair is a <div> containing two child <div>s: first is the label,
-    second is the value.
+    Each pair is a direct-child <div> of ``container`` containing two child
+    <div>s: first is the label, second is the value.
+
+    Iterating only direct children (not all descendants via ``.css("div")``)
+    prevents duplicate entries when nested div structures appear inside a
+    pair's value cell.
     """
     result: dict[str, str] = {}
-    for pair_div in container.css("div"):
+    for pair_div in container.iter(include_text=False):
+        # container.iter() yields only direct children — no parent== guard needed.
+        # (selectolax Node.__eq__ uses Python identity, not DOM pointer equality,
+        # so `pair_div.parent == container` is unreliable across wrapper instances.)
+        if pair_div.tag != "div":
+            continue
         direct_divs = [
             c
             for c in pair_div.iter(include_text=False)
-            if c.tag == "div" and c.parent == pair_div
+            if c.tag == "div"
         ]
         if len(direct_divs) >= 2:
             label = direct_divs[0].text(strip=True)
@@ -149,13 +158,13 @@ def _extract_all_kv(tree: HTMLParser) -> dict[str, str]:
         top_divs = [
             c
             for c in kv.iter(include_text=False)
-            if c.tag == "div" and c.parent == kv
+            if c.tag == "div"
         ]
         for top_div in top_divs:
             inner_divs = [
                 c
                 for c in top_div.iter(include_text=False)
-                if c.tag == "div" and c.parent == top_div
+                if c.tag == "div"
             ]
             if len(inner_divs) == 1:
                 value = inner_divs[0].text(strip=True)
@@ -192,8 +201,8 @@ class SelectolaxDetailParser:
         main_block = tree.css_first(".request-declaration__block-main")
         if main_block is None:
             raise ParseBugError(
-                "Expected .request-declaration__block-main not found; "
-                "site DOM may have changed"
+                selector=".request-declaration__block-main",
+                context="detail-card page; main block missing — site DOM may have changed",
             )
 
         # --- Collect all key-value pairs across all blocks ---

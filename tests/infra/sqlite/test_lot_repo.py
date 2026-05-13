@@ -10,8 +10,11 @@ deterministic.
 from __future__ import annotations
 
 import json
+import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -467,3 +470,100 @@ def test_mark_seen_timezone_roundtrip(tmp_db: ConnectionProvider) -> None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     assert parsed.tzinfo is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests: rollback invariant (Fix 4 — mid-write failure)
+# ---------------------------------------------------------------------------
+
+
+class _FailOnHistoryConnection:
+    """Thin proxy around sqlite3.Connection that raises on lots_history INSERT.
+
+    Used to simulate a mid-write failure inside upsert without monkey-patching
+    sqlite3.Connection.execute (which is read-only in CPython 3.12+).
+    """
+
+    def __init__(self, real_conn: sqlite3.Connection) -> None:
+        self._conn = real_conn
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
+        if "lots_history" in sql.lower() and sql.strip().upper().startswith("INSERT"):
+            raise sqlite3.OperationalError("simulated mid-write failure")
+        return self._conn.execute(sql, params)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
+class _FailingConnProvider:
+    """ConnectionProvider wrapper that returns a _FailOnHistoryConnection once."""
+
+    def __init__(self, real_provider: ConnectionProvider) -> None:
+        self._real = real_provider
+        self._inject_failure = False
+
+    def get_connection(self) -> object:  # type: ignore[override]
+        conn = self._real.get_connection()
+        if self._inject_failure:
+            return _FailOnHistoryConnection(conn)
+        return conn
+
+
+def test_upsert_rollback_on_mid_write_error_undoes_partial_changes(
+    tmp_db: ConnectionProvider,
+) -> None:
+    """If a SQL exception occurs during lots_history INSERT inside the upsert tx,
+    the entire transaction must be rolled back: status unchanged, no history row.
+    """
+    # First upsert — insert base row using real provider
+    repo = _make_repo(tmp_db)
+    lot = make_lot(id=70, status="Свободен")
+    repo.upsert(lot, tracked=["status"])
+
+    # Second upsert — use failing provider that raises mid-tx on lots_history INSERT
+    failing_provider = _FailingConnProvider(tmp_db)
+    failing_provider._inject_failure = True
+    repo_fail = SqliteLotRepository(
+        conn_provider=failing_provider,  # type: ignore[arg-type]
+        clock=FixedClock(),
+    )
+
+    new_lot = lot.model_copy(update={"status": "Снят"})
+    with pytest.raises(sqlite3.OperationalError, match="simulated mid-write failure"):
+        repo_fail.upsert(new_lot, tracked=["status"])
+
+    # Verify rollback: status in DB must remain "Свободен", history must be empty
+    fetched = repo.get(70)
+    assert fetched is not None
+    assert fetched.status == "Свободен"
+    conn = tmp_db.get_connection()
+    cur = conn.execute("SELECT COUNT(*) FROM lots_history WHERE lot_id = 70")
+    assert cur.fetchone()[0] == 0
+    cur.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: R-tree INSERT with non-NULL coords (Fix 5)
+# ---------------------------------------------------------------------------
+
+
+def test_first_upsert_with_coords_creates_exactly_one_rtree_row(
+    tmp_db: ConnectionProvider,
+) -> None:
+    """ADR-016 R3-M8 simplest invariant: INSERT lat/lon != None → R-tree row count == 1."""
+    repo = _make_repo(tmp_db)
+    lot = make_lot(id=100, lat=48.48, lon=135.08)
+    repo.upsert(lot, tracked=[])
+
+    cur = tmp_db.get_connection().execute(
+        "SELECT COUNT(*) FROM lots_rtree WHERE id = 100"
+    )
+    assert cur.fetchone()[0] == 1
+    cur.close()

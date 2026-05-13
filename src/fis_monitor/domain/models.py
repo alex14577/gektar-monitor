@@ -17,6 +17,7 @@ used by `EventBus` to scrub PII before persisting critical events.
 
 from __future__ import annotations
 
+import hashlib
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -557,6 +558,23 @@ class NotificationRecord(BaseModel):
     attempt_no: StrictInt
     last_attempt_at: datetime | None
     sent_at: datetime | None
+
+    def __repr__(self) -> str:
+        """PII-safe representation: recipient is hashed via sha256[:8].
+
+        NB: sha256[:8] is a short FINGERPRINT for log correlation, NOT a
+        cryptographic identity — 32 bits → collision probability ~1 in 65k
+        via birthday paradox. Sufficient for distinguishing recipients in
+        logs without exposing plaintext PII.
+        """
+        recipient_hash = hashlib.sha256(
+            self.recipient.encode("utf-8")
+        ).hexdigest()[:8]
+        return (
+            f"NotificationRecord(lot_id={self.lot_id}, channel={self.channel!r}, "
+            f"recipient=<sha256:{recipient_hash}>, status={self.status!r}, "
+            f"attempt_no={self.attempt_no})"
+        )
 
 
 # ---------------------------------------------------------------------------

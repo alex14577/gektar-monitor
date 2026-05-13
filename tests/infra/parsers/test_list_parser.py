@@ -187,14 +187,16 @@ def test_empty_tbody_returns_empty_list(parser: SelectolaxListParser) -> None:
 def test_missing_tbody_raises_parse_bug_error(parser: SelectolaxListParser) -> None:
     # HTML parsers auto-insert <tbody> for <table><tr> so use a page with no table.
     html = "<html><body><div>no table here</div></body></html>"
-    with pytest.raises(ParseBugError):
+    with pytest.raises(ParseBugError) as exc_info:
         parser.parse(html)
+    assert exc_info.value.selector == "tbody"
 
 
 def test_missing_table_raises_parse_bug_error(parser: SelectolaxListParser) -> None:
     html = "<html><body><p>No table here</p></body></html>"
-    with pytest.raises(ParseBugError):
+    with pytest.raises(ParseBugError) as exc_info:
         parser.parse(html)
+    assert exc_info.value.selector == "tbody"
 
 
 # ---------------------------------------------------------------------------
@@ -260,8 +262,9 @@ def test_error_page_no_region_raises_or_empty(parser: SelectolaxListParser) -> N
     """error_8_no_region.html is a Gosuslugi redirect page (no tbody).
     Parser must raise ParseBugError (no tbody found)."""
     html = load_fixture("error_8_no_region.html")
-    with pytest.raises(ParseBugError):
+    with pytest.raises(ParseBugError) as exc_info:
         parser.parse(html)
+    assert exc_info.value.selector == "tbody"
 
 
 # ---------------------------------------------------------------------------
