@@ -11,6 +11,9 @@ Architecture:
 
 ADR-008: No DB persistence. Event slots live in memory only.
 See docs/decisions/ADR-008-eventbus-dual-circuit-no-db-persistence.md.
+
+Subscription handle is ``ThreadEventSubscription`` from ``.subscriptions``
+(extracted for cohesion: bus = fan-out logic, handle = per-subscriber lifecycle).
 """
 from __future__ import annotations
 
@@ -18,62 +21,13 @@ import contextlib
 import logging
 import queue
 import threading
-from collections.abc import Iterator
 
 from fis_monitor.domain.models import SseEvent
+from fis_monitor.infra.sse.subscriptions import ThreadEventSubscription
 
 logger = logging.getLogger(__name__)
 
-_QUEUE_MAXSIZE = 100
 _DEFAULT_CRITICAL_TIMEOUT = 2.0
-
-
-class _ThreadEventSubscription:
-    """Per-subscriber context-manager handle.
-
-    Holds a ``queue.Queue`` and is returned by ``ThreadEventBus.subscribe()``.
-    Callers SHOULD use it as a context manager to guarantee ``unsubscribe()``
-    on disconnect.
-
-    ``iter()`` is a non-blocking generator: it drains the queue until empty,
-    then returns. Callers poll it inside an async executor (SSE route).
-
-    Thread-safety: ``_alive`` flag is read/written under the bus lock during
-    force-unsubscribe; the flag itself is checked cheaply before put on every
-    publish call.
-    """
-
-    def __init__(self, bus: ThreadEventBus) -> None:
-        self._bus = bus
-        self._q: queue.Queue[SseEvent] = queue.Queue(maxsize=_QUEUE_MAXSIZE)
-        self._alive = True
-
-    # ------------------------------------------------------------------
-    # Context-manager
-    # ------------------------------------------------------------------
-
-    def __enter__(self) -> _ThreadEventSubscription:
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None:
-        self.unsubscribe()
-        return None
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def unsubscribe(self) -> None:
-        """Remove this subscription from the bus. Idempotent."""
-        self._bus._remove_subscriber(self)
-
-    def iter(self) -> Iterator[SseEvent]:
-        """Non-blocking generator: yield all events currently in the queue."""
-        while True:
-            try:
-                yield self._q.get_nowait()
-            except queue.Empty:
-                return
 
 
 class ThreadEventBus:
@@ -108,7 +62,7 @@ class ThreadEventBus:
     def __init__(self, critical_timeout: float = _DEFAULT_CRITICAL_TIMEOUT) -> None:
         self._critical_timeout = critical_timeout
         self._lock = threading.Lock()
-        self._subscribers: list[_ThreadEventSubscription] = []
+        self._subscribers: list[ThreadEventSubscription] = []
         # Per-type in-memory slot for last critical event.
         # Key: concrete SseEvent class; value: the event instance.
         self._last_critical: dict[type, SseEvent] = {}
@@ -137,9 +91,9 @@ class ThreadEventBus:
         else:
             self._publish_normal(event, snapshot)
 
-    def subscribe(self) -> _ThreadEventSubscription:
+    def subscribe(self) -> ThreadEventSubscription:
         """Return a new per-subscriber handle and register it."""
-        sub = _ThreadEventSubscription(self)
+        sub = ThreadEventSubscription(remover=self._remove_subscriber)
         with self._lock:
             self._subscribers.append(sub)
         return sub
@@ -164,7 +118,7 @@ class ThreadEventBus:
     # ------------------------------------------------------------------
 
     def _publish_normal(
-        self, event: SseEvent, snapshot: list[_ThreadEventSubscription]
+        self, event: SseEvent, snapshot: list[ThreadEventSubscription]
     ) -> None:
         """Best-effort delivery for normal events.
 
@@ -191,13 +145,13 @@ class ThreadEventBus:
                     # queue.Full here means another producer raced us; accept the loss.
 
     def _publish_critical(
-        self, event: SseEvent, snapshot: list[_ThreadEventSubscription]
+        self, event: SseEvent, snapshot: list[ThreadEventSubscription]
     ) -> None:
         # Update per-type slot first (under lock, atomic overwrite).
         with self._lock:
             self._last_critical[type(event)] = event
 
-        to_force_unsubscribe: list[_ThreadEventSubscription] = []
+        to_force_unsubscribe: list[ThreadEventSubscription] = []
 
         for sub in snapshot:
             # Lock-free read of _alive: safe in CPython (GIL guarantees boolean atomicity).
@@ -219,14 +173,14 @@ class ThreadEventBus:
         for sub in to_force_unsubscribe:
             self._force_remove(sub)
 
-    def _force_remove(self, sub: _ThreadEventSubscription) -> None:
+    def _force_remove(self, sub: ThreadEventSubscription) -> None:
         """Mark subscriber dead and remove from the live list (under lock)."""
         with self._lock:
             sub._alive = False
             with contextlib.suppress(ValueError):
                 self._subscribers.remove(sub)
 
-    def _remove_subscriber(self, sub: _ThreadEventSubscription) -> None:
+    def _remove_subscriber(self, sub: ThreadEventSubscription) -> None:
         """Called by ``_ThreadEventSubscription.unsubscribe()`` — idempotent."""
         with self._lock:
             sub._alive = False
