@@ -71,6 +71,8 @@
 
 - **EventSubscription[T]** — generic `Protocol` (context-manager handle) результата `EventBus.subscribe()`. Методы: `iter() -> Iterator[T]`, `unsubscribe()` (idempotent). Перенесён из `models.py` (follow-up z9d). Python 3.12 type parameter syntax (`class EventSubscription[T]`). См. [[architecture/03-protocols]].
 
+- **ThreadEventBus** — конкретная реализация `EventBus` Protocol (`infra/sse/bus.py`). Sync→async bridge для SSE fan-out. Один `queue.Queue(maxsize=100)` на подписчика. Маршрутизация по `event.priority` ClassVar: `normal` → `put_nowait` + drop-from-tail; `critical` → blocking `put(timeout=2.0)` + force-unsubscribe slow consumer. Per-type in-memory слоты `_last_critical: dict[type, SseEvent]` для replay при SSE reconnect — доступны через `bus.last_critical(EventClass)`. **Без persistence в БД** (ADR-008): слоты живут в памяти, F5 восстанавливает из source of truth. Единый `threading.Lock` защищает список подписчиков и слоты. Реализовано в tic.1. **MVP scope: in-memory only; state-table persistence с TTL=1h (ADR-008 R3-C5) — planned, see [[#12y]].** См. [[decisions/ADR-008-eventbus-dual-circuit-no-db-persistence|ADR-008]], [[architecture/07-concurrency]] §7.3.
+
 - **MigrationRunner** — type alias (`Callable[[sqlite3.Connection, int, int], None]`) в `infra/sqlite/init_db.py`. Передаётся в `init_db()` как необязательный параметр `migration_runner`. Сигнатура: `(conn, from_version, to_version) -> None`. Реализовано в akv.2. Конкретная реализация `SqliteMigrationRunner` (с `Protocol`-швом и методом `run(target_version)`) планируется в akv.3. См. [[architecture/03-protocols]].
 
 ## Onboarding и конфигурация
