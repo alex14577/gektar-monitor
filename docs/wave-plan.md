@@ -139,9 +139,9 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 4 — Services tier 2 + EventBus fan-out
 
-- [ ] `a4t.3` — NotifierDispatcher (consumer_loop + retry + recovery) · sonnet · ждёт `a4t.4`, `akv.6` · **HIGH risk** (state-machine race conditions)
-- [ ] `a4t.1` — MonitorCycleService · sonnet · ждёт `a4t.2`, `akv.5`, `akv.8`, `bye.1`, `bye.2`
-- [ ] `tic.3` — SSE fan-out · sonnet · ждёт `tic.2`
+- [x] `a4t.3` — NotifierDispatcher (consumer_loop + retry + recovery) · sonnet · ждёт `a4t.4`, `akv.6` · **HIGH risk** (state-machine race conditions)
+- [x] `a4t.1` — MonitorCycleService · sonnet · ждёт `a4t.2`, `akv.5`, `akv.8`, `bye.1`, `bye.2`
+- [x] `tic.3` — SSE fan-out · sonnet · ждёт `tic.2`
 
 ### Wave 5 — Composition assembly
 
@@ -297,6 +297,35 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - **Sub-agent инициатива на commit/bd close — наблюдается у sonnet** (akv.8 + tic.2 сами закоммитили после writer-фазы, akv.8 ещё и сам сделал bd close + правку wave-plan). Контент валидный, но workflow требует reviewer ДО commit'а. Оркестратор продавил fix-round для akv.8 поверх premature commit'а. Если повторится → escalate до feedback memory.
 - **Pre-flight error-class extension** (3 errors в `domain/errors.py` до старта writer'ов) — обязательный паттерн при параллельной работе, иначе collision на одном файле.
 - **bd update --acceptance ДО claim** для двух тасок — сэкономило fix-round'ы (a4t.6 без HMAC, akv.8 с правильным Protocol-контрактом).
+
+### Session #11 (2026-05-13) — Wave 4 запуск (3 параллельно, all HIGH/critical-path)
+
+**Цель:** Wave 4 Services tier 2 + EventBus fan-out — 3 параллельных writer'а (`a4t.3` Dispatcher, `a4t.1` MonitorCycleService, `tic.3` SSE streamer), нулевое пересечение файлов. Все 3 на критическом пути MVP — без них build_container не соберётся.
+
+**Pre-flight оркестратора:**
+- Чтение canon для каждой таски (ADR-019 целиком, notifications.md §170–317, architecture/08-error-strategy.md, architecture/07-concurrency.md §7.3).
+- Идентификация overlap: `a4t.1` расширяет `domain/errors.py` (UpstreamError + category), `tic.3` расширяет `domain/interfaces.py` (EventSubscription + wait_one/alive). Разные файлы — ОК.
+
+**Сделано:**
+- `a4t.3` — `NotifierDispatcher` (`services/notifier_dispatcher.py`), 30 tests. **APPROVE round-1** (7 minors). Reviewer opus подтвердил соответствие ADR-019 целиком: R3-M2 stop_event-aware sleep (тест passing), R4-C3 zombie last_attempt_at IS NULL recovery, R4-C4 mark_attempt None race, R4-M6 MAX_TOTAL_ATTEMPTS=10 cap, sync consumer_loop (R4-M11). Recipient PII-safe (sha256[:8] hash в cap_reached log, плейн-recipient отсутствует в SseSmtpFailed publish).
+- `tic.3` — `SseStreamer` (`infra/sse/sse_stream.py`) + extension `EventSubscription.wait_one` / `.alive` (`domain/interfaces.py` + `infra/sse/subscriptions.py`), 17 tests. **APPROVE round-1** (5 minors). Transport-агностик; Origin check вынесен в oxy.6 (writer задокументировал). Backwards-compat tic.2 — все 34 ранее существующие SSE-тесты зелёные.
+- `a4t.1` — `MonitorCycleService` (`services/monitor_cycle.py`) + extension `UpstreamError(message, *, category)` (`domain/errors.py`) + `ErrorCategory` Literal +`"internal_error"` (`domain/models.py`). **Round-1: socket-error на 35-й минуте writer-фазы** — производственный код (447 LOC) дошёл до диска, но тесты не написались. Спавн второго writer'а который дописал 20 тестов под существующий контракт. **Round-1 review NEEDS-WORK** (2 majors): M1 `_close_with_unexpected_error` публиковал `error_category="network"` для багов (semantic miscategorization, supervisor бы делал backoff на детерминированном баге); M2 row-conversion swallowed `ValidationError` (искажало `lots_fetched`, нарушало canon §08 «no except Exception»). **Round-2 fixes**: M1 — `ErrorCategory` Literal +`"internal_error"`, hardcoded `"network"` → `"internal_error"`; M2 — `ValidationError → ParseBugError(selector="<list-row-conversion>", context=f"row_index={N}")` wrap-and-route (правильная категория для парсер-багов, cycle "error" без re-raise). +2 новых теста (`test_invalid_parsed_row_raises_parse_bug_error`, `test_invalid_parsed_row_does_not_silently_skip` — 5 рядов, 1 invalid → `lots_fetched==0`). **Round-2 APPROVE**.
+
+**Итог wave:** **3/3 closed** ✅. Suite: **658 passed, 3 skipped** (+67 от Wave 3 baseline 589 = 30 dispatcher + 17 sse + 20 cycle). Один fix-round для 1/3 тасок (a4t.1 — главный use case, semantic correctness errors). Разблокированы: `8ov.2` (build_container — ждал a4t.1/a4t.3/a4t.4), `oxy.6` (SSE endpoints — ждал tic.3). MVP critical path сократился до 5 шагов: `8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5`.
+
+**Vault обновления (orchestrator):**
+- `domain/errors.py` — `UpstreamError.__init__` принимает `*, category: UpstreamCategory`; `SmtpHostPolicyError`, `SmtpStarttlsError` обновлены с default `category="network"`.
+- `domain/models.py` — `ErrorCategory` Literal +`"internal_error"` (8-е значение).
+- `domain/interfaces.py` — `EventSubscription[T]` Protocol +`wait_one(timeout) -> T | None` + `alive: bool`.
+- `pyproject.toml` — добавлен `pytest-asyncio` в dev-deps (для SSE async-тестов).
+- `docs/glossary.md` — **+6 записей** под секцией «Сервисы (Wave 4)»: NotifierDispatcher, MonitorCycleService, ErrorCategory, UpstreamError (extension), SseStreamer, EventSubscription.wait_one/alive extension.
+- Нет новых ADR (все таски следуют ADR-019, ADR-004, ADR-008).
+
+**Подтверждения / lessons workflow:**
+- **3 параллельных writer'а HIGH-risk — работает** (нулевое пересечение файлов было критично). Все 3 sonnet writer'а.
+- **opus-reviewer для critical-таск** (a4t.3 state-machine + a4t.1 use-case) поймал semantic-bug в a4t.1 (`error_category="network"` для багов). Sonnet-reviewer мог пропустить — это уровень canon-cross-check, не code-quality.
+- **Sub-agent socket-error mid-fase** (a4t.1 round-1) — production-код дошёл до диска до краша. Recovery-стратегия: спавн второго writer'а для дописывания тестов под existing контракт (читает код как канон). Зафиксирована pattern.
+- **Acceptance contract divergence**: a4t.1 acceptance говорил «ConnectivityError vs UpstreamError vs ParseBugError» — в коде `ConnectivityError` не существовал; canon §08 описывает `UpstreamError(category=...)`. Решено через extension `UpstreamError.category` без создания дублирующего класса.
 
 ---
 

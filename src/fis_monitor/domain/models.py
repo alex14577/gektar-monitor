@@ -67,6 +67,7 @@ ErrorCategory = Literal[
     "timeout",
     "parse_bug",
     "schema_anomaly",
+    "internal_error",   # M1 fix: для unexpected exceptions (bugs)
 ]
 
 

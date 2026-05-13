@@ -38,7 +38,7 @@ def test_domain_errors_are_raisable():
     with pytest.raises(ParserVersionMismatch):
         raise ParserVersionMismatch("v mismatch")
     with pytest.raises(UpstreamError):
-        raise UpstreamError("upstream")
+        raise UpstreamError("upstream", category="network")
 
 
 def test_parse_bug_error_str_does_not_leak_html_or_pii():

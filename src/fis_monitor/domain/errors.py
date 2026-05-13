@@ -14,6 +14,8 @@ Mixing the two via inheritance would break `except` semantics in
 
 from __future__ import annotations
 
+from typing import Literal
+
 
 class DomainError(Exception):
     """Root of the domain exception tree.
@@ -26,7 +28,20 @@ class DomainError(Exception):
 
 
 class UpstreamError(DomainError):
-    """Failure originating from an external system (HTTP, DNS, SMTP, …)."""
+    """Failure originating from an external system (HTTP, DNS, SMTP, …).
+
+    Attributes:
+        category: Closed enum of upstream failure types per
+                  docs/architecture/08-error-strategy.md.
+    """
+
+    UpstreamCategory = Literal[
+        "network", "http_5xx", "http_4xx", "redirect_login", "timeout"
+    ]
+
+    def __init__(self, message: str, *, category: "UpstreamError.UpstreamCategory") -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class SmtpHostPolicyError(UpstreamError):
@@ -36,6 +51,9 @@ class SmtpHostPolicyError(UpstreamError):
     "loopback", "cloud metadata endpoint").  Do NOT include the resolved IP
     address or any recipient-derived data — those are PII-ish audit-only fields.
     """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, category="network")
 
 
 class MigrationRequired(DomainError):
@@ -232,5 +250,5 @@ class SmtpStarttlsError(UpstreamError):
     """
 
     def __init__(self, code: int) -> None:
-        super().__init__(f"STARTTLS rejected by server (code={code})")
+        super().__init__(f"STARTTLS rejected by server (code={code})", category="network")
         self.code = code

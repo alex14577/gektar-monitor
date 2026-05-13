@@ -112,12 +112,27 @@ class EventSubscription[T](Protocol):
 
     ``unsubscribe()`` MUST be idempotent: calling it after ``__exit__``
     (or twice in a row) is a no-op.
+
+    ``wait_one(timeout)`` is a **blocking** dequeue used by ``SseStreamer``
+    to avoid busy-looping in an executor thread. Returns ``None`` on timeout
+    or when the subscription has been force-unsubscribed by the bus.
+
+    ``alive`` is a read-only property reflecting whether the subscription
+    is still active. ``False`` after ``unsubscribe()`` or force-unsubscribe.
     """
+
+    @property
+    def alive(self) -> bool: ...
 
     def __enter__(self) -> EventSubscription[T]: ...
     def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None: ...
     def unsubscribe(self) -> None: ...
     def iter(self) -> Iterator[T]: ...
+    def wait_one(self, timeout: float) -> T | None:
+        """Blocking dequeue. Returns the next event, or ``None`` on timeout /
+        dead subscription. Must be called from a non-async thread (executor).
+        """
+        ...
 
 
 class ConfigSubscription(Protocol):

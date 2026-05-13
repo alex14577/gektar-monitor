@@ -78,6 +78,11 @@ class ThreadEventSubscription:
     # Public API
     # ------------------------------------------------------------------
 
+    @property
+    def alive(self) -> bool:
+        """True while the subscription is active; False after unsubscribe or force-remove."""
+        return self._alive
+
     def unsubscribe(self) -> None:
         """Remove this subscription from the bus. Idempotent."""
         self._remover(self)
@@ -89,6 +94,20 @@ class ThreadEventSubscription:
                 yield self._q.get_nowait()
             except queue.Empty:
                 return
+
+    def wait_one(self, timeout: float) -> SseEvent | None:
+        """Blocking dequeue. Returns the next event, or None on timeout / dead subscription.
+
+        Called from an executor thread (NOT the asyncio event loop). Blocks at most
+        *timeout* seconds. Returns None both on queue.Empty timeout and when the
+        subscription has been force-unsubscribed (alive=False).
+        """
+        if not self._alive:
+            return None
+        try:
+            return self._q.get(timeout=timeout)
+        except queue.Empty:
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +156,12 @@ class ThreadConfigSubscription:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def alive(self) -> bool:
+        """True while the subscription is active; False after unsubscribe."""
+        with self._lock:
+            return self._alive
 
     def unsubscribe(self) -> None:
         """Remove this subscription from the config source. Idempotent."""
