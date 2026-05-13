@@ -1,6 +1,66 @@
-# Точка возобновления сессии (обновлено 13.05.2026 после сессии #4)
+# Точка возобновления сессии (обновлено 13.05.2026 после сессии #5)
 
 Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md` (stub-MOC; нужные секции — в `docs/architecture/`, `docs/decisions/`).
+
+## Где остановились (сессия #5, 13.05.2026)
+
+**Закрыты 2 таски волны 2A (с одним раундом ревью) + 2 follow-up bd-issues.**
+Closed: `akv.2` (init_db pre-flight user_version), `tic.1` (ThreadEventBus).
+
+### Что сделано в сессии #5
+
+1. **bd `akv.2` closed** (commit `aef8609`) — `init_db()` в `infra/sqlite/init_db.py`. Five-branch algorithm: fresh DB / ==latest / >latest RuntimeError / <latest+runner / <latest no-runner MigrationRequired. Post-runner verify user_version (Major 2 из ревью). Новое исключение `MigrationRequired(DomainError)` в `domain/errors.py` (PII-safe: from_version/to_version только, без путей). `MigrationRunner` — type alias `Callable[[Connection, int, int], None]`, не Protocol (брейншторм: конкретный класс в akv.3). 9 тестов. FIXME из `docs/architecture/03-protocols.md:177` снят.
+
+2. **bd `tic.1` closed** (commit `8807fe6`) — `ThreadEventBus` в `infra/sse/bus.py`. Реализует `EventBus` Protocol. Routing по `event.priority` ClassVar: normal = put_nowait + drop-from-tail; critical = blocking put(timeout=2.0) + force-unsubscribe slow consumer + per-type slot update. Public helper `last_critical(EventClass)` (НЕ в Protocol — LSP friction задокументирован). MVP scope: **in-memory only** (расхождение с ADR-008 R3-C5 / 07-concurrency §7.3 которое требует state-table persistence с TTL=1h — отложено до создания StateRepository, follow-up `12y`). 19 тестов (включая AST-parse инвариант: bus.py не импортирует sqlite3).
+
+3. **Follow-up bd-issues (P2)**:
+   - `12y` — `StateRepository` для last_critical_event:* persistence (зависимость для расширения tic.1 до full canon).
+   - `1zk` — `SqliteMigrationRunner` должен re-check user_version внутри своей первой BEGIN IMMEDIATE и raise `ConcurrentMigrationError` (TOCTOU defence-in-depth для akv.3, Major 1 из ревью akv.2).
+
+4. **Оркестрация по playbook** (см. `bd memories orchestrator-playbook`):
+   - Брейншторм-фаза (5-10 мин, сам, без sub-agent) перед стартом — фиксировались micro-decisions через AskUserQuestion.
+   - Pre-write extraction-шаг в промптах writer-агентов (цитаты canon, grep, line-ranges).
+   - 2 параллельных writer-агента (sonnet) — grep-пересечение файлов пусто (`infra/sqlite/` vs `infra/sse/`).
+   - Reviewer (sonnet) ДО `bd close`. Оба ревью — APPROVE с Major'ами.
+   - 2 параллельных fix-агента (sonnet). Все правки по canon, спорные deferred в follow-up bd.
+   - `pytest` + `git show --stat` оркестратор прогонял сам — не верил summary sub-agent'ов.
+
+5. **Vault changes**:
+   - `docs/architecture/03-protocols.md` строка 177: FIXME → "Fixed in akv.2".
+   - `docs/architecture/07-concurrency.md` §7.3: TODO-note про in-memory slots → follow-up `12y`.
+   - `docs/glossary.md`: добавлены `MigrationRequired`, `init_db()`, `ThreadEventBus`; обновлена запись `MigrationRunner` (Protocol → текущий type alias + future Protocol в akv.3).
+   - ADR не создавался (тривиальные impl-задачи без новых архитектурных решений).
+
+### Состояние репо в конце сессии #5
+
+- Working tree: clean (commit `8807fe6`)
+- Branch: `master`
+- Tests: **266 passed, 2 skipped**
+- Ruff: чисто по новому коду (2 RUF001 legacy в `tests/domain/conftest.py`, известно)
+- Git remote: НЕТ (local-only repo, `git push` не применим)
+- bd: 10 closed, 68 open, 0 in_progress, 30 blocked, 38 ready
+
+### С чего стартовать сессию #6
+
+**Волна 2B — оставшаяся P0 + готовые P1:**
+
+- **`akv.3`** P0 — `SqliteMigrationRunner v1→v2` через 12-step rebuild pattern (FIXME из ADR-019 ext). Зависит от akv.2 (закрыт) + см. follow-up `1zk` (re-check user_version внутри BEGIN IMMEDIATE).
+- **`bye.4`** P0 — `SmtpEmailNotifier` с manual STARTTLS + Message-ID. Зависит от `akv.7` (state.db SMTP host SSOT) — проверить разблокирован ли.
+- **`vgm.1`** P1 — pytest `tmp_db` fixture + factories. Нужен ещё до repository-тасок (akv.5/akv.6).
+- **`vgm.3`** P1 — import-linter CI контракты (ADR-006).
+- **`8ov.1`** P1 — Composition: Infra + Services dataclasses (split Container).
+
+**Заметки для оркестратора:**
+- `akv.3` — встроить в промпт writer'а инструкцию из `1zk` (re-check внутри runner's first BEGIN IMMEDIATE).
+- Параллельность: `akv.3` (`infra/sqlite/migrations.py`) + `vgm.1` (`tests/conftest.py`) — разные файлы, можно параллельно.
+- Reviewer **sonnet** по дефолту (правило пользователя).
+- В каждом Agent-вызове **явно указывать `model: "sonnet"`** в коде + в текстовых апдейтах пользователю (правило пользователя сессии #5).
+
+### bd-issues с устаревшими doc-refs
+
+12+ open-issue упоминают `architecture.md` / `decisions-log.md` в description (атомарные доки в `docs/architecture/` и `docs/decisions/`). Список (актуализировано): `akv.3`, `8ov`, `8ov.4`, `a4t.1`, `tic`, `tic.3`, `bye.9`, `plg.3`, `vgm`, `vgm.5`, `12y`, `1zk`. Ссылки работают через stub-MOC, но при работе оркестратор должен подставлять конкретные `docs/architecture/<file>.md` / `docs/decisions/ADR-NNN-<slug>.md`.
+
+---
 
 ## Где остановились (сессия #4, 13.05.2026)
 
