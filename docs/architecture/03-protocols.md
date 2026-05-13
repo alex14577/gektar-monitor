@@ -401,7 +401,8 @@ class Clock(Protocol):
 class Locker(Protocol):
     """Single-instance lock.
     Инвариант: реализация ОБЯЗАНА использовать OS-level lock
-    (fcntl.flock на Linux, msvcrt.locking на Windows) с O_NOFOLLOW|O_EXCL.
+    (fcntl.flock на Linux, msvcrt.locking на Windows) с O_NOFOLLOW.
+    O_EXCL намеренно НЕ используется — мешал бы re-acquire stale-lock после краша.
     PID в файле — только для info ('кто держит'), не для арбитража."""
     def acquire(self) -> LockHandle: ...     # raises AlreadyRunningError(pid=...)
     def release(self, handle: LockHandle) -> None: ...
@@ -464,7 +465,7 @@ class SseLotStatus(BaseModel):
 
 > `EventSubscription` (события EventBus) и `ConfigSubscription` (callback на config-reload) — **разные имена**, чтобы не путать.
 
-**Реализации MVP**: `SystemClock`, `FileLocker` (PID + `psutil.pid_exists`), `WatchdogConfigSource` (читает `config.json`, watchdog Observer триггерит reload), `WindowsAutostart` (Task Scheduler через `schtasks`), `LinuxAutostart` (XDG Autostart), `ThreadEventBus`.
+**Реализации MVP**: `SystemClock`, `FileLocker` (OS-level `fcntl.flock` / `msvcrt.locking`, PID info-only — ADR-013), `WatchdogConfigSource` (читает `config.json`, watchdog Observer триггерит reload), `WindowsAutostart` (Task Scheduler через `schtasks`), `LinuxAutostart` (XDG Autostart), `ThreadEventBus`.
 
 **OnboardingService — отдельный документ.** State-machine, transitions, guards, контракт `OnboardingService.can_advance(from, to) -> bool` и middleware `onboarding_gate` — в [[onboarding]]. Здесь только указатель: server-side enforcement, middleware редиректит на **последний валидный step** (не на query-param). См. [[decisions/ADR-018-onboarding-fsm-server-enforced|ADR-018]].
 

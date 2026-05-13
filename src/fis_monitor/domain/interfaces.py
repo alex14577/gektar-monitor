@@ -181,8 +181,10 @@ class Locker(Protocol):
 
     Invariant: implementation MUST use an OS-level lock
     (``fcntl.flock`` on Linux, ``msvcrt.locking`` on Windows) with
-    ``O_NOFOLLOW|O_EXCL``. The PID stored in the lock-file is for human
-    inspection only — it is NOT used for arbitration.
+    ``O_NOFOLLOW``. The PID stored in the lock-file is for human
+    inspection only — it is NOT used for arbitration. O_EXCL is
+    intentionally omitted — combining it with O_CREAT would prevent
+    re-acquiring a stale lock file.
 
     Implementation: ``infra/lock.py::FileLocker``.
     """

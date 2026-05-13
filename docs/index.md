@@ -28,6 +28,7 @@
 ## Реализация
 
 - [[ops/getting-started]] — Day 1: клонирование, venv, dev-сервер, ЕСИА-сессия
+- [[wave-plan]] — **план распараллеливания bd-issues по волнам до MVP + session log**
 - [[project-structure]] — раскладка `src/fis_monitor/`, модули по слоям
 - [[ops/runbook]] — что делать при авариях (8 сценариев)
 - [[web/api-reference]] — единый список API-эндпоинтов

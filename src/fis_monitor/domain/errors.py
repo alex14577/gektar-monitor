@@ -101,6 +101,19 @@ class MigrationChainBroken(DomainError):
         self.to_version = to_version
 
 
+class BusyError(DomainError):
+    """Single-flight conflict: a ``LoginSession.open_headed_login`` call is
+    already in progress.
+
+    Raised by ``PlaywrightLoginSession.open_headed_login`` when the internal
+    ``threading.Lock`` cannot be acquired (``blocking=False``), meaning another
+    caller is already running a headed-login workflow.
+
+    Callers should surface this to the user as "login already in progress"
+    and NOT retry immediately.
+    """
+
+
 class ParseBugError(DomainError):
     """DOM-shape сломан — селектор не нашёл ожидаемого узла.
 
@@ -145,3 +158,27 @@ class ParseBugError(DomainError):
 
 class ParserVersionMismatch(DomainError):
     """Stored `raw_json` schema version ≠ current parser version → lazy reparse."""
+
+
+class AlreadyRunningError(DomainError):
+    """Another instance holds the OS-level lock.
+
+    Raised by ``Locker.acquire()`` when the lock-file is already locked by
+    another instance. `holder_pid` is the PID stamped in the lock-file for
+    diagnostics (info-only, not used for arbitration). If the holder process
+    has exited, the OS-lock is not held and a fresh acquire will succeed.
+
+    Attributes:
+        holder_pid: The PID of the process holding the lock, or None if
+                    the lock-file exists but the PID cannot be read.
+
+    PII contract: message contains only the holder PID integer — no paths,
+    no timestamps, no user data.
+    """
+
+    def __init__(self, holder_pid: int | None = None) -> None:
+        msg = "Another instance is already running"
+        if holder_pid is not None:
+            msg += f" (PID {holder_pid})"
+        super().__init__(msg)
+        self.holder_pid = holder_pid

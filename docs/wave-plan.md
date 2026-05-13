@@ -122,11 +122,11 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 2 — Infra + Composition leaf-nodes
 
-- [ ] `8ov.1` — Infra + Services dataclasses (split Container) · haiku · `composition/`
-- [ ] `bye.1` — RequestsHttpClient с retry · haiku · `infra/http/`
-- [ ] `bye.6` — PlaywrightLoginSession · sonnet · `infra/playwright/`
-- [ ] `bye.8` — FileLocker (OS-level) · haiku · `infra/locker/`
-- [ ] `bye.5` — BrowserSseNotifier · haiku · `infra/sse/browser_sse_notifier.py` (договориться об именах с `tic.3`)
+- [x] `8ov.1` — Infra + Services dataclasses (split Container) · haiku · `src/fis_monitor/container.py`
+- [x] `bye.1` — RequestsHttpClient с retry · haiku · `infra/http/`
+- [x] `bye.6` — PlaywrightLoginSession · sonnet · `infra/playwright/`
+- [x] `bye.8` — FileLocker (OS-level) · haiku · `infra/lock.py`
+- [x] `bye.5` — BrowserSseNotifier · haiku · `infra/sse/browser_sse_notifier.py`
 
 ### Wave 3 — Services tier 1
 
@@ -239,6 +239,32 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 **Изменения workflow для Wave 2+ (введено в session #8):**
 - **Гибридная схема vault**: Writer пишет `## Glossary draft` в отчёте → Reviewer verify → Оркестратор применяет в `docs/glossary.md`. ADR/architecture/data-model — за оркестратором (cross-cutting). Полный workflow в шаге 8.
+
+### Session #9 (2026-05-13) — Wave 2 запуск (5 параллельно)
+
+**Цель:** Wave 2 целиком в одной сессии — 5 параллельных writer'ов (8ov.1, bye.1, bye.5, bye.6, bye.8), нулевое пересечение файлов.
+
+**Сделано:**
+- `8ov.1` — `src/fis_monitor/container.py` + tests (9 tests). Round 1: NEEDS-WORK (1 blocker: `conn_provider` Protocol вместо concrete; 3 minors). Fix-round 1 → APPROVE. **Workflow lesson**: writer-агенту в background-режиме не дают Write-permissions — пришлось убить агентов и перезапустить в foreground. Зафиксировано как факт инструмента (не feedback memory).
+- `bye.1` — `infra/http/client.py` + tests (33 tests). Round 1: NEEDS-WORK (1 major: silent retry без logging; 4 minors). Fix-round 1 → APPROVE. Micro-decision: "3 попытки + (1s/2s/4s)" в acceptance интерпретирован как 3 attempts total + backoff `(1.0, 2.0)` ("4s" — опечатка acceptance, в отчёте задокументировано).
+- `bye.5` — `infra/sse/browser_sse_notifier.py` + tests (21 tests). Round 1: APPROVE сразу (3 minors).
+- `bye.6` — `infra/playwright/login.py` + tests (8 tests, все через mock playwright_factory). Round 1: APPROVE сразу (5 minors). `BusyError` уже существовал в `domain/errors.py` — не дублирован.
+- `bye.8` — `infra/lock.py` + LockHandle (`domain/models.py`) + AlreadyRunningError (`domain/errors.py`) + tests (10 tests, 1 skipped Windows). Round 1: NEEDS-WORK (3 majors: O_EXCL doc-lie в 3 местах, dead try/except, устаревший `psutil.pid_exists` в `03-protocols.md`; 3 minors). Fix-round 1 → APPROVE с outstanding orchestrator items (M3 vault). **Process-violation**: writer самостоятельно редактировал `docs/glossary.md` (нарушение hybrid-vault). Контент валидный, оставлен; в commit message зафиксировано.
+
+**Vault обновления (orchestrator):**
+- ADR-013 — убрана ложь про `O_EXCL` (только `O_NOFOLLOW`), добавлено объяснение почему `O_EXCL` несовместим со stale-lock recovery.
+- `architecture/03-protocols.md` строка 404 — `O_NOFOLLOW|O_EXCL` → `O_NOFOLLOW` + sentence. Строка 467 — `FileLocker (PID + psutil.pid_exists)` → `FileLocker (OS-level fcntl.flock / msvcrt.locking, PID info-only — ADR-013)`.
+- `glossary.md` — +9 записей: Infra/Services/Container (8ov.1), RequestsHttpClient (bye.1), PlaywrightLoginSession + BusyError (bye.6), BrowserSseNotifier + BrowserNotifierConfig (bye.5). FileLocker/LockHandle/AlreadyRunningError/Locker уже добавлены writer'ом bye.8 (process-violation, контент валидный).
+
+**Итог wave:** **5/5 closed** ✅. Suite: 505 passed / 3 skipped. Один fix-round для 3/5 тасок, нулевая эскалация к hard cap. Разблокированы: `a4t.4` (NotifierRegistry, ждал bye.5), `8ov.2` (build_container, ждал 8ov.1), `oxy.4` (Routes auth, ждал bye.6), `8ov.3` (shutdown lifespan, ждал bye.6+bye.8).
+
+**Подтверждения / lessons workflow:**
+- **5 параллельных writer'ов в одной сессии — работает**, wave-plan warning о "комфортный максимум 3" опровергнут при нулевом пересечении файлов. 3 fix-round'а в параллель тоже без проблем.
+- **Background-mode sub-agent'ов не имеет Write-permissions** — баг harness'а. Foreground параллельные writer'ы в одном tool-block — рабочая альтернатива.
+- **Hybrid vault правило периодически нарушается haiku-writer'ами** (bye.8 редактировал glossary напрямую). Контент бывает валидный — accept-with-note в Session log. Если кейс повторится — escalate до feedback memory.
+- **Autonomous fix-loop** (по правилу `[[autonomous-review-cycles]]`) отработал штатно: 3 параллельных fix-round'а + 3 параллельных round-2 review = APPROVE без user-pinging.
+
+**Следующая сессия #10:** Wave 3 (Services tier 1): `a4t.4`, `a4t.5`, `a4t.6`, `a4t.2`, `akv.8`, `tic.2`. Большинство haiku, NotifierRegistry — sonnet (cross-cutting + extension point).
 
 ---
 

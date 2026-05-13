@@ -37,6 +37,14 @@
 - **single-instance lock** — Защита от двух одновременно запущенных копий через PID-файл `{data_dir}/app.lock` (Windows: `%LOCALAPPDATA%\fis-monitor\`, Linux: `~/.local/share/fis-monitor/`, через `platformdirs`). См. [[product/monitoring-plan]] → «Защита от двух копий».
 - **heartbeat** — Опциональная периодическая «сводка-я-жив» в выбранный канал. По умолчанию выключена.
 
+## Инфраструктура — блокировки
+
+- **FileLocker** — конкретная реализация `Locker` Protocol в `infra/lock.py`. OS-level single-instance lock с использованием `fcntl.flock(LOCK_EX|LOCK_NB)` на Unix и `msvcrt.locking(LK_NBLCK)` на Windows. Файл открывается с флагом `O_NOFOLLOW` (Unix) для защиты от symlink-атак. Инвариант: **PID записывается в файл для диагностики только**, OS-level lock — SSOT для арбитража. При двойном acquire возвращается holder_pid из файла через `AlreadyRunningError`. Stale lock (файл содержит PID несуществующего процесса) автоматически перезахватывается, так как OS-lock не удерживается. Метод `release()` разблокирует, закрывает fd и удаляет файл (best-effort). Реализовано в bye.8. См. [[decisions/ADR-013-locker-os-level-pid-info-only|ADR-013]].
+
+- **LockHandle** — `@dataclass(frozen=True, slots=True)` в `domain/models.py`. Opaque handle возвращаемый `Locker.acquire()` и потребляемый `Locker.release(handle)`. Поля: `fd: int` (открытый файловый дескриптор lock-file, используется `release()` для разблокировки и закрытия), `pid: int` (текущий PID, записанный в lock-file для диагностики), `path: str` (путь к lock-file для unlink при release). Frozen для immutability. Реализовано в bye.8.
+
+- **AlreadyRunningError** — `DomainError` подкласс в `domain/errors.py`. Поднимается `FileLocker.acquire()` когда lock-file уже заблокирован другим процессом. Атрибут: `holder_pid: int | None` — PID из lock-file для диагностики, или None если файл содержит невалидные данные. Сообщение: `"Another instance is already running"` или `"Another instance is already running (PID {holder_pid})"`. PII-safe: содержит только целое число, никаких путей или временных меток. Реализовано в bye.8. См. [[decisions/ADR-013-locker-os-level-pid-info-only|ADR-013]].
+
 ## Domain — модели и diff
 
 - **compute_changes** — чистая функция `compute_changes(old: Lot | None, new: Lot, tracked: Sequence[TrackedField]) -> list[FieldChange]` в `domain/diff.py`. Вызывается репозиторием внутри `BEGIN IMMEDIATE` tx (ADR-016, R3-C2) — закрывает TOCTOU между `SELECT old` и `UPDATE`. Без I/O, полностью детерминирована.
@@ -93,6 +101,8 @@
 
 - **SmtpEmailNotifier** — конкретная реализация `Notifier` Protocol в `infra/smtp/email_notifier.py`, `channel_id="email"`. Manual STARTTLS flow (ADR-021): `SMTP(host=endpoint.ip)` → `ehlo(original_host)` → `docmd("STARTTLS")` → `ctx.wrap_socket(server_hostname=endpoint.original_host)` → `smtp.file = None` → повторный `ehlo(original_host)` → `login()` → `send_message()`. `server_hostname` всегда `original_host` (НЕ `ip`) — обходит CPython smtplib баг. Деривация Message-ID: `<{lot_id}.email.{sha256(recipient)[:16]}@fis-monitor.local>` (ADR-019 R4-C5) — детерминированный, MTA дедуплицирует at-least-once через recovery. `smtp_password.get_secret_value()` вызывается **только** в момент `smtp.login()`, никогда в logs/exceptions/detail (ADR-017). DI: `smtp_creds_repo`, `config_source`, `clock`, `host_policy` (4 параметра per canon §4.2; `config_source` + `clock` зарезервированы под future retry-stamping). `NotifyResult.detail` — PII-free динамические коды (`tls_<ExcType>`, `smtp_<code>`, `connect_error_<ExcType>`, `network_<ExcType>` + статические `sent`, `auth_failed`, `recipient_refused`, `server_disconnected`). `SmtpHostPolicyError` пробрасывается, не оборачивается. Реализовано в bye.4.
 
+- **Locker** — `Protocol` (Layer 1, domain/interfaces.py) для OS-level single-instance lock. Методы: `acquire() -> LockHandle` (raises `AlreadyRunningError` если другой процесс держит lock), `release(handle: LockHandle)`. Реализация: `FileLocker`. Инвариант: PID info-only, OS-lock — SSOT. Symlink-safe (O_NOFOLLOW). Реализовано в bye.8. См. [[decisions/ADR-013-locker-os-level-pid-info-only|ADR-013]].
+
 - **EmailNotifierConfig** — `NotifierConfig` подкласс (Pydantic BaseModel) в том же модуле `email_notifier.py` — high cohesion. Поля: `enabled`, `use_default_smtp`, `smtp_host`, `smtp_port` (1..65535, default 587), `recipients: list[EmailStr]`. Поле `from_address` намеренно отсутствует (YAGNI; добавить когда понадобится override без правки smtp_user). Реализовано в bye.4.
 
 - **SqliteSettingsRepository** — конкретная реализация `SettingsRepository` Protocol в `infra/sqlite/repositories/settings.py`. K/V на таблице `state`. Write-методы (`set`, `set_onboarding`) — внутри `BEGIN IMMEDIATE` + ROLLBACK on exception. Read-методы (`get`, `get_onboarding`) — без явной tx. `OnboardingState` сериализуется как `.value` под ключом `onboarding_state`; дефолт `OnboardingState.NOT_STARTED` если строки нет. `updated_at` стампится через injected `Clock.now()` (UTC, ISO 8601). Реализовано в akv.7.
@@ -100,6 +110,30 @@
 - **SqliteSmtpCredentialsRepository** — конкретная реализация `SmtpCredentialsRepository` Protocol в `infra/sqlite/repositories/smtp_credentials.py`. Singleton row `id=1` (enforced через `CHECK (id=1)` в schema). `save()` — атомарный `INSERT OR REPLACE` всех 6 полей (smtp_user, smtp_password, smtp_host, smtp_port, use_default, updated_at) в одной `BEGIN IMMEDIATE` tx — последний save wins consistently. `load()` использует **named columns** в SELECT (обходит column-order quirk после `v1_to_v2` migration — см. [[#v1_to_v2 (migration)]]), оборачивает `smtp_password` в `SecretStr`. `.get_secret_value()` вызывается строго один раз — в момент SQL binding, никогда в logs/exceptions/repr (ADR-017). Реализовано в akv.7.
 
 - **tmp_db (pytest fixture)** — function-scope в `tests/conftest.py`. Возвращает `ConnectionProvider` подключённый к свежему `tmp_path/state.db` с применённым `schema.sql` через `init_db()`. WAL-режим выставляется per-connection (`ConnectionProvider._configure`, ADR-007). Cleanup: `provider.close_all()` в `finally`. Companions: `tmp_db_path` (Path) и `schema_sql` (session-scoped str). Реализовано в vgm.1.
+
+## Composition root
+
+- **Infra** — `@dataclass(frozen=True, repr=False)` в `src/fis_monitor/container.py`. Агрегирует системные швы Layer 0-2: clock, event_bus, conn_provider (concrete `ThreadLocalConnectionProvider` alias, **не** Protocol — canon §4.1), locker, config_source, cycle_progress_signal (`threading.Event`, soft-yield координатор N-M8), 6 repos, 7 адаптеров (http_client, list_parser, detail_parser, login_session, session_probe, autostart, smtp_host_policy). `frozen=True` → immutability после build_container; `repr=False` → защита от утечки SecretStr в crash-логи. Реализовано в 8ov.1. См. [[architecture/04-composition-root]], [[decisions/ADR-004-composition-root-container-infra-services|ADR-004]].
+
+- **Services** — `@dataclass(frozen=True, repr=False)` в `src/fis_monitor/container.py`. Агрегирует use cases (Layer 3-4): notifier_dispatcher, monitor_cycle, enrichment, full_scan, onboarding, login, settings_service, smtp_test, session_monitor, diagnostics, lot_query. Зависит только от Protocol'ов из Infra (DIP). Те же инварианты что у Infra. Реализовано в 8ov.1.
+
+- **Container** — `@dataclass(repr=False)` mutable в `src/fis_monitor/container.py`. Поля: `infra: Infra`, `services: Services`. **НЕ** frozen — supervisor-handles могут ребиндить `container.services` целиком в lifespan (заменяется новой `Services` инстанцией; frozen Services никогда не мутируется in-place). Реализовано в 8ov.1. См. [[decisions/ADR-004-composition-root-container-infra-services|ADR-004]].
+
+## Инфраструктура HTTP
+
+- **RequestsHttpClient** — конкретная реализация `HttpClient` Protocol в `infra/http/client.py`. Синхронный, на `requests.Session`. DI: `_session: requests.Session` + `_sleep_fn: Callable[[float], None]` (default `time.sleep`, мокается в тестах). Retry policy: 3 attempts total с fixed backoff (1.0s после attempt 1, 2.0s после attempt 2) на 5xx/429/`ConnectionError`/`Timeout`. 4xx (404, 403, 400) — НЕ retry. На терминальный fail: возвращает последний `HttpResponse` если был получен, иначе re-raise последнее исключение. `logger.warning` на каждый retry со структурированным `extra={url, attempt}`. Default timeout `(connect=5.0, read=30.0)` tuple; scalar `timeout=N` → symmetric `(N, N)`. User-Agent в header. Реализовано в bye.1. См. [[architecture/03-protocols]].
+
+## Инфраструктура Playwright (auth)
+
+- **PlaywrightLoginSession** — конкретная реализация `LoginSession` Protocol в `infra/playwright/login.py`. Headed-mode (`headless=False`) с persistent context (`profile_dir`) для удержания ЕСИА-сессии. Single-flight через `threading.Lock` (non-reentrant, `acquire(blocking=False)` → second `open_headed_login` → `BusyError`). Thread-safe `cancel()` под отдельным `_state_lock` хранит `_active_browser`, вызывает `browser.close()` извне worker-потока (ADR-014 phase 1.5). Invariant: `context.route("**/*", handler)` host-whitelist — handler abort'ит non-whitelist, continue для whitelist (защита от навигации на произвольные хосты). `deadline` измеряется через `clock.monotonic()` DI (не wall-clock — immune к NTP/DST). Маппинг исключений: `TargetClosedError` → `LoginOutcome(reason="cancelled")`, timeout → `"timeout"`. DI: `playwright_factory` (default `sync_playwright`) для unit-тестов без реального браузера. Реализовано в bye.6. См. [[architecture/03-protocols]], [[decisions/ADR-014-two-phase-shutdown|ADR-014]].
+
+- **BusyError** — `DomainError` подкласс в `domain/errors.py`. Сигнал single-flight conflict при попытке параллельного login пока активен другой.
+
+## Инфраструктура SSE (browser notifier)
+
+- **BrowserSseNotifier** — конкретная реализация `Notifier` Protocol в `infra/sse/browser_sse_notifier.py`. `channel_id="browser"`. Вместо отправки наружу публикует `SseLotNew(lot=lot, fragment_template="poster")` в `EventBus` (→ SSE → подключённые tab'ы браузера). При overflow / любом исключении из `bus.publish` — log warning с `exc_info=True` + возврат `NotifyResult(ok=True, detail="dropped (bus overflow)", retryable=False)` (defense-in-depth per ADR-008: потеря SSE-события для конкретного tab'а НЕ блокирует dispatcher). `test(recipient)` — no-op (push-only канал, broadcast'ит всем подписчикам, не unicast). DI: `EventBus` Protocol (не concrete `ThreadEventBus`). Реализовано в bye.5. См. [[architecture/03-protocols]], [[architecture/06-notifier-registry]], [[decisions/ADR-008-eventbus-dual-circuit-no-db-persistence|ADR-008]].
+
+- **BrowserNotifierConfig** — `NotifierConfig` подкласс (Pydantic frozen) в том же модуле `browser_sse_notifier.py`. Минимум: `enabled: bool = True`.
 
 ## Инфраструктура парсинга (selectolax)
 

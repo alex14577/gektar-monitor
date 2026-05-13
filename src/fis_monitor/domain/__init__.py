@@ -6,6 +6,8 @@ Playwright. Higher layers depend on `domain`, never vice-versa (DIP).
 """
 
 from fis_monitor.domain.errors import (
+    AlreadyRunningError,
+    BusyError,
     DomainError,
     ParseBugError,
     ParserVersionMismatch,
@@ -63,6 +65,8 @@ __all__ = [  # noqa: RUF022 — grouped by responsibility, NOT alphabetical
     "UpstreamError",
     "ParseBugError",
     "ParserVersionMismatch",
+    "AlreadyRunningError",
+    "BusyError",
     # type aliases / enums
     "TrackedField",
     "ErrorCategory",

@@ -749,6 +749,9 @@ class LockHandle:
     """Opaque handle returned by `Locker.acquire()` and consumed by
     `Locker.release(handle)`.
 
+    `fd` is the open file descriptor of the lock-file; used by `release()`
+    to unlock and close.
+
     `pid` is the writer-PID stamped into the lock-file for human inspection
     (`who holds the lock?`). It is NOT used for arbitration — OS-level
     lock (`fcntl.flock` / `msvcrt.locking`) is the SSOT.
@@ -756,6 +759,7 @@ class LockHandle:
     `path` is the lock-file path; used by `release()` to unlink.
     """
 
+    fd: int
     pid: int
     path: str
 

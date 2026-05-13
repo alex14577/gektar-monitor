@@ -1,0 +1,240 @@
+"""Playwright-backed headed-login session — PlaywrightLoginSession.
+
+Implements the ``LoginSession`` Protocol (domain/interfaces.py §3.4).
+
+Design notes:
+- **Headed-only** (``headless=False``): the user must confirm login manually
+  via the browser window. No credentials are passed to Playwright.
+- **Persistent context** (``profile_dir``): cookies / localStorage survive
+  between invocations so the user does not re-login every startup.
+- **Single-flight** via ``threading.Lock(blocking=False)`` acquire:
+  a second call while one is in progress raises ``BusyError`` immediately.
+- **Thread-safe cancel** (ADR-014 §phase-1.5): ``cancel()`` calls
+  ``browser.close()`` from the shutdown thread; the active
+  ``page.wait_for_url`` unwinds with ``TargetClosedError`` (~2-3s) and
+  the worker returns ``LoginOutcome(success=False, error="cancelled")``.
+- **Host-whitelist invariant**: ``context.route("**/*", handler)`` intercepts
+  every request; non-whitelisted hosts are aborted, whitelisted ones continue.
+- **Hard deadline** (``open_headed_login(deadline=300.0)``): 5-minute cap as
+  a safety net against a user closing the tab without logging in. Returns
+  ``LoginOutcome(success=False, error="timeout")``.
+
+References:
+  - ADR-014 (two-phase shutdown, phase 1.5)
+  - docs/architecture/03-protocols.md §3.4
+  - docs/architecture/07-concurrency.md §pw-login row
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
+
+from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
+
+from fis_monitor.domain.errors import BusyError
+from fis_monitor.domain.interfaces import Clock
+from fis_monitor.domain.models import LoginErrorHint, LoginOutcome
+
+__all__ = ["PlaywrightLoginSession"]
+
+_log = logging.getLogger(__name__)
+
+# URL pattern that matches the FIS post-login landing page redirect.
+# Playwright interprets this as a glob; we wait until the page URL matches.
+_LOGIN_SUCCESS_URL_GLOB = "**/cabinet/**"
+
+
+class PlaywrightLoginSession:
+    """Headed-login via Playwright — ``LoginSession`` Protocol implementation.
+
+    Args:
+        profile_dir: Path to the persistent-context profile directory.
+            Created automatically by Playwright if absent.
+        allowed_hosts: Sequence of hostnames that are allowed to receive
+            network requests during the login flow (e.g. the FIS domain and
+            any required CDN/auth endpoints).  All other hosts are aborted.
+        clock: Wall-clock / monotonic source (injected for testability).
+        playwright_factory: Callable returning a ``sync_playwright()``
+            context-manager.  Defaults to the real ``sync_playwright``; tests
+            pass a mock factory here.
+    """
+
+    def __init__(
+        self,
+        profile_dir: Path,
+        *,
+        allowed_hosts: Sequence[str],
+        clock: Clock,
+        playwright_factory: Callable[[], Any] = sync_playwright,
+    ) -> None:
+        self._profile_dir = profile_dir
+        self._allowed_hosts: frozenset[str] = frozenset(allowed_hosts)
+        self._clock = clock
+        self._playwright_factory = playwright_factory
+
+        # Single-flight lock: acquired before starting, released in finally.
+        self._lock = threading.Lock()
+
+        # Protects _active_browser; separate from _lock so cancel() does not
+        # need to wait for the full single-flight path.
+        self._state_lock = threading.Lock()
+        self._active_browser: Browser | None = None
+
+    # ------------------------------------------------------------------
+    # LoginSession Protocol
+    # ------------------------------------------------------------------
+
+    def open_headed_login(self, *, deadline: float) -> LoginOutcome:
+        """Open a headed browser window and wait for the user to log in.
+
+        Blocks the calling thread until one of:
+        - login succeeds (URL matches the post-login glob),
+        - ``deadline`` seconds elapse (returns ``error="timeout"``),
+        - ``cancel()`` is called from another thread (returns ``error="cancelled"``).
+
+        Raises:
+            BusyError: if another login is already in progress.
+        """
+        acquired = self._lock.acquire(blocking=False)
+        if not acquired:
+            raise BusyError(
+                "PlaywrightLoginSession: open_headed_login is already in progress"
+            )
+        try:
+            return self._run_login(deadline=deadline)
+        finally:
+            self._lock.release()
+
+    def cancel(self) -> None:
+        """Thread-safe external stop.
+
+        Calls ``browser.close()`` from outside the worker thread.  Safe to
+        call when no login is active (no-op).  The active ``page.wait_for_url``
+        will raise ``TargetClosedError`` inside the worker and resolve to
+        ``LoginOutcome(success=False, error="cancelled")``.
+        """
+        with self._state_lock:
+            browser = self._active_browser
+        if browser is not None:
+            _log.info("PlaywrightLoginSession.cancel(): closing active browser")
+            try:
+                browser.close()
+            except Exception:  # pragma: no cover — Playwright internals
+                _log.debug("cancel(): browser.close() raised (already closed?)", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _run_login(self, *, deadline: float) -> LoginOutcome:
+        """Core login flow — called with ``_lock`` already held."""
+        start = self._clock.monotonic()
+        remaining_ms = int(deadline * 1000)
+
+        try:
+            with self._playwright_factory() as pw:
+                browser = pw.chromium.launch_persistent_context(
+                    str(self._profile_dir),
+                    headless=False,
+                )
+                # Register the active browser so cancel() can reach it.
+                with self._state_lock:
+                    self._active_browser = browser
+
+                try:
+                    return self._wait_for_login(
+                        context=browser,
+                        remaining_ms=remaining_ms,
+                        start=start,
+                        deadline=deadline,
+                    )
+                finally:
+                    with self._state_lock:
+                        self._active_browser = None
+                    try:
+                        browser.close()
+                    except Exception:  # pragma: no cover
+                        _log.debug("_run_login: browser.close() raised", exc_info=True)
+
+        except Exception as exc:
+            return self._map_exception(exc)
+
+    def _wait_for_login(
+        self,
+        *,
+        context: BrowserContext,
+        remaining_ms: int,
+        start: float,
+        deadline: float,
+    ) -> LoginOutcome:
+        """Register route handler, get/open the page, then wait for redirect."""
+        # Register host-whitelist route on the context.
+        context.route("**/*", self._make_route_handler())
+
+        # Use existing page if one is open, otherwise open a new one.
+        pages = context.pages
+        page: Page = pages[0] if pages else context.new_page()
+
+        # Adjust remaining timeout accounting for setup time.
+        elapsed_ms = int((self._clock.monotonic() - start) * 1000)
+        timeout_ms = max(remaining_ms - elapsed_ms, 0)
+
+        if timeout_ms <= 0:
+            return LoginOutcome(success=False, cookies_updated=False, error="timeout")
+
+        try:
+            page.wait_for_url(_LOGIN_SUCCESS_URL_GLOB, timeout=timeout_ms)
+        except Exception as exc:
+            return self._map_exception(exc)
+
+        # Success: let Playwright persist the context (cookies saved to profile).
+        _log.info("PlaywrightLoginSession: login succeeded")
+        return LoginOutcome(success=True, cookies_updated=True, error=None)
+
+    def _make_route_handler(self) -> Callable[[Route], None]:
+        """Return a route handler that enforces the host-whitelist invariant."""
+        allowed_hosts = self._allowed_hosts
+
+        def _handler(route: Route) -> None:
+            url = route.request.url
+            try:
+                from urllib.parse import urlparse
+                host = urlparse(url).hostname or ""
+            except Exception:
+                route.abort()
+                return
+            if host in allowed_hosts:
+                route.continue_()
+            else:
+                _log.debug("PlaywrightLoginSession: aborting non-whitelisted host %s", host)
+                route.abort()
+
+        return _handler
+
+    @staticmethod
+    def _map_exception(exc: BaseException) -> LoginOutcome:
+        """Map a Playwright (or other) exception to a ``LoginOutcome`` error hint."""
+        # Import lazily to avoid hard dependency at module load time.
+        exc_type = type(exc).__name__
+        exc_str = str(exc).lower()
+
+        hint: LoginErrorHint
+        if "targetclosed" in exc_type.lower() or "targetclosed" in exc_str:
+            hint = "cancelled"
+        elif "timeout" in exc_type.lower() or "timeout" in exc_str:
+            hint = "timeout"
+        elif "disconnect" in exc_type.lower() or "disconnect" in exc_str:
+            hint = "playwright_disconnect"
+        elif "playwright" in exc_type.lower() or "playwright" in exc_str:
+            hint = "playwright_other"
+        else:
+            _log.debug(
+                "PlaywrightLoginSession: unexpected exception type=%s", exc_type, exc_info=exc
+            )
+            hint = "playwright_other"
+
+        return LoginOutcome(success=False, cookies_updated=False, error=hint)

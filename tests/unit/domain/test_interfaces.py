@@ -194,7 +194,7 @@ def test_connection_provider_structural() -> None:
 
 class _FakeLocker:
     def acquire(self) -> LockHandle:
-        return LockHandle(pid=1, path="/tmp/test.lock")
+        return LockHandle(fd=42, pid=1, path="/tmp/test.lock")
 
     def release(self, handle: LockHandle) -> None:
         pass

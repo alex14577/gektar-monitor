@@ -503,7 +503,7 @@ def test_http_response_frozen():
 # LockHandle — frozen dataclass
 # ---------------------------------------------------------------------------
 def test_lock_handle_frozen():
-    h = LockHandle(pid=12345, path="/tmp/fis.lock")
+    h = LockHandle(fd=42, pid=12345, path="/tmp/fis.lock")
     with pytest.raises(dataclasses.FrozenInstanceError):
         h.pid = 1  # type: ignore[misc]
 
