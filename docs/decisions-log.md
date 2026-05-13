@@ -48,6 +48,7 @@
 - [ADR-018: Onboarding FSM server-enforced](#adr-018-onboarding-fsm-server-enforced)
 - [ADR-020: SMTP host/port SSOT = state.db](#adr-020-smtp-hostport-ssot--statedb-r4-c1)
 - [ADR-021: Manual STARTTLS — обход smtplib server_hostname bug](#adr-021-manual-starttls--обход-smtplib-server_hostname-bug-при-connect-by-ip-r4-c2)
+- [ADR-022: ALLOWED_TRACKED_FIELDS SSOT + SmtpHostPolicyError наследует UpstreamError](#adr-022-allowed_tracked_fields-ssot-через-typingget_args--smtphostpolicyerror-наследует-upstreamerror)
 
 **Резервирование:**
 - [ADR-009: Backup стратегия — только USER_STATE_TABLES](#adr-009-backup-стратегия--только-user_state_tables)
@@ -614,6 +615,20 @@ smtp.quit()
 - Дождаться CPython фикса (вероятно `smtplib.SMTP(host_for_sni=...)`) — версии Python 3.12..3.14 баг присутствует.
 
 **Consequences.** TLS-cert verification работает корректно (cert против `smtp.yandex.ru`, connect по pin'нутому IP). MITM/DNS-rebinding закрыт. Цена: ~15 строк boilerplate вместо одного `smtp.starttls()`. Документировать в `SmtpEmailNotifier` docstring почему руками.
+
+---
+
+### ADR-022: ALLOWED_TRACKED_FIELDS SSOT через typing.get_args + SmtpHostPolicyError наследует UpstreamError
+
+**Context.** Два смежных кодовых решения из `domain/diff.py` и `domain/errors.py`, не покрытые явным ADR.
+
+**Decision 1 — ALLOWED_TRACKED_FIELDS SSOT.**
+`ALLOWED_TRACKED_FIELDS: frozenset[str] = frozenset(typing.get_args(TrackedField))` вместо ручного дублирования значений Literal. Альтернатива — держать два отдельных определения (Literal для типов, frozenset для runtime-проверки) — риск дрейфа при добавлении нового tracked-поля: тип обновлён, frozenset забыт → инъекция в SQL-identifier остаётся незакрытой.
+
+**Decision 2 — SmtpHostPolicyError(UpstreamError).**
+Ошибки DNS-resolve и blocklist при проверке SMTP-хоста классифицируются как `upstream` (ADR-003: UpstreamError — для network/DNS/HTTP-слоя). Альтернатива — отдельная иерархия от `DomainError` — создаёт неоднородность: `SmtpEmailNotifier.send()` ловит и `UpstreamError`, и `SmtpHostPolicyError` разными `except`-ветками, нарушая принцип «один обработчик на тип сбоя».
+
+**Consequences.** Нулевая возможность дрейфа между Literal и runtime-frozenset. `SmtpHostPolicyError` обрабатывается в `run_forever()` единым `except UpstreamError` блоком без дополнительных ветвлений.
 
 ---
 
