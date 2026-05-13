@@ -31,7 +31,6 @@ Subscription handles (follow-up z9d):
 
 from __future__ import annotations
 
-import ast
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import (
@@ -291,8 +290,24 @@ class UserStateRepository(Protocol):
     def set_starred(self, lot_id: int, value: bool) -> None: ...
     def set_submitted(self, lot_id: int, value: bool, at: datetime | None) -> None: ...
     def set_note(self, lot_id: int, note: str | None) -> None: ...
-    def mark_visited(self, at: datetime) -> None: ...
-    def last_visit(self) -> datetime | None: ...
+
+    def mark_visited(self, at: datetime) -> None:
+        """Record the timestamp of the user's most recent dashboard visit.
+
+        This is a **global** (single-valued) timestamp — it tracks the last
+        time the user opened the dashboard, not a per-lot visit counter.
+        For per-lot interaction state (starred, submitted, notes) use the
+        other methods on this repository.
+        """
+        ...
+
+    def last_visit(self) -> datetime | None:
+        """Return the timestamp of the last ``mark_visited()`` call, or
+        ``None`` if the dashboard has never been visited.
+
+        Global, not per-lot — mirrors the semantics of ``mark_visited()``.
+        """
+        ...
 
 
 class NotificationsRepository(Protocol):
@@ -514,11 +529,21 @@ class Notifier(Protocol):
     display_name: ClassVar[str]
     """Human-readable channel name for UI display."""
 
+    description: ClassVar[str]
+    """Short human-readable description of the channel shown in the UI channel
+    selector (e.g. ``"Send email notifications via SMTP"``). Used by the
+    auto-generated channel-configuration form."""
+
     config_schema: ClassVar[type[NotifierConfig]]
     """Pydantic model class that describes per-channel configuration."""
 
     recipient_label: ClassVar[str]
     """UI label for the recipient field (e.g. ``"Email address"``)."""
+
+    recipient_placeholder: ClassVar[str]
+    """Placeholder text shown in the recipient input field
+    (e.g. ``"user@example.com"``). Used by the auto-generated UI form to
+    guide the user on the expected format."""
 
     def send(self, lot: LotPublicDTO, recipient: str) -> NotifyResult:
         """Deliver a notification for ``lot`` to ``recipient``.
@@ -537,34 +562,3 @@ class Notifier(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
-# Module-level import guard (fail-fast on forbidden imports)
-# ---------------------------------------------------------------------------
-_FORBIDDEN_MODULES = frozenset({"infra", "services", "web", "composition"})
-
-
-def _assert_no_forbidden_imports(source_path: str = __file__) -> None:  # pragma: no cover
-    """Parse this file with ``ast`` and assert no forbidden top-level imports.
-
-    Called in tests (``test_interfaces.py::test_no_forbidden_imports``).
-    This function is intentionally NOT called at module import time to
-    avoid file-I/O in production code paths.
-    """
-    with open(source_path, encoding="utf-8") as fh:
-        tree = ast.parse(fh.read(), filename=source_path)
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                _check_name(alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            _check_name(node.module)
-
-
-def _check_name(module_name: str) -> None:  # pragma: no cover
-    parts = module_name.split(".")
-    for forbidden in _FORBIDDEN_MODULES:
-        if forbidden in parts:
-            raise ImportError(
-                f"domain/interfaces.py imports forbidden module '{module_name}'"
-            )

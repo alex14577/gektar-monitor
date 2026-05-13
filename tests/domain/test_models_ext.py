@@ -528,8 +528,8 @@ def test_event_subscription_is_protocol_with_context_manager():
             return iter(())
 
     f = _Fake()
-    # runtime_checkable Protocol allows isinstance()
-    assert isinstance(f, EventSubscription)
+    # Structural conformance via type annotation (not runtime_checkable)
+    _: EventSubscription[object] = f
 
 
 def test_event_subscription_iter_yields_events():
@@ -551,7 +551,7 @@ def test_event_subscription_iter_yields_events():
             yield from sentinel
 
     f = _Fake()
-    assert isinstance(f, EventSubscription)
+    _2: EventSubscription[object] = f
     with f as sub:
         collected = tuple(sub.iter())
     assert collected == sentinel
@@ -576,7 +576,8 @@ def test_config_subscription_is_protocol_with_context_manager():
         def unsubscribe(self) -> None:
             pass
 
-    assert isinstance(_Fake(), ConfigSubscription)
+    # Structural conformance via type annotation (not runtime_checkable)
+    _: ConfigSubscription = _Fake()
 
 
 # ---------------------------------------------------------------------------

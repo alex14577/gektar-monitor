@@ -18,7 +18,7 @@ used by `EventBus` to scrub PII before persisting critical events.
 from __future__ import annotations
 
 import socket
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -27,8 +27,6 @@ from typing import (
     Any,
     ClassVar,
     Literal,
-    Protocol,
-    runtime_checkable,
 )
 
 from pydantic import (
@@ -823,58 +821,3 @@ type SseEvent = (
     | SseLotStatus
 )
 
-
-# ---------------------------------------------------------------------------
-# Subscription handles — Protocols (docs/architecture/03-protocols.md §3.5)
-# ---------------------------------------------------------------------------
-#
-# `EventSubscription` (bus events) and `ConfigSubscription` (config-reload
-# callbacks) are intentionally DIFFERENT names — they look similar but live
-# on different lifecycles and must not be confused at call-sites.
-#
-# TODO(531.2): move EventSubscription/ConfigSubscription Protocols to
-# domain/interfaces.py — bd issue z9d.
-# ---------------------------------------------------------------------------
-@runtime_checkable
-class EventSubscription[T](Protocol):
-    """Handle returned by `EventBus.subscribe()`. Context-manager + lazy
-    iterator over received events.
-
-    Generic over the event type `T` so call-sites can spell
-    `EventSubscription[SseEvent]` and rely on static type-checking of
-    the iterator yield-type.
-
-    Invariant: `iter()` is a non-blocking generator yielding events as
-    they arrive. Concrete bus implementations decide the back-pressure
-    policy (drop-from-tail for `normal`, force-unsubscribe for slow
-    consumers of `critical` — see docs/architecture/03-protocols.md §3.5 / R3-C5).
-
-    Usage:
-
-        with bus.subscribe() as sub:
-            for event in sub.iter():
-                ...
-        # __exit__ calls unsubscribe()
-
-    `unsubscribe()` MUST be idempotent: calling it after `__exit__` (or
-    twice in a row) is a no-op.
-    """
-
-    def __enter__(self) -> EventSubscription[T]: ...
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None: ...
-    def unsubscribe(self) -> None: ...
-    def iter(self) -> Iterator[T]: ...
-
-
-@runtime_checkable
-class ConfigSubscription(Protocol):
-    """Context-manager handle returned by `ConfigSource.subscribe(cb)`.
-
-    Separate type from `EventSubscription` to keep call-sites unambiguous —
-    config reload and SSE bus events are different lifecycles. Reload
-    delivery is push-based (callback), so this handle has no `iter()`.
-    """
-
-    def __enter__(self) -> ConfigSubscription: ...
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None: ...
-    def unsubscribe(self) -> None: ...

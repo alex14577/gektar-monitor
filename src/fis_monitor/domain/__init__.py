@@ -11,15 +11,17 @@ from fis_monitor.domain.errors import (
     ParserVersionMismatch,
     UpstreamError,
 )
+from fis_monitor.domain.interfaces import (
+    ConfigSubscription,
+    EventSubscription,
+)
 from fis_monitor.domain.models import (
     BrowserConfig,
     CatchupConfig,
-    ConfigSubscription,
     CycleResult,
     DndConfig,
     EmailConfig,
     ErrorCategory,
-    EventSubscription,
     FieldChange,
     FiltersConfig,
     HeartbeatConfig,

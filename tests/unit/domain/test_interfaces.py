@@ -15,7 +15,7 @@ from __future__ import annotations
 import ast
 import socket
 from collections.abc import Iterator
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -73,7 +73,7 @@ INTERFACES_PY = (
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=datetime.UTC)  # type: ignore[attr-defined]
+    return datetime.now(tz=UTC)
 
 
 # ===========================================================================
@@ -123,7 +123,7 @@ def test_notifier_has_classvar_channel_id() -> None:
 def test_clock_is_runtime_checkable() -> None:
     class FakeClock:
         def now(self) -> datetime:
-            return datetime.now(tz=datetime.UTC)  # type: ignore[attr-defined]
+            return datetime.now(tz=UTC)
 
         def monotonic(self) -> float:
             return 0.0
@@ -135,8 +135,10 @@ def test_notifier_is_runtime_checkable() -> None:
     class FakeNotifier:
         channel_id: ClassVar[str] = "fake"
         display_name: ClassVar[str] = "Fake"
+        description: ClassVar[str] = "A fake channel for testing."
         config_schema: ClassVar[type[NotifierConfig]] = NotifierConfig
         recipient_label: ClassVar[str] = "To"
+        recipient_placeholder: ClassVar[str] = "recipient@example.com"
 
         def send(self, lot: LotPublicDTO, recipient: str) -> NotifyResult:
             return NotifyResult(ok=True, detail="ok", retryable=False)
@@ -168,7 +170,7 @@ def test_event_bus_is_not_runtime_checkable() -> None:
 
 class _FakeClock:
     def now(self) -> datetime:
-        return datetime.now(tz=datetime.UTC)  # type: ignore[attr-defined]
+        return datetime.now(tz=UTC)
 
     def monotonic(self) -> float:
         return 0.0
@@ -343,6 +345,58 @@ def test_notifications_repository_structural() -> None:
     _: NotificationsRepository = _FakeNotificationsRepository()
 
 
+def test_notifications_repository_mark_attempt_returns_none_when_terminal() -> None:
+    """mark_attempt() returning None is a valid part of the Protocol contract.
+
+    Per ADR-019 / R4-C4: if the row is already in a terminal state (sent or
+    permanent_fail) a concurrent consumer may have won the race. The method
+    MUST return None in that case; callers MUST skip the send.
+
+    This test documents the None-path as an *expected* contract, not an error.
+    """
+
+    class _FakeTerminalRepo:
+        """Fake where mark_attempt always returns None (terminal-state race)."""
+
+        def reserve(self, lot_id: int, channel: str, recipient: str) -> bool:
+            return False
+
+        def status_of(
+            self, lot_id: int, channel: str, recipient: str
+        ) -> Literal["pending", "sent", "permanent_fail"] | None:
+            return "sent"
+
+        def mark_attempt(
+            self, lot_id: int, channel: str, recipient: str, at: datetime
+        ) -> int | None:
+            # Row already terminal — caller must skip the send.
+            return None
+
+        def mark_sent(
+            self, lot_id: int, channel: str, recipient: str, at: datetime
+        ) -> None:
+            pass
+
+        def mark_permanent_fail(
+            self, lot_id: int, channel: str, recipient: str
+        ) -> None:
+            pass
+
+        def list_pending_older_than(self, age: timedelta) -> list[NotificationRecord]:
+            return []
+
+        def list_recent(self, limit: int) -> list[NotificationRecord]:
+            return []
+
+    repo: NotificationsRepository = _FakeTerminalRepo()
+
+    result = repo.mark_attempt(1, "email", "user@example.com", _utcnow())
+    assert result is None, (
+        "mark_attempt must be allowed to return None when row is in terminal state "
+        "(race-safe semantics per ADR-019 R4-C4)"
+    )
+
+
 class _FakeSettingsRepository:
     def get(self, key: str) -> str | None:
         return None
@@ -489,8 +543,10 @@ def test_migration_runner_structural() -> None:
 class _FakeNotifier:
     channel_id: ClassVar[str] = "fake"
     display_name: ClassVar[str] = "Fake Channel"
+    description: ClassVar[str] = "A fake notification channel used in tests."
     config_schema: ClassVar[type[NotifierConfig]] = NotifierConfig
     recipient_label: ClassVar[str] = "Recipient"
+    recipient_placeholder: ClassVar[str] = "recipient@example.com"
 
     def send(self, lot: LotPublicDTO, recipient: str) -> NotifyResult:
         return NotifyResult(ok=True, detail="sent", retryable=False)
