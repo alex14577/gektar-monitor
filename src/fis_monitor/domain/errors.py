@@ -29,6 +29,15 @@ class UpstreamError(DomainError):
     """Failure originating from an external system (HTTP, DNS, SMTP, …)."""
 
 
+class SmtpHostPolicyError(UpstreamError):
+    """SMTP host failed policy validation (DNS-rebinding, blocklist, bad TLD, …).
+
+    Message includes the host name and the reason category (e.g. "private IP",
+    "loopback", "cloud metadata endpoint").  Do NOT include the resolved IP
+    address or any recipient-derived data — those are PII-ish audit-only fields.
+    """
+
+
 class ParseBugError(DomainError):
     """HTML/JSON shape diverged from parser expectations — unrecoverable cycle bug."""
 
