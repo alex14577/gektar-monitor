@@ -1,6 +1,69 @@
-# Точка возобновления сессии (обновлено 13.05.2026 после сессии #7)
+# Точка возобновления сессии (обновлено 13.05.2026 после сессии #8)
 
-Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md` (stub-MOC; нужные секции — в `docs/architecture/`, `docs/decisions/`).
+Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md` (stub-MOC; нужные секции — в `docs/architecture/`, `docs/decisions/`). **Стратегический wave-plan до MVP** — `docs/wave-plan.md` (включает session log).
+
+## Где остановились (сессия #8, 13.05.2026)
+
+**Wave 1 закрыта 5/5 + follow-up batch (review-driven polish).** Commits: `9433c0b` (akv.6), `58aa658` (akv.7), `486ddf2` (bye.4), `0462b5a` (akv.5), `a50ff15` (bye.2), `4d875ce` (follow-up batch), `27b6f92`/`240affb`/`4dcd2f4` (wave-plan docs).
+
+### Что сделано в сессии #8
+
+**Wave 1 — 5 тасок параллельными writer-агентами:**
+1. `akv.5` — `SqliteLotRepository` (upsert + compute_changes ВНУТРИ tx + _sync_geo 5 переходов + lots_history) — 21 tests.
+2. `akv.6` — `SqliteNotificationsRepository` (state machine pending→sent|permanent_fail + R4-C3/C4 race-handling) — 16 tests + fix-round (timezone, BEGIN IMMEDIATE убран с read-методов).
+3. `akv.7` — `SqliteSettingsRepository` + `SqliteSmtpCredentialsRepository` (singleton-row, named columns guard для column-order quirk после migration) — 17 tests.
+4. `bye.2` — `SelectolaxListParser` + `SelectolaxDetailParser` (`selectolax 0.4.8`, stateless, ParseBugError для DOM-shape) — 32 tests.
+5. `bye.4` — `SmtpEmailNotifier` + `EmailNotifierConfig` (manual STARTTLS per ADR-021, Message-ID детерминированный per R4-C5) — 27 tests + fix-round (DI canon-signature, narrow except, удалено unused `from_address`).
+
+**Wave 1 follow-up batch** (commit `4d875ce`, 6 review-driven improvements):
+- `ParseBugError` → structured (selector + context атрибуты, PII-safe). Все call-sites обновлены.
+- `NotificationRecord.__repr__` → SHA-256[:8] fingerprint вместо plaintext recipient.
+- Defense whitelist в `SqliteLotRepository.upsert` ДО BEGIN IMMEDIATE.
+- Mid-write rollback test (patch `conn.execute` чтобы fail на INSERT lots_history).
+- Dedicated R-tree COUNT=1 test (ADR-016 R3-M8 simplest invariant).
+- `_extract_kv_pairs` direct-child fix (убран `parent==container`, polагaемся на `container.iter(include_text=False)`).
+- **Fix-loop**: iter 1 → NEEDS-WORK (1 blocker + 5 majors); iter 2 → APPROVE (3 minors). Hard cap 3 не достигнут.
+
+### Изменения workflow зафиксированные в session #8
+
+В `docs/wave-plan.md` шаги 4/7/8 переписаны. bd memories: `vault-update-mandatory-after-approve`, `major-also-blocks-close`, `code-principles-in-every-prompt`, `vault-workflow-hybrid-wave2`.
+
+1. **Code-principles обязательный блок** в каждом writer- и reviewer-промпте вербатим (8 буллетов из `feedback_code_principles.md`).
+2. **Fix-loop правило**: `APPROVE` reviewer'а разрешает close ТОЛЬКО если списки blockers + majors пустые. Hard cap 3 итерации, иначе escalate.
+3. **Гибридная vault-схема** для Wave 2+: Writer → `## Glossary draft` в отчёте → Reviewer verify → Оркестратор применяет в `docs/glossary.md`. ADR/architecture/data-model — за оркестратором.
+
+### Vault обновлён в session #8
+
+8 новых glossary-записей: `SqliteLotRepository`, `SqliteNotificationsRepository`, `SqliteSettingsRepository`, `SqliteSmtpCredentialsRepository`, `SmtpEmailNotifier`, `EmailNotifierConfig`, `SelectolaxListParser`, `SelectolaxDetailParser`, `ParseBugError` (structured). Новая секция «Инфраструктура парсинга (selectolax)».
+
+### Состояние репо в конце сессии #8
+
+- Working tree: clean modulo `docs/index.md` (modified — линтер откатил wave-plan-ссылку, не критично) и `docs/staging-fake-site.md` (untracked — не наш файл).
+- Branch: `master`, HEAD `4dcd2f4`.
+- Tests: **424 passed, 2 skipped** (было 303 после session #7, +121 новых).
+- Ruff: чисто по новому коду (2 legacy RUF001 в `tests/domain/conftest.py:31`, известно).
+- import-linter: 2 contracts kept.
+- bd: 20 closed (было 15) / 58 open / 38 ready / 0 in_progress.
+
+### С чего стартовать сессию #9
+
+**Wave 2 — leaf-nodes (5 кандидатов, нулевое пересечение файлов):**
+
+- **`8ov.1`** P1 — Composition: Infra + Services dataclasses (split Container). `composition/` новый пакет. `haiku` хватит.
+- **`bye.1`** P2 — `RequestsHttpClient` с retry policy. `infra/http/`. `haiku`.
+- **`bye.5`** P2 — `BrowserSseNotifier` (publish в EventBus). `infra/sse/browser_sse_notifier.py`. `haiku`. Согласовать с `tic.3` имена файлов.
+- **`bye.6`** P1 — `PlaywrightLoginSession` (headed + cancel + single-flight). `infra/playwright/`. `sonnet` — нетривиальный (thread-safe cancel, host-whitelist route abort).
+- **`bye.8`** P2 — `FileLocker` (OS-level lock, PID info-only). `infra/locker/`. `haiku`.
+
+**Применить новый workflow с самого начала Wave 2:**
+1. Каждый writer-промпт включает **code-principles блок вербатим** (8 буллетов).
+2. Каждый writer-промпт добавляет: «в конце отчёта `## Glossary draft` для новых классов/Protocol/паттернов, НЕ редактируй glossary.md сам».
+3. Каждый reviewer-промпт включает: «verdict APPROVE только если blockers + majors пустые. Включи `## Glossary draft check`. Проверь code-principles compliance.».
+4. Fix-loop до чистого APPROVE (hard cap 3).
+
+**Параллельность**: 5 leaf-nodes — теоретически параллельны (разные dirs), но комфортный максимум 3 в одной сессии. Разумно: `8ov.1` + `bye.1` + `bye.8` первой волной (все haiku), потом `bye.5` + `bye.6` (sonnet для bye.6).
+
+---
 
 ## Где остановились (сессия #7, 13.05.2026)
 
