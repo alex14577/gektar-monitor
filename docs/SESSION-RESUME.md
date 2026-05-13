@@ -1,6 +1,66 @@
-# Точка возобновления сессии (обновлено 13.05.2026 после сессии #6)
+# Точка возобновления сессии (обновлено 13.05.2026 после сессии #7)
 
 Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md` (stub-MOC; нужные секции — в `docs/architecture/`, `docs/decisions/`).
+
+## Где остановились (сессия #7, 13.05.2026)
+
+**Закрыты 2 bd-issues (Wave 2B часть 2): `akv.3`, `vgm.3`.** Commits `48e90d3`, `0117ee4`.
+
+### Что сделано в сессии #7
+
+1. **bd `akv.3` closed** (commit `48e90d3`) — миграция SQLite v1→v2:
+   - `src/fis_monitor/infra/sqlite/migrations_v1_to_v2.py`. Часть A: `notifications` через 12-step rebuild (CREATE _new + INSERT SELECT + DROP old indexes + DROP + RENAME + CREATE v2 partial indexes). v1-строки → `status='sent'`, `attempt_no=1`, `last_attempt_at=sent_at`. Часть B: `smtp_credentials` через `ALTER TABLE ADD COLUMN smtp_host/smtp_port` с DEFAULT + CHECK (ADR-020).
+   - Функция работает ВНУТРИ runner BEGIN IMMEDIATE — без своих BEGIN/COMMIT/ROLLBACK, без `PRAGMA user_version`. FK-toggling опущен (notifications не имеет FK).
+   - `migrations.py`: добавлены `MIGRATION_V1_TO_V2 = Migration(1, 2, apply=v1_to_v2)` + factory `default_migration_runner()`.
+   - 6 интеграционных тестов (data preservation, индексы, idempotency via TOCTOU, middle-failure atomicity, factory).
+   - FIXME ADR-019 §R4-M8 (про невыполнимый ALTER NOT NULL) — снят.
+   - **Known limitation**: после migration колонки `smtp_credentials` имеют порядок `id, smtp_user, smtp_password, use_default, updated_at, smtp_host, smtp_port` (ADD COLUMN клеит в конец), отличный от `schema.sql`. Безопасно только при доступе по именам (sqlite3.Row + явный список колонок) — задокументировано в docstring `_migrate_smtp_credentials`.
+
+2. **bd `vgm.3` closed** (commit `0117ee4`) — import-linter контракты (ADR-006):
+   - `.importlinter` в корне репо. Два контракта: `layers` ((composition)|(app) → web → services → infra → domain) + `domain_purity` (forbidden: sqlite3, requests, fastapi, playwright, smtplib).
+   - Адаптации vs ADR-006 verbatim: `composition` и `app` опциональны через `(...)` (ещё не существуют — 8ov.1/8ov.2); `include_external_packages = True` обязательно для domain_purity (без флага stdlib/3rd-party не резолвится).
+   - `pyproject.toml`: `import-linter>=2.0` в dev-deps.
+   - `src/fis_monitor/services/__init__.py` — пустой, превращает namespace-пакет в regular (иначе import-linter не обходит layer).
+   - `tests/test_import_linter_contracts.py` — happy path + negative (временный config с заведомо нарушенным контрактом). `_resolve_lint_imports()` ищет бинарник рядом с `sys.executable`, `pytest.skip` если отсутствует.
+   - README: секция `## CI / Quality gates`.
+
+3. **Vault обновлён**:
+   - `docs/glossary.md`: записи `v1_to_v2 (migration)`, `import-linter (контракты архитектуры)`.
+   - ADR не создавался (тривиальная реализация существующего design).
+
+4. **Изменения playbook'а / memory**:
+   - Memory `sub-agent-mandatory-for-writer-tasks` обновлена: **writer-default = `general-purpose`** (нет конфликтной персоны Laravel/Livewire / cloud-microservices, нет skill auto-trigger'а). Senior Developer / Software Architect — фоллбэк. Backend Architect — избегать (skill-hijack). Reviewer-default остаётся `Code Reviewer` (профильная персона работает).
+   - В session #7 ещё использовался Senior Developer (отработал штатно — 3 раза), но **в следующей волне пробуем general-purpose** как первый выбор.
+
+### Состояние репо в конце сессии #7
+
+- Working tree: clean (HEAD `0117ee4`)
+- Branch: `master`
+- Tests: **303 passed, 2 skipped** (8 новых: 6 миграционных + 2 import-linter)
+- Ruff: чисто по новому коду (2 legacy RUF001 в `tests/domain/conftest.py:31`, известно)
+- import-linter: `2 kept, 0 broken` на текущем коде
+- Git remote: НЕТ (local-only)
+- bd: 15 closed, 63 open, 24 blocked, 39 ready, 0 in_progress
+
+### С чего стартовать сессию #8
+
+**Wave 2C — оставшиеся P0/P1:**
+
+- **`bye.4`** P0 — `SmtpEmailNotifier` (manual STARTTLS + Message-ID). Зависит от `akv.7` (SmtpCredentialsRepository) — **проверить разблокирован ли** перед стартом. Если ещё нет — взять `akv.7` или `akv.5` первыми.
+- **`8ov.1`** P1 — Composition: Infra + Services dataclasses (split Container). Разблокирует `8ov.2` (build_container).
+- **`arl`** P1 — Test: NotifierDispatcher маппит NotifyResult.detail в ErrorCategory без утечки в SSE. Зависит от dispatcher (пока не реализован).
+
+**Заметки для оркестратора:**
+- **Writer-default**: попробовать `general-purpose` (sonnet) на первой же задаче — например, на 8ov.1 (нет сложной доменной специфики, идеальный кандидат для проверки). Сохранить результат сравнения в bd memory.
+- 8ov.1 создаёт пакет `fis_monitor/composition/` (или модуль) — это активирует optional layers в `.importlinter` (контракт начнёт фактически проверять composition→web→services→infra→domain топологию). После реализации убрать `(...)` в `.importlinter` (необязательно, layers tolerant). 
+- Параллельность: 8ov.1 (`composition/`) + bye.4 (`infra/smtp/`) — разные файлы, но bye.4 имеет deps. Уточнить перед волной.
+- Reviewer ДО `bd close`, model `sonnet` по дефолту.
+
+### Memory заметки (обновлено в session #7)
+
+- `sub-agent-mandatory-for-writer-tasks` — переписано: writer-default = `general-purpose`, Backend Architect — избегать. Решение принято после ретро session #7 + явного вопроса пользователя про разницу промптов Backend Architect vs Senior Developer. Подтверждение: оба шаблона (Laravel/Livewire premium UI и cloud-microservices) — мёртвый груз для Python/SQLite MVP; персона `general-purpose` чище.
+
+---
 
 ## Где остановились (сессия #6, 13.05.2026)
 
