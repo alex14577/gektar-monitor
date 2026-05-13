@@ -4,10 +4,16 @@ TDD: these tests define the contract before the implementation.
 Acceptance criteria:
   1. EXCLUDED_SETTINGS_PATHS removes notifications.email.recipients and
      notifications.email.from_address from the settings dict.
-  2. EXCLUDED_DB_FIELDS removes lot_user_state.note from any row.
+  2. EXCLUDED_DB_FIELDS removes lot_user_state.note and
+     notifications.recipient from any row.
   3. REDACTED_DB_FIELDS redacts cycles.error (URL / email / path patterns
      replaced with placeholders); other columns pass through unchanged.
-  4. A full pseudo-dump with all sensitive strings produces JSON that
+     Non-string error values are returned as-is (no TypeError).
+  4. redact_error covers relative traversal paths and Windows paths with
+     spaces.
+  5. filter_state_keys applies STATE_ALLOWED_KEYS allowlist (fail-closed)
+     and drops keys with forbidden substrings as defence-in-depth.
+  6. A full pseudo-dump with all sensitive strings produces JSON that
      contains none of the PII strings.
 """
 
@@ -101,6 +107,14 @@ class TestFilterSettings:
         result = policy.filter_settings(settings)
         assert result == {"interval_minutes": 15}
 
+    def test_non_dict_intermediate_value_is_safe(self, policy: DiagnosticsExcludePolicy) -> None:
+        """Non-dict intermediate (e.g. notifications="disabled") must not raise and
+        must be returned unchanged."""
+        settings: dict = {"notifications": "disabled", "interval_minutes": 5}
+        result = policy.filter_settings(settings)
+        assert result["notifications"] == "disabled"
+        assert result["interval_minutes"] == 5
+
 
 # ---------------------------------------------------------------------------
 # filter_row — EXCLUDED_DB_FIELDS (lot_user_state.note)
@@ -141,6 +155,35 @@ class TestFilterRowExcluded:
         row = {"id": 1, "lot_id": 42, "note": "private", "tracked": True}
         policy.filter_row("lot_user_state", row)
         assert "note" in row
+
+    # --- C1: notifications.recipient ---
+
+    def test_notifications_recipient_removed(self, policy: DiagnosticsExcludePolicy) -> None:
+        """notifications.recipient is PII and must be excluded entirely."""
+        row = {"id": 5, "recipient": "leaker@example.com", "status": "pending"}
+        result = policy.filter_row("notifications", row)
+        assert "recipient" not in result
+
+    def test_notifications_recipient_value_absent_from_output(
+        self, policy: DiagnosticsExcludePolicy
+    ) -> None:
+        row = {"id": 6, "recipient": "leaker@example.com", "status": "sent"}
+        result = policy.filter_row("notifications", row)
+        assert "leaker@example.com" not in str(result)
+
+    def test_notifications_other_fields_preserved(self, policy: DiagnosticsExcludePolicy) -> None:
+        row = {"id": 7, "recipient": "x@y.com", "status": "sent", "attempt_no": 1}
+        result = policy.filter_row("notifications", row)
+        assert result["id"] == 7
+        assert result["status"] == "sent"
+        assert result["attempt_no"] == 1
+
+    def test_notifications_recipient_none_still_removed(
+        self, policy: DiagnosticsExcludePolicy
+    ) -> None:
+        row = {"id": 8, "recipient": None, "status": "pending"}
+        result = policy.filter_row("notifications", row)
+        assert "recipient" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +232,21 @@ class TestFilterRowRedacted:
         # lots.error is not in REDACTED_DB_FIELDS — passes through
         assert result["error"] == "https://gosauctions.ru/lot/456"
 
+    def test_cycles_error_non_string_int_passthrough(
+        self, policy: DiagnosticsExcludePolicy
+    ) -> None:
+        """Non-string error values (legacy migration artifacts) must not raise TypeError."""
+        row = {"id": 11, "error": 42, "status": "error"}
+        result = policy.filter_row("cycles", row)
+        assert result["error"] == 42
+
+    def test_cycles_error_non_string_zero_passthrough(
+        self, policy: DiagnosticsExcludePolicy
+    ) -> None:
+        row = {"id": 12, "error": 0}
+        result = policy.filter_row("cycles", row)
+        assert result["error"] == 0
+
 
 # ---------------------------------------------------------------------------
 # redact_error — static method
@@ -236,6 +294,105 @@ class TestRedactError:
         result = DiagnosticsExcludePolicy.redact_error(text)
         assert result == text
 
+    # --- M1: relative traversal ---
+
+    def test_redact_error_relative_path(self) -> None:
+        text = "open failed at ../../../etc/passwd: no such file"
+        result = DiagnosticsExcludePolicy.redact_error(text)
+        assert result is not None
+        assert "passwd" not in result
+
+    def test_redact_error_relative_path_single_step(self) -> None:
+        text = "error reading ../config/secrets.env"
+        result = DiagnosticsExcludePolicy.redact_error(text)
+        assert result is not None
+        assert "secrets.env" not in result
+
+    # --- M2: Windows paths with spaces ---
+
+    def test_redact_error_windows_path_with_spaces(self) -> None:
+        text = r"permission denied at C:\Program Files\sensitive\key.pem"
+        result = DiagnosticsExcludePolicy.redact_error(text)
+        assert result is not None
+        assert "sensitive" not in result
+        assert "key.pem" not in result
+
+    def test_redact_error_windows_path_program_files(self) -> None:
+        text = r"loading C:\Program Files\MyApp\config.dat failed"
+        result = DiagnosticsExcludePolicy.redact_error(text)
+        assert result is not None
+        assert "MyApp" not in result
+        assert "config.dat" not in result
+
+
+# ---------------------------------------------------------------------------
+# filter_state_keys
+# ---------------------------------------------------------------------------
+
+
+class TestFilterStateKeys:
+    def test_allowed_key_passes_through(self, policy: DiagnosticsExcludePolicy) -> None:
+        rows = [{"key": "monitor_paused", "value": "false"}]
+        result = policy.filter_state_keys(rows)
+        assert len(result) == 1
+        assert result[0]["key"] == "monitor_paused"
+
+    def test_all_allowed_keys_pass(self, policy: DiagnosticsExcludePolicy) -> None:
+        allowed = ["monitor_paused", "last_full_scan_at", "onboarded", "onboarding_step"]
+        rows = [{"key": k, "value": "v"} for k in allowed]
+        result = policy.filter_state_keys(rows)
+        assert len(result) == 4
+
+    def test_unknown_key_excluded(self, policy: DiagnosticsExcludePolicy) -> None:
+        """last_critical_event:smtp is not in the allowlist — must be dropped."""
+        rows = [
+            {"key": "last_critical_event:smtp", "value": "2024-01-01"},
+            {"key": "monitor_paused", "value": "true"},
+        ]
+        result = policy.filter_state_keys(rows)
+        assert len(result) == 1
+        assert result[0]["key"] == "monitor_paused"
+
+    def test_forbidden_substring_excluded_even_if_in_allowlist(
+        self, policy: DiagnosticsExcludePolicy
+    ) -> None:
+        """Defence-in-depth: api_token must be dropped by the substring rule
+        even if it were somehow added to STATE_ALLOWED_KEYS."""
+        # Temporarily patch to simulate a mistake
+        original = DiagnosticsExcludePolicy.STATE_ALLOWED_KEYS
+        patched = original | frozenset({"api_token"})
+        DiagnosticsExcludePolicy.STATE_ALLOWED_KEYS = patched  # type: ignore[assignment]
+        try:
+            rows = [{"key": "api_token", "value": "supersecret"}]
+            result = policy.filter_state_keys(rows)
+            assert result == []
+        finally:
+            DiagnosticsExcludePolicy.STATE_ALLOWED_KEYS = original  # type: ignore[assignment]
+
+    def test_empty_list_returns_empty(self, policy: DiagnosticsExcludePolicy) -> None:
+        assert policy.filter_state_keys([]) == []
+
+    def test_row_without_key_field_excluded(self, policy: DiagnosticsExcludePolicy) -> None:
+        """Rows missing the 'key' field are dropped (fail-closed)."""
+        rows = [{"value": "orphan_value"}]
+        result = policy.filter_state_keys(rows)
+        assert result == []
+
+    def test_original_rows_not_mutated(self, policy: DiagnosticsExcludePolicy) -> None:
+        row = {"key": "monitor_paused", "value": "true"}
+        policy.filter_state_keys([row])
+        assert row == {"key": "monitor_paused", "value": "true"}
+
+    def test_password_substring_excluded(self, policy: DiagnosticsExcludePolicy) -> None:
+        rows = [{"key": "smtp_password_hash", "value": "hashed"}]
+        result = policy.filter_state_keys(rows)
+        assert result == []
+
+    def test_secret_substring_excluded(self, policy: DiagnosticsExcludePolicy) -> None:
+        rows = [{"key": "oauth_secret", "value": "abc123"}]
+        result = policy.filter_state_keys(rows)
+        assert result == []
+
 
 # ---------------------------------------------------------------------------
 # End-to-end: pseudo-dump scenario
@@ -253,6 +410,7 @@ class TestPseudoDump:
         "call the agent tomorrow",
         "https://gosauctions.ru/lot/secret-99",
         "recipient admin@corp.com failed",
+        "leaker@example.com",  # C1: notifications.recipient
     ]
 
     def _build_dump(self) -> dict:
@@ -285,6 +443,10 @@ class TestPseudoDump:
                         "error": "recipient admin@corp.com failed",
                     },
                     {"id": 102, "status": "ok", "error": None},
+                ],
+                "notifications": [
+                    {"id": 10, "recipient": "leaker@example.com", "status": "pending"},
+                    {"id": 11, "recipient": "another@example.com", "status": "sent"},
                 ],
                 "lots": [
                     {"id": 10, "cadastral_no": "77:01:0001001:1", "status": "active"},
