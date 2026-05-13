@@ -50,6 +50,11 @@ def _row_to_result(row: tuple) -> CycleResult:
     Expected column order (from SELECT statement):
     id, region, started_at, finished_at, status, lots_fetched, new_lots,
     error, id_schema_check
+
+    ``finished_at`` is guaranteed NOT NULL here because the caller (``list_recent``)
+    filters ``WHERE status != 'open'`` — only closed cycles (ok/error/aborted) are
+    returned, and those always have ``finished_at`` set by ``close()``.
+    ``_parse_dt`` is therefore safe to call unconditionally on ``finished_at_raw``.
     """
     (
         id_,
@@ -93,6 +98,12 @@ class SqliteCyclesRepository:
 
     ``clock`` must be UTC-aware (``Clock`` Protocol from domain/interfaces.py).
     It is used by ``prune_older_than`` to compute the cutoff timestamp.
+
+    .. note:: **``prune_older_than`` is NOT part of the ``CyclesRepository`` Protocol.**
+        It is a maintenance/retention operation that is infra-internal.
+        Callers that schedule retention (e.g. a background scheduler) must hold
+        a concrete ``SqliteCyclesRepository`` reference, NOT a Protocol-typed one.
+        Domain code and services should only depend on the ``CyclesRepository`` Protocol.
     """
 
     def __init__(self, conn_provider: ConnectionProvider, clock: Clock) -> None:
@@ -154,13 +165,13 @@ class SqliteCyclesRepository:
                     cycle_id,
                 ),
             )
-            if cur.rowcount == 0:
-                conn.rollback()
-                raise RuntimeError(f"cycle not found: id={cycle_id}")
+            row_count = cur.rowcount
             conn.commit()
         except Exception:
             conn.rollback()
             raise
+        if row_count == 0:
+            raise RuntimeError(f"cycle not found: id={cycle_id}")
 
     def list_recent(self, limit: int) -> list[CycleResult]:
         """Return the most recently completed cycles, ordered by ``started_at DESC``.

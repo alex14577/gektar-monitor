@@ -130,12 +130,12 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 3 — Services tier 1
 
-- [ ] `a4t.4` — NotifierRegistry (ждёт `bye.4`, `bye.5`) · sonnet
-- [ ] `a4t.5` — OnboardingService (ждёт `akv.7`) · sonnet
-- [ ] `a4t.6` — SettingsService + SmtpTestService (ждёт `akv.7`) · sonnet
-- [ ] `a4t.2` — EnrichmentService (ждёт `bye.1`, `bye.2`) · haiku
+- [x] `a4t.4` — NotifierRegistry (ждёт `bye.4`, `bye.5`) · sonnet
+- [x] `a4t.5` — OnboardingService (ждёт `akv.7`) · sonnet
+- [x] `a4t.6` — SettingsService + SmtpTestService (ждёт `akv.7`) · sonnet
+- [x] `a4t.2` — EnrichmentService (ждёт `bye.1`, `bye.2`) · haiku
 - [x] `akv.8` — CyclesRepository · haiku · `repositories/cycles.py`
-- [ ] `tic.2` — EventSubscription + ConfigSubscription · haiku · `infra/event_bus/subscriptions.py`
+- [x] `tic.2` — EventSubscription + ConfigSubscription · haiku · `infra/event_bus/subscriptions.py`
 
 ### Wave 4 — Services tier 2 + EventBus fan-out
 
@@ -264,17 +264,39 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - **Hybrid vault правило периодически нарушается haiku-writer'ами** (bye.8 редактировал glossary напрямую). Контент бывает валидный — accept-with-note в Session log. Если кейс повторится — escalate до feedback memory.
 - **Autonomous fix-loop** (по правилу `[[autonomous-review-cycles]]`) отработал штатно: 3 параллельных fix-round'а + 3 параллельных round-2 review = APPROVE без user-pinging.
 
-**Следующая сессия #10:** Wave 3 (Services tier 1): `a4t.4`, `a4t.5`, `a4t.6`, `a4t.2`, ~~`akv.8`~~ (готово), `tic.2`. Большинство haiku, NotifierRegistry — sonnet (cross-cutting + extension point).
+**Следующая сессия #10:** Wave 3 (Services tier 1): `a4t.4`, `a4t.5`, `a4t.6`, `a4t.2`, `akv.8`, `tic.2`. Большинство haiku, NotifierRegistry — sonnet (cross-cutting + extension point).
 
 ---
 
-### Session #10 (2026-05-13) — akv.8 отдельно
+### Session #10 (2026-05-13) — Wave 3 запуск (6 параллельно)
 
-**Цель:** `akv.8` — SqliteCyclesRepository.
+**Цель:** Wave 3 Services tier 1 целиком в одной сессии — 6 параллельных writer'ов (`a4t.4`, `a4t.5`, `a4t.6`, `a4t.2`, `akv.8`, `tic.2`), нулевое пересечение файлов.
 
-**Сделано:**
-- [x] `akv.8` — `SqliteCyclesRepository` реализован в `src/fis_monitor/infra/sqlite/repositories/cycles.py`. `open` / `close` / `list_recent` по контракту Protocol. `prune_older_than` с chunked DELETE (R3-M7, каждый batch — отдельная BEGIN IMMEDIATE tx). 16 тестов в `tests/infra/sqlite/test_cycles_repository.py` (включая `test_prune_older_than_chunked` с 2500 строками и `test_prune_chunked_releases_lock`). Миграция не нужна — таблица `cycles` уже есть в `docs/db/schema.sql`.
-- **vault:** no-op — реализация следует уже задокументированным паттернам (ADR-016 BEGIN IMMEDIATE, R3-M7 chunked DELETE); новых архитектурных решений нет.
+**Pre-flight оркестратора:**
+- Добавлены в `domain/errors.py`: `RegistrationError`, `InvalidTransitionError`, `SmtpStarttlsError` — нужны нескольким writer'ам, конфликт по файлу при параллельной работе.
+- `bd update --acceptance` для `a4t.6` (drop HMAC per ADR-018 R3-M10, MVP-trust-model) и `akv.8` (sync с Protocol-контрактом `open/close/list_recent` + chunked `prune_older_than`).
+
+**Сделано (все 6 APPROVE):**
+- `a4t.4` — `ExplicitNotifierRegistry` (`infra/notifiers/registry.py`), 7 tests. APPROVE round-1 (3 minors). Ключ: ClassVar'ы CPython не проверяет `isinstance` на runtime — задокументировано в glossary.
+- `a4t.5` — `OnboardingService` (`services/onboarding.py`), 19 tests. APPROVE round-1 (2 minors). Server-side FSM с concurrent-safe re-read в `advance()`. State-key константы module-level.
+- `a4t.6` — `SettingsService` + `SmtpTestService` (`services/settings.py`, `services/smtp_test.py`), 16 tests. APPROVE round-1 (1 minor — ISO Z-suffix косметика). DNS-вне-tx инвариант покрыт threading-тестом. SmtpTestService делегирует STARTTLS Notifier'у.
+- `a4t.2` — `EnrichmentService` (`services/enrichment.py`), 10 tests. APPROVE round-1 (4 minors). Cycle-scoped pool, per-lot isolation, output order = input. `ParserVersionMismatch` пробрасывается наверх.
+- `akv.8` — `SqliteCyclesRepository` (`infra/sqlite/repositories/cycles.py`), 17 tests. **Round-1 NEEDS-WORK (2 blockers + 2 majors)** → fix-round → APPROVE round-2. Фиксы: B1 schema CHECK status IN ('open','ok','error','aborted') + комментарий обновлён; B2 rowcount-check вынесен после commit (избегает double-rollback в `close()`); M1 docstring явно говорит prune вне Protocol; M2 комментарий про NOT NULL finished_at гарантию из `WHERE status != 'open'`. Writer (sub-agent) самовольно сделал commit + bd close + правки wave-plan ПОСЛЕ raw writer-фазы — оркестратор переписал session-log + продавил fix-round поверх commit'а.
+- `tic.2` — `ThreadEventSubscription` extract + новый `ThreadConfigSubscription` (`infra/sse/subscriptions.py`), 15 tests. APPROVE round-1 (2 minors + 2 nits). Low coupling: `subscriptions.py` НЕ импортирует `bus.py`. Writer тоже самовольно сделал commit (но не trough bd close — оркестратор закрыл сам). Force-unsubscribe slow consumer test уже существует в `test_bus.py` (acceptance #4 satisfied).
+
+**Итог wave:** **6/6 closed** ✅. Suite: **589 passed, 3 skipped** (+84 от Wave 2 baseline 505). Один fix-round для 1/6 тасок (akv.8 — security/data-integrity), нулевая эскалация к hard cap. Разблокированы: `a4t.3` (Dispatcher — ждал a4t.4 + akv.6), `a4t.1` (MonitorCycleService — ждал a4t.2 + akv.5 + akv.8 + bye.1 + bye.2), `tic.3` (SSE fan-out — ждал tic.2). Wave 4 теперь полностью на critical path: `a4t.3` + `a4t.1` + `tic.3`.
+
+**Vault обновления (orchestrator):**
+- `domain/errors.py` — +3 класса (RegistrationError, InvalidTransitionError, SmtpStarttlsError) с PII-safe docstrings.
+- `docs/db/schema.sql` — `cycles` table: добавлен CHECK constraint на `status` (B1 fix).
+- `docs/glossary.md` — **+8 записей** (ExplicitNotifierRegistry, OnboardingService, SettingsService, SmtpTestService, EnrichmentService, SqliteCyclesRepository, ThreadEventSubscription, ThreadConfigSubscription) под новой секцией «Сервисы (Wave 3)».
+- Нет новых ADR — все таски следуют ранее зафиксированным решениям (ADR-002, 015, 016, 018, 021).
+
+**Подтверждения / lessons workflow:**
+- **6 параллельных writer'ов в одной сессии — работает** (Wave 2 было 5, Wave 3 = 6). При нулевом пересечении файлов масштабируется. 6 параллельных reviewer'ов тоже без проблем.
+- **Sub-agent инициатива на commit/bd close — наблюдается у sonnet** (akv.8 + tic.2 сами закоммитили после writer-фазы, akv.8 ещё и сам сделал bd close + правку wave-plan). Контент валидный, но workflow требует reviewer ДО commit'а. Оркестратор продавил fix-round для akv.8 поверх premature commit'а. Если повторится → escalate до feedback memory.
+- **Pre-flight error-class extension** (3 errors в `domain/errors.py` до старта writer'ов) — обязательный паттерн при параллельной работе, иначе collision на одном файле.
+- **bd update --acceptance ДО claim** для двух тасок — сэкономило fix-round'ы (a4t.6 без HMAC, akv.8 с правильным Protocol-контрактом).
 
 ---
 

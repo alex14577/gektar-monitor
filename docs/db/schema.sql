@@ -217,7 +217,8 @@ CREATE TABLE IF NOT EXISTS cycles (
     region          INTEGER NOT NULL,
     started_at      TIMESTAMP NOT NULL,
     finished_at     TIMESTAMP,
-    status          TEXT    NOT NULL,                -- 'ok'|'error'|'aborted'
+    status          TEXT    NOT NULL                  -- 'open' (in-flight) | 'ok'|'error'|'aborted'
+                       CHECK (status IN ('open', 'ok', 'error', 'aborted')),
     lots_fetched    INTEGER NOT NULL DEFAULT 0,
     new_lots        INTEGER NOT NULL DEFAULT 0,
     error           TEXT,

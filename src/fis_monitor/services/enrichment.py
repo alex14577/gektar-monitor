@@ -1,0 +1,150 @@
+"""EnrichmentService — parallel detail-page enrichment via ThreadPoolExecutor.
+
+Enriches a list of lots (produced by the list-stage) by fetching each
+lot's detail page and merging the parsed result into the lot.
+
+Design invariants:
+- Cycle-scoped ThreadPoolExecutor: created inside ``enrich_lots`` and
+  closed via context-manager — no persistent pool state.
+- Per-lot exception isolation: any Exception (except ParserVersionMismatch)
+  is caught, logged at WARNING, and the original lot is returned with
+  ``enrichment_status='failed'``.
+- ParserVersionMismatch propagates unmodified — caller (MonitorCycleService)
+  decides whether to reparse or drop.
+- max_workers is a mandatory keyword passed by the caller from ConfigSource —
+  EnrichmentService does not know a default (rate-limits on torgi.gov.ru make
+  the right value domain-specific / operator-configurable).
+- Order of returned lots matches input order.
+
+See docs/architecture/03-protocols.md §3.2 for HttpClient / DetailParser
+contracts.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import UTC, datetime
+
+from fis_monitor.domain.errors import ParserVersionMismatch
+from fis_monitor.domain.interfaces import DetailParser, HttpClient
+from fis_monitor.domain.models import Lot, ParsedDetail
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_URL_TEMPLATE = "https://torgi.gov.ru/new/public/lots/lot/{lot_id}"
+
+
+class EnrichmentService:
+    """Fetch and merge detail-page data into lots in parallel.
+
+    Dependencies injected via constructor (DIP):
+    - ``http``: ``HttpClient`` — synchronous HTTP GET seam.
+    - ``parser``: ``DetailParser`` — parses detail-card HTML into ``ParsedDetail``.
+    - ``url_template``: format string with ``{lot_id}`` placeholder.
+    """
+
+    def __init__(
+        self,
+        http: HttpClient,
+        parser: DetailParser,
+        *,
+        url_template: str = _DEFAULT_URL_TEMPLATE,
+    ) -> None:
+        self._http = http
+        self._parser = parser
+        self._url_template = url_template
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def enrich_lots(
+        self,
+        lots: Sequence[Lot],
+        *,
+        max_workers: int,
+    ) -> list[Lot]:
+        """Fetch detail pages in parallel and return enriched lots.
+
+        Args:
+            lots: Lots from the list-stage. May be empty.
+            max_workers: Thread-pool size - MANDATORY kwarg. Caller reads
+                this from ``ConfigSource`` (4-8 for torgi.gov.ru rate limits).
+
+        Returns:
+            List of ``Lot`` instances in the **same order as input**.
+            Successfully enriched lots have ``enrichment_status='done'`` and
+            merged coordinates / detail fields.
+            Failed lots (per-lot errors) are returned in their original shape
+            with ``enrichment_status='failed'``.
+
+        Raises:
+            ParserVersionMismatch: propagated from ``DetailParser.parse()`` —
+                caller decides how to handle lazy reparse.
+        """
+        if not lots:
+            return []
+
+        # Submit one future per lot, preserving input order via index map.
+        # ParserVersionMismatch must NOT be swallowed — it propagates through
+        # submit/result boundaries as a Future exception and is re-raised
+        # when we call future.result().
+        futures: list[Future[Lot]] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for lot in lots:
+                futures.append(pool.submit(self._enrich_one, lot))
+            # Results are collected OUTSIDE the submit loop but INSIDE the
+            # with-block so the pool is still alive during result collection
+            # (futures may raise ParserVersionMismatch which must propagate).
+            results: list[Lot] = []
+            for future in futures:
+                results.append(future.result())
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _enrich_one(self, lot: Lot) -> Lot:
+        """Fetch and parse detail page for a single lot.
+
+        Called from worker threads.  All exceptions except
+        ``ParserVersionMismatch`` are caught — they propagate to the
+        ``Future`` and are re-raised in ``enrich_lots`` only for
+        ``ParserVersionMismatch`` (which intentionally escapes the
+        per-lot guard).
+        """
+        url = self._url_template.format(lot_id=lot.id)
+        try:
+            response = self._http.get(url)
+            detail: ParsedDetail = self._parser.parse(response.text)
+        except ParserVersionMismatch:
+            # Intentionally NOT caught — propagates to caller.
+            raise
+        except Exception as exc:
+            logger.warning(
+                "enrichment failed for lot_id=%s: %s: %s",
+                lot.id,
+                type(exc).__name__,
+                exc,
+            )
+            return lot.model_copy(update={"enrichment_status": "failed"})
+
+        # Merge ParsedDetail fields into Lot (frozen → model_copy).
+        return lot.model_copy(
+            update={
+                "lat": detail.lat,
+                "lon": detail.lon,
+                "has_boundaries": detail.has_boundaries,
+                "date_update": (
+                    detail.date_update if detail.date_update is not None else lot.date_update
+                ),
+                "raw_json": detail.raw_json,
+                "parser_version": detail.parser_version,
+                "detail_fetched_at": datetime.now(tz=UTC),
+                "enrichment_status": "done",
+            }
+        )

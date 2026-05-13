@@ -197,6 +197,28 @@ class TestClose:
         with pytest.raises(RuntimeError, match="cycle not found"):
             repo.close(9999, result)
 
+    def test_close_unknown_id_leaves_connection_usable(
+        self, tmp_db: ConnectionProvider
+    ) -> None:
+        """After close() raises for an unknown id, the connection is in a clean
+        state (no active transaction) and subsequent open() calls succeed normally.
+
+        Regression guard for the double-rollback bug: if close() called
+        rollback() *inside* the try-block and the outer except also called
+        rollback(), a second ROLLBACK on an already-committed/rolled-back
+        connection raised sqlite3.ProgrammingError.  The fix moves the
+        RuntimeError raise *outside* the try/except so only one rollback fires.
+        """
+        repo = _make_repo(tmp_db)
+        result = _make_result(9999)
+
+        with pytest.raises(RuntimeError, match="cycle not found"):
+            repo.close(9999, result)
+
+        # Connection must be clean — next open() must work without error
+        new_id = repo.open(_REGION, _STARTED)
+        assert new_id > 0
+
 
 class TestListRecent:
     def test_list_recent_orders_by_started_at_desc(

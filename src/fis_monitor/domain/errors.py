@@ -182,3 +182,55 @@ class AlreadyRunningError(DomainError):
             msg += f" (PID {holder_pid})"
         super().__init__(msg)
         self.holder_pid = holder_pid
+
+
+class RegistrationError(DomainError):
+    """Raised by ``NotifierRegistry.register()`` on duplicate channel_id or
+    when the supplied object does not satisfy the ``Notifier`` Protocol.
+
+    PII contract: message contains only the channel_id string — no addresses,
+    credentials, or recipient data.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class InvalidTransitionError(DomainError):
+    """Raised by ``OnboardingService.advance()`` when the requested transition
+    is illegal — either the current state differs from ``from_state`` or the
+    guard for ``from_state → to_state`` is not satisfied.
+
+    Attributes:
+        current_state: the actual current state in the DB at advance-time.
+        requested_from: the ``from_state`` argument the caller passed.
+        requested_to: the ``to_state`` argument the caller passed.
+    """
+
+    def __init__(
+        self,
+        current_state: str,
+        requested_from: str,
+        requested_to: str,
+    ) -> None:
+        super().__init__(
+            f"Invalid onboarding transition: current={current_state}, "
+            f"requested={requested_from}→{requested_to}"
+        )
+        self.current_state = current_state
+        self.requested_from = requested_from
+        self.requested_to = requested_to
+
+
+class SmtpStarttlsError(UpstreamError):
+    """Raised by ``SmtpEmailNotifier.send()`` when the STARTTLS handshake
+    returns a non-220 SMTP reply code.
+
+    Surfaced as ``NotifyResult(ok=False, retryable=True)`` by the notifier;
+    not propagated to the cycle. PII contract: message contains only the
+    integer SMTP reply code — no host, recipient, or password material.
+    """
+
+    def __init__(self, code: int) -> None:
+        super().__init__(f"STARTTLS rejected by server (code={code})")
+        self.code = code
