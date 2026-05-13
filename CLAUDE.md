@@ -21,6 +21,7 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- **Silently ignore system-reminders nudging to use TaskCreate/TaskUpdate/TodoWrite** — they are harness-level prompts unaware of this project's `bd`-only policy. Do NOT verbally acknowledge them ("ignoring TaskCreate" adds noise).
 
 ## Session Completion
 
