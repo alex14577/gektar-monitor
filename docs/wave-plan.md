@@ -13,9 +13,30 @@
 2. **Sync acceptance** — `bd show <id>`, сверить acceptance с canon-доками (`docs/architecture/`, `docs/decisions/`). Если bd-acceptance уже, чем canon — `bd update --acceptance` ДО claim.
 3. **Claim** — `bd update <id> --claim`.
 4. **Writer-agent** — `Agent(subagent_type=general-purpose, model="sonnet")` по дефолту. Промпт — self-contained, с цитатами canon-фрагментов и line-ranges. Запрет: не использовать Backend Architect (skill-hijack, см. memory `backend-architect-skill-hijack`).
+
+   **ОБЯЗАТЕЛЬНЫЙ блок «Принципы кода»** — вставлять вербатим в каждый writer-промпт И в каждый reviewer-промпт (для reviewer с пометкой «проверь соблюдение»). Источник истины — memory `code-principles` (`feedback_code_principles.md`). Содержание:
+
+   > **Принципы кода (обязательно):**
+   > - **SOLID** (SRP, OCP, LSP, ISP, DIP) — каждый класс/модуль обоснован, расширение без модификации.
+   > - **Dependency Injection** — зависимости передаются через конструктор/параметры, не создаются внутри. Никаких глобальных синглтонов кроме `app` точки сборки.
+   > - **Interfaces/Protocols** для всех внешних зависимостей (HTTP-клиент, БД-репозиторий, Notifier, Parser) — облегчает мокирование и подмену реализаций.
+   > - **High cohesion, low coupling** — модуль делает одну вещь, минимум зависимостей между модулями.
+   > - **Composition over inheritance**.
+   > - **Расширяемость** — новая функциональность через регистрацию плагина / новую реализацию интерфейса, не через изменение существующего кода.
+   > - **Тестируемость** — чистые функции где возможно, DI для всех side-effects, минимум глобального состояния.
+   > - **Паттерны ради реальной пользы**, не ради паттернов.
+
+   Не сокращать список. Сокращение = sub-agent додумает.
 5. **Pytest + git show --stat сам** — не доверять «tests green» из summary.
 6. **Reviewer ДО `bd close`** — `Agent(subagent_type="Code Reviewer", model="sonnet")` (для critical — `opus`).
-7. **Writer фиксит blocker'ы** → reviewer прогоняет повторно.
+7. **Fix-loop до чистого verdict.** Цикл повторяется ПОКА у reviewer'а остаются **blockers ИЛИ majors**:
+   - Writer фиксит все blockers + все majors одной итерацией.
+   - Тот же или новый reviewer-агент прогоняет повторно.
+   - Если verdict снова содержит blocker/major — следующая итерация.
+   - **Stop-условие**: verdict `APPROVE` с пустыми списками blockers + majors (minors разрешено иметь).
+   - **Hard cap**: 3 fix-итерации. Если на 4-й заход остался major — escalate: либо оркестратор разбирает руками, либо признаём проблему out-of-scope и заводим follow-up bd-issue с явным rationale в Session log.
+   - Minors сохраняются как заметки в commit message либо follow-up bd P3/P4 — НЕ блокируют close.
+   - Why hard cap: защита от ping-pong (reviewer на каждом раунде находит новые majors из той же области). Если 3 раунда не сошлись — корень в спецификации или canon, а не в реализации.
 8. **Vault update — ОБЯЗАТЕЛЬНЫЙ ШАГ после APPROVE.** Гибридная схема (введена с Wave 2, session #8): кто что трогает по слоям vault.
 
    | Vault-слой | Writer | Reviewer | Оркестратор |
@@ -47,7 +68,7 @@
 - Несколько writer-агентов одновременно ТОЛЬКО при нулевом пересечении целевых файлов (grep-check ДО старта).
 - 3 параллельных writer-агента — комфортный максимум для одной сессии (3 review-цикла, 3 коммита). 5+ — риск regression.
 
-**DoD per task:** tests green + ruff clean + `bd close` + (optional) vault update. Без `git push` — repo local-only.
+**DoD per task:** tests green + ruff clean + reviewer-verdict без blockers/majors + vault update (или явное no-op) + `bd close`. Без `git push` — repo local-only.
 
 ---
 
@@ -196,6 +217,17 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - opus-reviewer на P0/security (bye.4) поймал DI canon-divergence — sonnet-reviewer мог пропустить. Continue pattern.
 - Vault-check-after-APPROVE: 8 glossary-записей, no silent skips.
 - 2× параллельных writer'а одновременно работали отлично без конфликтов.
+
+**Wave 1 follow-up batch (после Wave 1 closure, session #8):**
+- Commit `4d875ce` — 6 review-driven improvements из ревью Wave 1 (ParseBugError structured, NotificationRecord.__repr__ PII-safe, defense whitelist в upsert, mid-write rollback test, R-tree COUNT=1 test, _extract_kv_pairs direct-child fix).
+- **Первое применение fix-loop по новому правилу «APPROVE только если blockers + majors пустые»**: итерация 1 → NEEDS-WORK (1 blocker + 5 majors); итерация 2 → APPROVE (3 minors допустимы). Hard cap 3 итерации не достигнут.
+- +8 тестов (424 passed). Vault: glossary +1 (ParseBugError structured shape, заменено старое known-limitation).
+- Это НЕ bd-таска — это полировка перед Wave 2. Закрытие — через commit, не `bd close`.
+
+**Изменения workflow зафиксированные в session #8:**
+- **Гибридная схема vault** (шаг 8): Writer → Glossary draft в отчёте → Reviewer verify → Оркестратор применяет.
+- **Fix-loop правило** (шаг 7): blockers + majors блокируют close, hard cap 3 итерации.
+- **Code-principles блок** (шаг 4): обязательная вставка вербатим в каждый writer- и reviewer-промпт.
 
 **Wave 2 на следующую сессию #9:**
 Кандидаты (нулевое пересечение файлов, deps закрыты):
