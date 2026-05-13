@@ -37,7 +37,11 @@ class ConnectionProvider:
         provider = ConnectionProvider(db_path=Path("state.db"))
         conn = provider.get_connection()   # per-thread, idempotent
         ...
-        provider.close_all()               # shutdown — closes all live conns
+        provider.close_all()               # shutdown — terminal; provider not reusable
+
+    After close_all() the provider is permanently closed.  Any subsequent
+    call to get_connection() raises RuntimeError.  This matches the
+    shutdown semantics described in ADR-007.
     """
 
     def __init__(self, db_path: Path) -> None:
@@ -50,13 +54,21 @@ class ConnectionProvider:
         # and close_all(), preventing leaks.
         self._registry: dict[int, sqlite3.Connection] = {}
         self._lock = threading.Lock()
+        self._closed: bool = False
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def get_connection(self) -> sqlite3.Connection:
-        """Return the per-thread sqlite3.Connection, creating it if needed."""
+        """Return the per-thread sqlite3.Connection, creating it if needed.
+
+        Raises RuntimeError if close_all() has already been called.
+        """
+        if self._closed:
+            raise RuntimeError(
+                "ConnectionProvider is closed; cannot get connection after close_all()"
+            )
         conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
         if conn is None:
             conn = self._open()
@@ -64,26 +76,23 @@ class ConnectionProvider:
         return conn
 
     def close_all(self) -> None:
-        """Close every tracked live connection.
+        """Close every tracked live connection.  Terminal operation.
 
         Safe to call from a shutdown thread (not necessarily the owning
         thread). Takes a snapshot of current connections before iterating to
-        avoid mutation during close (R3-minor pattern from docs/architecture/03-protocols.md).
+        avoid mutation during close (R3-minor pattern from
+        docs/architecture/03-protocols.md).
 
-        Also clears the thread-local slot for the calling thread so that a
-        subsequent get_connection() creates a fresh connection rather than
-        returning the now-closed one.
+        After this call the provider is permanently closed.  Subsequent
+        calls to get_connection() will raise RuntimeError in all threads.
         """
         with self._lock:
+            self._closed = True
             snapshot = list(self._registry.values())
             self._registry.clear()
         for conn in snapshot:
             with contextlib.suppress(sqlite3.Error):  # already-closed is OK
                 conn.close()
-        # Clear the local slot for the current thread (other threads' locals
-        # will be re-created on next get_connection() call since the old conn
-        # is closed and not in the registry anymore).
-        self._local.conn = None
 
     def _clear_thread_local(self) -> None:
         """Remove the connection slot for the current thread.
@@ -107,7 +116,12 @@ class ConnectionProvider:
             self._db_path,
             check_same_thread=False,  # safety guaranteed per-thread by us
         )
-        self._configure(conn)
+        try:
+            self._configure(conn)
+        except Exception:
+            with contextlib.suppress(sqlite3.Error):
+                conn.close()
+            raise
         with self._lock:
             self._registry[id(conn)] = conn
         return conn
@@ -126,6 +140,7 @@ class ConnectionProvider:
           wal_autocheckpoint = 1000 — per-connection duplicate of persistent
                                value; ensures consistent behaviour after
                                restore from backup (schema.sql may not run).
+                               Defence-in-depth per ADR-007 update (R4-minor).
 
         journal_mode=WAL is persistent (set in schema.sql) but also safe to
         set per-connection — it is a no-op on an already-WAL database.

@@ -9,6 +9,7 @@ import gc
 import sqlite3
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -76,14 +77,26 @@ def test_pragma_settings(tmp_path: Path) -> None:
     # We set it per-connection too (safe to call each time).
     assert _pragma(conn, "auto_vacuum") == 2
 
+    # temp_store: 2 = MEMORY
+    assert _pragma(conn, "temp_store") == 2
+
+    # cache_size: -20000 (~20 MiB page cache)
+    assert _pragma(conn, "cache_size") == -20000
+
+    # mmap_size: 256 MiB = 268435456
+    assert _pragma(conn, "mmap_size") == 268435456
+
+    # wal_autocheckpoint: 1000 (defence-in-depth duplicate, ADR-007 R4-minor)
+    assert _pragma(conn, "wal_autocheckpoint") == 1000
+
 
 # ---------------------------------------------------------------------------
-# Test 3: close_all() closes all live connections; new get_connection() works
+# Test 3: close_all() closes provider permanently; subsequent get raises
 # ---------------------------------------------------------------------------
 
-def test_close_all_then_reconnect(tmp_path: Path) -> None:
-    """close_all() closes every tracked connection; subsequent get_connection()
-    creates a fresh one."""
+def test_close_all_then_get_raises_runtime_error(tmp_path: Path) -> None:
+    """close_all() is a terminal operation; get_connection() must raise
+    RuntimeError afterwards in the same thread."""
     provider = ConnectionProvider(db_path=tmp_path / "state.db")
 
     conn = provider.get_connection()
@@ -96,10 +109,32 @@ def test_close_all_then_reconnect(tmp_path: Path) -> None:
     with pytest.raises(sqlite3.ProgrammingError):
         conn.execute("SELECT 1").fetchone()
 
-    # A new get_connection() must return a working connection
-    new_conn = provider.get_connection()
-    result = new_conn.execute("SELECT 1").fetchone()
-    assert result == (1,)
+    # get_connection() in any thread must now raise RuntimeError
+    with pytest.raises(RuntimeError, match="closed"):
+        provider.get_connection()
+
+
+# ---------------------------------------------------------------------------
+# Test 3b: cross-thread close_all() invalidates provider for all threads
+# ---------------------------------------------------------------------------
+
+def test_close_all_from_other_thread_invalidates_provider(tmp_path: Path) -> None:
+    """close_all from a different thread must close registered connections
+    and make subsequent get_connection() in any thread raise."""
+    provider = ConnectionProvider(tmp_path / "test.db")
+
+    # Thread A creates a connection
+    conn_a = provider.get_connection()
+    conn_a.execute("CREATE TABLE t (id INTEGER)")
+
+    # Thread B (shutdown thread) closes everything
+    shutdown_thread = threading.Thread(target=provider.close_all)
+    shutdown_thread.start()
+    shutdown_thread.join(timeout=2.0)
+
+    # Thread A's stale conn must not be usable; new get_connection must raise.
+    with pytest.raises(RuntimeError, match="closed"):
+        provider.get_connection()
 
 
 # ---------------------------------------------------------------------------
@@ -141,3 +176,36 @@ def test_same_thread_same_connection(tmp_path: Path) -> None:
     conn1 = provider.get_connection()
     conn2 = provider.get_connection()
     assert conn1 is conn2
+
+
+# ---------------------------------------------------------------------------
+# Test 6: registry-leak guard -- _configure failure must not leak connection
+# ---------------------------------------------------------------------------
+
+def test_configure_failure_does_not_leak_connection(tmp_path: Path) -> None:
+    """If _configure raises, the raw connection must be closed immediately
+    and NOT registered in _registry."""
+    provider = ConnectionProvider(db_path=tmp_path / "state.db")
+
+    closed_conns: list[sqlite3.Connection] = []
+
+    def failing_configure(conn: sqlite3.Connection) -> None:
+        # Track the connection object so we can assert it was closed
+        closed_conns.append(conn)
+        raise RuntimeError("simulated configure failure")
+
+    with patch.object(provider, "_configure", failing_configure), pytest.raises(
+        RuntimeError, match="simulated configure failure"
+    ):
+        provider.get_connection()
+
+    # Registry must be empty — no leaked entry
+    with provider._lock:
+        assert len(provider._registry) == 0, (
+            "Registry must not contain a connection that failed to configure"
+        )
+
+    # The raw connection must have been closed (operating on it raises)
+    assert len(closed_conns) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        closed_conns[0].execute("SELECT 1")
