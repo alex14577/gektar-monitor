@@ -20,7 +20,8 @@ files:
 - Реализована `DefaultSmtpHostPolicy` с injectable resolver (тестируется без реального DNS).
 - Pre-resolve отсев: пустая строка, `"localhost"`, `"0"`, integer-форматы IP,
   internal TLDs (`.local`, `.internal`, `.lan`, `.corp`, `.home`, `.localdomain`,
-  `.test`, `.example`, `.invalid`, `.localhost`) — case-insensitive, tolerant к trailing dot.
+  `.test`, `.example`, `.invalid`, `.localhost`, `.arpa` — RFC 8375 `home.arpa` и
+  reverse-DNS зоны) — case-insensitive, tolerant к trailing dot.
 - IP-литерал short-circuit: блокируется до `getaddrinfo` (нет сетевого обращения).
 - Fail-closed по всем адресам из `getaddrinfo` (DNS-rebinding multi-record).
 - IPv4-mapped IPv6 (`::ffff:a.b.c.d`) unwrap перед blocklist.
@@ -29,7 +30,15 @@ files:
   `is_multicast`, `is_reserved`, `is_unspecified` + `255.255.255.255`.
 - `gaierror` оборачивается в `SmtpHostPolicyError(UpstreamError)` без утечки сообщений
   от resolver'а (см. [[decisions-log#ADR-022]]).
-- 39 тестов + 1 skipped (real-DNS smoke).
+- DNS timeout (5s) реализован через `concurrent.futures.ThreadPoolExecutor.submit().result(timeout=...)` —
+  thread-safe вместо process-global `socket.setdefaulttimeout`. C-level `getaddrinfo` после
+  таймаута может продолжаться в worker thread (документировано); политика возвращает контроль
+  в пределах timeout.
+- Guard malformed-tuple от injectable resolver: длина record != 5, не-tuple, не-subscriptable
+  `sockaddr`, non-str `sockaddr[0]` → `SmtpHostPolicyError("malformed")`.
+- `SmtpHostPolicy` Protocol помечен `@runtime_checkable` → `isinstance` работает в тестах и DI.
+- `assert first_ok is not None` заменён explicit `raise` для безопасности под Python `-O`.
+- 49 тестов + 1 skipped (real-DNS smoke).
 
 ## Почему так
 

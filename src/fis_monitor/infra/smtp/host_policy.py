@@ -14,10 +14,11 @@ Security properties guaranteed:
 
 from __future__ import annotations
 
+import concurrent.futures
 import ipaddress
 import socket
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from fis_monitor.domain.errors import SmtpHostPolicyError
 from fis_monitor.domain.models import ResolvedSmtpEndpoint
@@ -38,6 +39,9 @@ _BLOCKED_TLDS: frozenset[str] = frozenset(
         "example",
         "invalid",
         "localhost",
+        # `*.arpa` zones are reverse-DNS / infrastructure (incl. RFC 8375
+        # `home.arpa`). No legitimate SMTP host should ever live under .arpa.
+        "arpa",
     }
 )
 
@@ -45,8 +49,10 @@ _CLOUD_META_V4 = ipaddress.IPv4Address("169.254.169.254")
 _CLOUD_META_V6 = ipaddress.IPv6Address("fd00:ec2::254")
 _BROADCAST_V4 = ipaddress.IPv4Address("255.255.255.255")
 
-# Resolver type: matches socket.getaddrinfo return shape.
-_Resolver = Callable[[str, int], list[tuple]]
+# Resolver type: matches socket.getaddrinfo return shape — a 5-tuple per
+# RFC 3493 §6.1 (family, socktype, proto, canonname, sockaddr).
+_GetAddrInfoTuple = tuple[Any, Any, Any, Any, Any]
+_Resolver = Callable[[str, int], list[_GetAddrInfoTuple]]
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +60,7 @@ _Resolver = Callable[[str, int], list[tuple]]
 # ---------------------------------------------------------------------------
 
 
+@runtime_checkable
 class SmtpHostPolicy(Protocol):
     """Structural interface for SMTP host policy implementations."""
 
@@ -130,10 +137,26 @@ class DefaultSmtpHostPolicy:
             )
 
         first_ok: ResolvedSmtpEndpoint | None = None
-        for af, _socktype, _proto, _canonname, sockaddr in results:
-            raw_ip = sockaddr[0]
+        for record in results:
+            # Guard against malformed resolver output. Real getaddrinfo always
+            # returns 5-tuples, but an injected resolver could lie — we cannot
+            # let an IndexError or TypeError escape unwrapped.
+            if not isinstance(record, tuple) or len(record) != 5:
+                raise SmtpHostPolicyError(
+                    f"smtp host {host!r} DNS returned malformed record"
+                )
+            af, _socktype, _proto, _canonname, sockaddr = record
+            if (
+                not isinstance(sockaddr, (tuple, list))
+                or not sockaddr
+                or not isinstance(sockaddr[0], str)
+            ):
+                raise SmtpHostPolicyError(
+                    f"smtp host {host!r} DNS returned malformed sockaddr"
+                )
+
             try:
-                addr_obj = ipaddress.ip_address(raw_ip)
+                addr_obj = ipaddress.ip_address(sockaddr[0])
             except ValueError as exc:
                 raise SmtpHostPolicyError(
                     f"smtp host {host!r} DNS returned unparseable address"
@@ -151,14 +174,19 @@ class DefaultSmtpHostPolicy:
                     original_host=host,
                 )
 
-        assert first_ok is not None  # guarded by empty-check above
+        if first_ok is None:
+            # Defensive — unreachable given the empty-results check above, but
+            # `assert` is stripped under -O, and silently returning is unsafe.
+            raise SmtpHostPolicyError(
+                f"smtp host {host!r} produced no valid endpoint"
+            )
         return first_ok
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _resolve(self, host: str, port: int) -> list[tuple]:
+    def _resolve(self, host: str, port: int) -> list[_GetAddrInfoTuple]:
         if self._resolver is not None:
             try:
                 return self._resolver(host, port)
@@ -167,19 +195,31 @@ class DefaultSmtpHostPolicy:
                     f"smtp host {host!r}: dns resolution failed"
                 ) from exc
 
-        # Real socket path — apply timeout via setdefaulttimeout (fallback).
-        old_timeout = socket.getdefaulttimeout()
-        try:
-            socket.setdefaulttimeout(self._timeout)
-            return socket.getaddrinfo(
-                host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+        # Real socket path. `socket.getaddrinfo` has no per-call timeout
+        # parameter; `socket.setdefaulttimeout` is process-global and not
+        # thread-safe. Use a single-shot executor to bound wall-clock — the
+        # underlying C-level call may keep running but the policy method
+        # returns control to the caller within `self._timeout` seconds.
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="smtp-dns"
+        ) as pool:
+            future = pool.submit(
+                socket.getaddrinfo,
+                host,
+                port,
+                socket.AF_UNSPEC,
+                socket.SOCK_STREAM,
             )
-        except socket.gaierror as exc:
-            raise SmtpHostPolicyError(
-                f"smtp host {host!r}: dns resolution failed"
-            ) from exc
-        finally:
-            socket.setdefaulttimeout(old_timeout)
+            try:
+                return future.result(timeout=self._timeout)
+            except concurrent.futures.TimeoutError as exc:
+                raise SmtpHostPolicyError(
+                    f"smtp host {host!r}: dns resolution timed out"
+                ) from exc
+            except socket.gaierror as exc:
+                raise SmtpHostPolicyError(
+                    f"smtp host {host!r}: dns resolution failed"
+                ) from exc
 
 
 # ---------------------------------------------------------------------------

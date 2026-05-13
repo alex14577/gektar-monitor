@@ -258,6 +258,10 @@ _BLOCKED_TLD_HOSTS = [
     "smtp.LOCAL",
     "mail.INTERNAL",
     "host.LAN",
+    # RFC 8375 home.arpa + general *.arpa infrastructure zone
+    "mail.home.arpa",
+    "host.arpa",
+    "x.arpa.",
 ]
 
 
@@ -313,6 +317,59 @@ def test_dns_failure_wrapped_as_smtp_host_policy_error() -> None:
     msg = str(exc_info.value)
     assert "gaierror" not in msg.lower()
     assert "smtp.example.com" in msg
+
+
+# ---------------------------------------------------------------------------
+# 21b. DNS-rebinding bad-first — bad address as FIRST record must fail-closed
+# ---------------------------------------------------------------------------
+
+
+def test_dns_rebinding_bad_first_fails_closed() -> None:
+    def _resolver(host: str, port: int):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.1", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("1.2.3.4", port)),
+        ]
+
+    policy = DefaultSmtpHostPolicy(resolver=_resolver)
+    with pytest.raises(SmtpHostPolicyError, match="private"):
+        policy.resolve_and_check("smtp.example.com", 587)
+
+
+# ---------------------------------------------------------------------------
+# 21c. Malformed resolver output — must not leak IndexError / TypeError
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_record",
+    [
+        ("only", "three", "items"),                           # wrong length
+        (socket.AF_INET, 0, 0, "", ()),                       # empty sockaddr
+        (socket.AF_INET, 0, 0, "", (123, 587)),               # non-str ip
+        "not-a-tuple",                                        # wrong type
+        (socket.AF_INET, 0, 0, "", object()),                 # non-subscriptable sockaddr
+    ],
+)
+def test_malformed_resolver_record_wrapped(bad_record) -> None:
+    def _resolver(host: str, port: int):
+        return [bad_record]
+
+    policy = DefaultSmtpHostPolicy(resolver=_resolver)
+    with pytest.raises(SmtpHostPolicyError, match="malformed"):
+        policy.resolve_and_check("smtp.example.com", 587)
+
+
+# ---------------------------------------------------------------------------
+# 21d. SmtpHostPolicy Protocol is runtime_checkable
+# ---------------------------------------------------------------------------
+
+
+def test_protocol_is_runtime_checkable() -> None:
+    from fis_monitor.infra.smtp.host_policy import SmtpHostPolicy
+
+    policy = DefaultSmtpHostPolicy(resolver=MagicMock())
+    assert isinstance(policy, SmtpHostPolicy)
 
 
 # ---------------------------------------------------------------------------
