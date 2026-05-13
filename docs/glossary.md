@@ -93,6 +93,8 @@
 
 - **NotifierConfig** — базовый Pydantic `BaseModel` для конфиг-схем плагин-каналов уведомлений. Конкретные классы: `EmailNotifierConfig`, `BrowserNotifierConfig`, `HeartbeatNotifierConfig`. Используется composition root для инициализации explicit registry (ADR-002). См. [[notifications]], [[decisions/ADR-002-plugin-discovery-explicit-registry|ADR-002]].
 
+- **import-linter (контракты архитектуры)** — инструмент статического анализа импортов, закреплённый в `dev`-зависимостях (`pyproject.toml`). Конфигурация в `.importlinter` в корне репо. Два контракта: `layers` — слоистая архитектура (composition/app → web → services → infra → domain, нарушение идёт снизу вверх), `domain_purity` — domain не импортирует инфра-библиотеки (sqlite3, requests, fastapi, playwright, smtplib). Запуск: `lint-imports`. Тест: `tests/test_import_linter_contracts.py`. Слои `composition` и `app` объявлены опциональными `(...)` до реализации в тасках `8ov.1`/`8ov.2`. См. [[decisions/ADR-006-import-linter-ci]].
+
 ## См. также
 
 - [[decisions-log]]

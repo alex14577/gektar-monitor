@@ -1,0 +1,22 @@
+[importlinter]
+root_package = fis_monitor
+include_external_packages = True
+# include_external_packages = True требуется для domain_purity:
+#   forbidden_modules перечисляет stdlib/3rd-party (sqlite3, requests, fastapi,
+#   playwright, smtplib) — без этого флага import-linter их не резолвит.
+
+[importlinter:contract:layers]
+name = Layered architecture
+type = layers
+layers =
+    (fis_monitor.composition) | (fis_monitor.app)
+    fis_monitor.web
+    fis_monitor.services
+    fis_monitor.infra
+    fis_monitor.domain
+
+[importlinter:contract:domain_purity]
+name = Domain doesn't touch infrastructure libs
+type = forbidden
+source_modules = fis_monitor.domain
+forbidden_modules = sqlite3, requests, fastapi, playwright, smtplib
