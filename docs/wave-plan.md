@@ -16,18 +16,32 @@
 5. **Pytest + git show --stat сам** — не доверять «tests green» из summary.
 6. **Reviewer ДО `bd close`** — `Agent(subagent_type="Code Reviewer", model="sonnet")` (для critical — `opus`).
 7. **Writer фиксит blocker'ы** → reviewer прогоняет повторно.
-8. **Vault update — ОБЯЗАТЕЛЬНЫЙ ШАГ после APPROVE.** Сразу после approve-ревью, ДО `bd close`, явно ответить на 4 вопроса и обновить vault если хоть один = да:
-   - Принято ли архитектурное решение, которого нет в ADR? → новый `docs/decisions/ADR-NNN-<slug>.md` + ссылка в `decisions-log.md`.
-   - Введён ли новый термин / класс / Protocol / паттерн? → запись в `docs/glossary.md`.
-   - Изменился ли контракт / поток / инвариант, описанный в `docs/architecture/<NN>.md` или `docs/data-model/<topic>.md`? → обновить соответствующий файл.
-   - Появилось ли known-limitation / non-obvious trade-off, который стоит зафиксировать? → glossary или соответствующий ADR §Consequences.
+8. **Vault update — ОБЯЗАТЕЛЬНЫЙ ШАГ после APPROVE.** Гибридная схема (введена с Wave 2, session #8): кто что трогает по слоям vault.
 
-   Если ответ на все 4 — **нет** (тривиальный fix без новых знаний), явно записать в Session log: «vault не трогаем — нет новых знаний». Это форсирует осознанный check, а не silent skip.
+   | Vault-слой | Writer | Reviewer | Оркестратор |
+   |---|---|---|---|
+   | `glossary.md` — новые классы/Protocol/паттерны | **Пишет черновик в отчёте** (не редактирует файл) | Verify: класс существует, инварианты названы верно, нет PII в примерах, wiki-links валидны | Применяет в `glossary.md`, финализирует если пропущено |
+   | ADR (`decisions/`) | ❌ | Может предложить «нужен ADR» как Major | **Пишет** (architectural decision — оркестратор/пользователь уровень) |
+   | `architecture/<NN>.md` обновления | ❌ | Может предложить «устарел контракт» | **Пишет** (cross-file consistency, writer не видит) |
+   | `data-model/<topic>.md` | Пишет если контракт меняется **внутри его таски** | Verify совпадение с кодом | Финализирует cross-cutting |
+   | Session log `wave-plan.md` | ❌ | ❌ | **Оркестратор** |
+
+   **Writer-промпт добавляет:** «Если ты создал новый класс/Protocol/паттерн — в конце своего отчёта добавь markdown-блок `## Glossary draft` с черновиком записи (что, где, инварианты, ссылки на ADR `[[decisions/ADR-NNN-<slug>|ADR-NNN]]`). НЕ редактируй `docs/glossary.md` сам. ADR/architecture/data-model — НЕ трогай.»
+
+   **Reviewer-промпт добавляет шаг:** «Прочитай `## Glossary draft` из writer-отчёта (если есть). Verify: (a) описание совпадает с реальным кодом, (b) инварианты названы верно, (c) нет PII/secrets в примерах, (d) wiki-links на ADR валидны. Включи в свой verdict секцию `## Glossary draft check` с APPROVE/AMEND.»
+
+   **Оркестратор** после APPROVE reviewer'а:
+   - Применяет glossary-черновик в `docs/glossary.md` (с правками по reviewer'у).
+   - Сам отвечает на 4 vault-вопроса для ADR/architecture/data-model слоёв (которые writer не трогает):
+     - Архитектурное решение → новый ADR `docs/decisions/ADR-NNN-<slug>.md` + ссылка в `decisions-log.md`.
+     - Контракт/поток/инвариант изменился → правка `docs/architecture/<NN>.md` или `docs/data-model/<topic>.md`.
+     - Known-limitation → glossary entry или ADR §Consequences.
+   - Если всё no-op — фиксирует «vault: no-op — нет новых знаний» в Session log.
 
    НЕ создавать `docs/tasks/<id>.md` и per-task логи — контекст работы хранится в bd (description/notes) и git-коммитах (SSOT).
 
-9. **Commit + `bd close`** — DoD: tests green, ruff clean, import-linter clean (если затронуты слои), vault check выполнен (см. шаг 8). Commit включает и код, и vault-изменения одним пушем.
-10. **Отметить галочку** в этом документе + кратко в Session log (с пометкой что добавлено в vault или явное «vault: no-op»).
+9. **Commit + `bd close`** — DoD: tests green, ruff clean, import-linter clean (если затронуты слои), vault обновлён. Commit включает и код, и vault-изменения одним пушем.
+10. **Отметить галочку** в этом документе + кратко в Session log (что добавлено в vault или явное «vault: no-op»).
 
 **Параллельность в волне:**
 - Несколько writer-агентов одновременно ТОЛЬКО при нулевом пересечении целевых файлов (grep-check ДО старта).
@@ -77,11 +91,11 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 Все deps закрыты, нулевое пересечение файлов.
 
-- [ ] `akv.5` — LotRepository.upsert + compute_changes + _sync_geo · sonnet · `repositories/lots.py`
+- [x] `akv.5` — LotRepository.upsert + compute_changes + _sync_geo · sonnet · `repositories/lots.py`
 - [x] `akv.6` — NotificationsRepository state machine · sonnet · `repositories/notifications.py`
 - [x] `akv.7` — SettingsRepository + SmtpCredentialsRepository · sonnet · `repositories/settings.py`, `repositories/smtp_credentials.py`
 - [x] `bye.4` — SmtpEmailNotifier (manual STARTTLS + Message-ID) · sonnet · `infra/smtp/email_notifier.py`
-- [ ] `bye.2` — ListParser + DetailParser · sonnet · `infra/parsers/`
+- [x] `bye.2` — ListParser + DetailParser · sonnet · `infra/parsers/`
 
 **Разблокирует:** `a4t.1`, `a4t.2`, `a4t.3`, `a4t.4`, `a4t.5`, `a4t.6`, `a4t.7`, `a4t.8`.
 
@@ -166,16 +180,33 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - `akv.7` (`58aa658`) — SqliteSettingsRepository + SqliteSmtpCredentialsRepository, 17 tests. Reviewer APPROVE сразу. Vault: glossary +2.
 - `bye.4` (`486ddf2`) — SmtpEmailNotifier + EmailNotifierConfig, 27 tests. **Reviewer (opus) NEEDS-WORK → fix-round (security-critical)**: добавлены `config_source`/`clock` в `__init__` per canon §4.2 (8ov.2 бы сломался), `except Exception` сужен до `(smtplib.SMTPException, OSError, ssl.SSLError)` + `logger.debug`, удалено unused `from_address` поле, ужесточены тесты (`server_hostname != _IP`, `check_hostname is True`, recipient NOT in Message-ID, `smtp.quit()`/`close()` fallback). Vault: glossary +2 (SmtpEmailNotifier, EmailNotifierConfig).
 
-**Итог wave:** 3/5 closed (akv.5 и bye.2 — на Wave 1 продолжение или Wave 2). Suite: 363 passed / 2 skipped. Vault: 5 новых glossary-записей. Все 3 таски потребовали fix-round после первого review — reviewer-ДО-close механика спасла от security blocker (server_hostname binding) и data-corruption blocker (naive datetime в БД).
+**Итог wave:** **5/5 closed** ✅. Suite: 416 passed / 2 skipped. Vault: 8 новых glossary-записей (5 классов + новая секция «Инфраструктура парсинга»). Wave 1 — полностью закрыта в одной сессии (5 тасок параллельно × 2 раунда писателей + 5 ревью + 2 fix-раунда).
 
-**Разблокировано Wave 1:** `a4t.3` (Dispatcher ждал akv.6) — теперь ready. `a4t.5`/`a4t.6` (ждали akv.7) — ready. `a4t.4` (ждал bye.4 + bye.5) — partial (нужен ещё bye.5).
+**Результаты:**
+- `akv.5` `0462b5a` — SqliteLotRepository, 21 tests. APPROVE сразу (3 majors как заметки на будущее).
+- `akv.6` `9433c0b` — SqliteNotificationsRepository, 16 tests. NEEDS-WORK → fix (timezone, BEGIN IMMEDIATE убран с read-методов, R4-C4 race-test добавлен).
+- `akv.7` `58aa658` — SqliteSettingsRepository + SmtpCredentials, 17 tests. APPROVE сразу.
+- `bye.4` `486ddf2` — SmtpEmailNotifier, 27 tests. **opus-reviewer** NEEDS-WORK → fix (DI canon-signature, narrow except, `from_address` удалён).
+- `bye.2` `0462b5a` (после) — Selectolax parsers, 32 tests. APPROVE (1 major: ParseBugError без `.selector`/`.context` атрибутов — known limitation, документировано в glossary).
 
-**Следующая сессия #9:** Wave 1 хвост (`akv.5` lots-repo + `bye.2` parsers) либо сразу Wave 2 leaf-nodes (`8ov.1`, `bye.1`, `bye.5`, `bye.6`, `bye.8`). Параллельные writer-агенты × 3-5 — workflow подтверждён рабочим.
+**Разблокировано:** `a4t.1` (MonitorCycleService — ждал akv.5+bye.2+bye.1), `a4t.2` (Enrichment — ждал bye.2), `a4t.3` (Dispatcher), `a4t.4` (Registry — partial, ждёт bye.5), `a4t.5`/`a4t.6`/`a4t.7`/`a4t.8`. Critical-path движется.
 
-**Заметки для следующего оркестратора:**
-- general-purpose (sonnet) как writer-default — **подтверждено**: 3/3 агента отработали без skill-hijack или persona-drift. Backend Architect остаётся в чёрном списке.
-- opus-reviewer на security-critical (bye.4) поймал blocker (`server_hostname=endpoint.original_host` правильно — но canon-divergence в DI signature который sonnet-reviewer мог упустить). Continue this pattern: P0/security → opus, остальное → sonnet.
-- vault-check-after-APPROVE workflow (шаг 8) сработал: для каждой APPROVE-ed таски добавлены glossary-записи. No silent skips.
+**Подтверждения workflow:**
+- general-purpose (sonnet) writer-default — 5/5 без skill-hijack/persona-drift. Backend Architect остаётся blacklisted.
+- opus-reviewer на P0/security (bye.4) поймал DI canon-divergence — sonnet-reviewer мог пропустить. Continue pattern.
+- Vault-check-after-APPROVE: 8 glossary-записей, no silent skips.
+- 2× параллельных writer'а одновременно работали отлично без конфликтов.
+
+**Wave 2 на следующую сессию #9:**
+Кандидаты (нулевое пересечение файлов, deps закрыты):
+- `8ov.1` Composition Infra+Services dataclasses · haiku
+- `bye.1` RequestsHttpClient retry · haiku
+- `bye.5` BrowserSseNotifier · haiku
+- `bye.6` PlaywrightLoginSession · sonnet (single-flight + cancel)
+- `bye.8` FileLocker · haiku
+
+**Изменения workflow для Wave 2+ (введено в session #8):**
+- **Гибридная схема vault**: Writer пишет `## Glossary draft` в отчёте → Reviewer verify → Оркестратор применяет в `docs/glossary.md`. ADR/architecture/data-model — за оркестратором (cross-cutting). Полный workflow в шаге 8.
 
 ---
 
