@@ -1,6 +1,66 @@
-# Точка возобновления сессии (обновлено 13.05.2026 после сессии #3)
+# Точка возобновления сессии (обновлено 13.05.2026 после сессии #4)
 
 Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md` (stub-MOC; нужные секции — в `docs/architecture/`, `docs/decisions/`).
+
+## Где остановились (сессия #4, 13.05.2026)
+
+**Закрыты 3 таски волны 1 (с двумя раундами ревью) + реструктуризация Obsidian vault + обновление DoD/playbook.**
+Closed: `531.2` (Protocols interfaces.py), `akv.1` (ConnectionProvider), `0t8` (DiagnosticsExcludePolicy).
+
+### Что сделано в сессии #4
+
+1. **bd `531.2`/`akv.1`/`0t8` closed** — параллельная волна 1 на Sonnet writer-агентах. Первый раунд ревью (Sonnet) дал 3x NEEDS-WORK; fix-агенты (Sonnet) починили все blocker-ы; второй раунд ревью на **Opus** → 3x APPROVE.
+   - `531.2`: 21 Protocol в `domain/interfaces.py`, 29 тестов. Закрыл follow-up `z9d` (перенос EventSubscription/ConfigSubscription из models.py). `Notifier` получил все 6 ClassVars (channel_id/display_name/description/config_schema/recipient_label/recipient_placeholder) — ADR-001 обновлён.
+   - `akv.1`: `ConnectionProvider` в `infra/sqlite/connection.py` с `_closed` flag (исправлен M1: cross-thread `close_all()` теперь делает provider non-reusable, raise RuntimeError). PRAGMA по ADR-007. ADR-007 обновлён про `wal_autocheckpoint` defence-in-depth duplicate. 7 тестов.
+   - `0t8`: `DiagnosticsExcludePolicy` в `services/diagnostics/exclude_policy.py`. **Critical fix**: добавлено `notifications.recipient` в EXCLUDED_DB_FIELDS (PII leak). Реализован `filter_state_keys()` (allowlist + forbidden-substring defence). 49 тестов.
+
+2. **Vault restructuring** (branch `docs/restructure-vault`, merged `fb3ccd5` + fix `01305d0`):
+   - `decisions-log.md` (635 строк) → 22 atomic ADR в `docs/decisions/ADR-NNN-<slug>.md` + stub-MOC.
+   - `architecture.md` (1635 строк) → 14 atomic + stub-MOC в `docs/architecture/`.
+   - `data-model.md` (428 строк) → 5 atomic + stub-MOC в `docs/data-model/`.
+   - 17 root-доков перенесены в `docs/{web,ops,product,parser}/` через `git mv` (history preserved).
+   - 460/463 wiki-link валидны (3 placeholder'а в CLAUDE.md инструкциях — не реальные линки).
+   - Verifier-скрипт `.tools/vault_link_check.py` оставлен в репо.
+   - Средний размер ноты — ~58 строк (vs 200-1635 раньше) — sub-agents теперь читают целиком.
+
+3. **DoD актуализирован**: `docs/tasks/<bd-id>.md` запрещены (директория удалена); vault обновляется только при наличии новых знаний (ADR / glossary / architecture sections). См. `bd memories dod-per-task-includes-obsidian-vault-update-docs`.
+
+4. **Orchestrator playbook записан** (после ретроспективы 1-го раунда ревью):
+   - `bd memories orchestrator-playbook` — 9 правил (brainstorm перед таской, pre-write extraction-шаг, reviewer ДО close, параллельность только при пустом grep-пересечении, fake-impl method-call coverage, verify pytest/git show самим, reviewer для critical = opus).
+   - `bd memories sub-agent-doc-reading` — sub-agents читают vault выборочно; цитировать canon в промпте, указывать атомарные файлы, pre-flight grep.
+
+5. **Follow-up bd-issues созданы** (P3/P4, не блокеры):
+   - `2uc` — race window в `ConnectionProvider._open` (`_closed` без lock).
+   - `fx8` — `filter_state_keys` non-str key контракт не задокументирован.
+   - `rbm` — IPv6 paths не редактируются в `redact_error`.
+
+### Состояние репо в конце сессии #4
+
+- Working tree: clean
+- Branch: `master` HEAD = после fixes/merge (см. `git log`)
+- Tests: 240+ passed, 2 skipped
+- Ruff: чистый по новому коду (2 RUF001 в `tests/domain/conftest.py:31` — legacy от 531.1, кириллическое "ХК" в названии ОГВ, не блокер)
+- Git remote: НЕТ (local-only repo, `git push` не применим)
+
+### С чего стартовать сессию #5
+
+**Волна 2 — P0 FIXME + параллельная фича:**
+
+- **`akv.2`** P0 — `init_db()` pre-flight `PRAGMA user_version` check (FIXME из architecture.md §3.1 → ныне `docs/architecture/...`). Использует `ConnectionProvider` (закрытый).
+- **`akv.3`** P0 — `MigrationRunner v1→v2` через 12-step SQLite rebuild pattern (FIXME из ADR-019 ext). Зависит от `akv.2`.
+- **`tic.1`** P1 — `ThreadEventBus` (Layer 0, ADR-008) с `publish()` + priority routing + per-type slots. Параллельно с akv.2/akv.3 (разные файлы).
+
+**Заметки для оркестратора (по playbook'у):**
+- `akv.2` + `akv.3` — последовательно (akv.3 зависит от akv.2 фактически).
+- `tic.1` — параллельно (grep-пересечение пусто).
+- **Pre-write extraction**: для `akv.2` → выписать из `docs/architecture/03-protocols.md` и ADR-007 точные PRAGMA-инварианты; для `tic.1` → выписать из ADR-008 + `docs/architecture/07-concurrency.md` (или эквивалентный split-файл) все требования к EventBus.
+- **Reviewer на sonnet** (по правилу пользователя — не opus). Critical-эскалация на opus — только при явном запросе.
+
+### bd-issues с устаревшими doc-refs
+
+12 open-issue упоминают `architecture.md` / `decisions-log.md` в description (см. `bd show` для каждого). Ссылки технически работают (stub-MOC существуют), но при работе над ними оркестратор должен mentally заменять на конкретные `docs/architecture/<file>.md` / `docs/decisions/ADR-NNN-<slug>.md`. Список: `akv.2`, `akv.3`, `8ov`, `8ov.1`, `8ov.4`, `a4t.1`, `tic`, `tic.3`, `bye.9`, `plg.3`, `vgm`, `vgm.5`.
+
+---
 
 ## Где остановились (сессия #3, 13.05.2026)
 
