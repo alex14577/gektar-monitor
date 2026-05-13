@@ -174,7 +174,7 @@ PRAGMA-разделение:
 - **Persistent** (`schema.sql`): `journal_mode=WAL`, `auto_vacuum=INCREMENTAL`, `user_version=N`.
 - **Per-connection** (`_configure`): `busy_timeout=5000`, `synchronous=NORMAL`, `foreign_keys=OFF`, `temp_store=MEMORY`, `cache_size=-20000`, `mmap_size=268435456`.
 
-> **FIXME (R5 review — DB)**: `init_db()` ДОЛЖЕН делать pre-flight check `PRAGMA user_version`. Если БД существует и `user_version < CURRENT_VERSION` — либо запустить MigrationRunner, либо `raise MigrationRequired` с инструкцией. Без этого первый dev с старой v1-БД словит cryptic `OperationalError` на отсутствующих колонках. В greenfield MVP runtime impact нулевой (v1-БД не существует), но фикс обязателен перед первым релизом v2→v3.
+> **Fixed in akv.2**: `init_db()` в `infra/sqlite/init_db.py` делает pre-flight check `PRAGMA user_version`. Алгоритм: fresh DB (user_version=0, нет таблиц) → `executescript(schema_sql)`; up-to-date → no-op; newer → `RuntimeError`; older → `migration_runner(conn, from, to)` или `raise MigrationRequired(from_version, to_version)`. `MigrationRequired` — `DomainError` без путей (PII-safe). Тип runner — `Callable[[sqlite3.Connection, int, int], None] | None`. Конкретный `MigrationRunner` — в akv.3.
 
 **Точка расширения**: при переезде на хостинг (`MODE=server`) — `PostgresLotRepository` (новая реализация Protocol). Use case не меняется. ConnectionProvider в этом сценарии заменяется на pool — но это уже infra-деталь, в domain она не утекает.
 

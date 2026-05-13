@@ -38,6 +38,30 @@ class SmtpHostPolicyError(UpstreamError):
     """
 
 
+class MigrationRequired(DomainError):
+    """Database schema version is older than the application expects.
+
+    Raised by ``init_db()`` when ``PRAGMA user_version < latest_version`` and
+    no ``migration_runner`` is provided.  The caller (composition root) is
+    responsible for either running the migration or surfacing a human-readable
+    message.
+
+    Attributes:
+        from_version: The ``user_version`` found in the database.
+        to_version:   The ``latest_version`` the application requires.
+
+    PII contract: message and attributes contain ONLY version integers — no
+    file paths, no database path, no user data.
+    """
+
+    def __init__(self, from_version: int, to_version: int) -> None:
+        super().__init__(
+            f"Database schema migration required: version {from_version} → {to_version}"
+        )
+        self.from_version = from_version
+        self.to_version = to_version
+
+
 class ParseBugError(DomainError):
     """HTML/JSON shape diverged from parser expectations — unrecoverable cycle bug."""
 

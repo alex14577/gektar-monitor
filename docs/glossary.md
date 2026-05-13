@@ -59,6 +59,10 @@
 
 - **ConnectionProvider** — `infra/sqlite/connection.py`, Layer 0. Обеспечивает per-thread `sqlite3.Connection` через `threading.local()`. Применяет per-connection PRAGMA (ADR-007) при каждом `_open()`: `auto_vacuum`, `journal_mode`, `synchronous`, `foreign_keys`, `busy_timeout`, `temp_store`, `cache_size`, `mmap_size`. Регистрация активных соединений через `dict[id, conn]` под `threading.Lock`; `close_all()` делает snapshot перед закрытием (защита от RuntimeError). Не является domain Protocol — принимается репозиториями конкретным типом. См. [[architecture/03-protocols]], [[decisions/ADR-007-per-connection-pragma|ADR-007]].
 
+- **MigrationRequired** — `DomainError` в `domain/errors.py`. Поднимается `init_db()` когда `PRAGMA user_version < latest_version` и `migration_runner` не передан. Атрибуты: `from_version: int`, `to_version: int`. Сообщение содержит только номера версий — без путей файлов (PII-safe). Composition root обязан либо поймать и запустить `migration_runner`, либо показать человекочитаемое сообщение. Реализовано в akv.2; конкретный runner — akv.3. См. [[architecture/03-protocols]] §3.1.
+
+- **init_db()** — функция в `infra/sqlite/init_db.py`. Pre-flight guard при старте: читает `PRAGMA user_version` вне транзакции, затем по алгоритму: `current==0` + нет таблиц → `executescript(schema_sql)`; `current==latest` → no-op; `current>latest` → `RuntimeError` (downgrade); `current<latest` → вызвать `migration_runner` или `raise MigrationRequired`. Зависит только от `ConnectionProvider` (infra-internal) — domain не знает о sqlite3. Реализовано в akv.2. См. [[decisions/ADR-007-per-connection-pragma|ADR-007]].
+
 ## Protocol-швы (domain/interfaces.py)
 
 - **LotRepository** — `Protocol` (Layer 1) для persist лотов. Ключевые методы: `upsert(lot, *, tracked)` (атомарный BEGIN IMMEDIATE + compute_changes внутри tx), `mark_seen`, `mark_inactive`, `needing_enrichment`. Реализация: `SqliteLotRepository`. См. [[architecture/03-protocols]], [[decisions/ADR-016-repository-invariants-begin-immediate|ADR-016]].
@@ -67,7 +71,7 @@
 
 - **EventSubscription[T]** — generic `Protocol` (context-manager handle) результата `EventBus.subscribe()`. Методы: `iter() -> Iterator[T]`, `unsubscribe()` (idempotent). Перенесён из `models.py` (follow-up z9d). Python 3.12 type parameter syntax (`class EventSubscription[T]`). См. [[architecture/03-protocols]].
 
-- **MigrationRunner** — `Protocol` (Layer 2) с единственным методом `run(target_version: int) -> None`. Минимальный seam для composition root; позволяет тестировать инициализацию без реального SQLite. Реализация: `SqliteMigrationRunner`.
+- **MigrationRunner** — type alias (`Callable[[sqlite3.Connection, int, int], None]`) в `infra/sqlite/init_db.py`. Передаётся в `init_db()` как необязательный параметр `migration_runner`. Сигнатура: `(conn, from_version, to_version) -> None`. Реализовано в akv.2. Конкретная реализация `SqliteMigrationRunner` (с `Protocol`-швом и методом `run(target_version)`) планируется в akv.3. См. [[architecture/03-protocols]].
 
 ## Onboarding и конфигурация
 
