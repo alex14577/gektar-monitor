@@ -253,7 +253,9 @@ class LotRepository(Protocol):
 
     All read-then-write operations use ``BEGIN IMMEDIATE`` to capture the
     writer-lock before the first ``SELECT`` (eliminates TOCTOU between
-    ``SELECT old`` and ``UPDATE``).  See docs/decisions/ADR-016-repository-invariants-begin-immediate.md, docs/architecture/03-protocols.md §3.1.
+    ``SELECT old`` and ``UPDATE``).
+    See docs/decisions/ADR-016-repository-invariants-begin-immediate.md,
+    docs/architecture/03-protocols.md §3.1.
     """
 
     def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:

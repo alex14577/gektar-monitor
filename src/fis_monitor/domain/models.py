@@ -258,8 +258,9 @@ class SseCycleError(BaseModel):
 class SseSmtpFailed(BaseModel):
     """Critical event: SMTP delivery failed.
 
-    Canon shape per docs/data-model/notifications.md §NotificationRecord. `channel_id` is an FK into the
-    channel-table; the plaintext recipient address is NEVER sent on the bus.
+    Canon shape per docs/data-model/notifications.md §NotificationRecord.
+    `channel_id` is an FK into the channel-table; the plaintext recipient
+    address is NEVER sent on the bus.
     `recipient_hash` and `message_id` live in the `notifications` table for
     dedup — they are NOT part of the SSE payload (PII / MTA-leak vectors).
     """
@@ -624,14 +625,16 @@ class ParsedDetail(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# NotifyResult — Notifier Result-pattern (docs/architecture/03-protocols.md §3.3, docs/notifications.md)
+# NotifyResult — Notifier Result-pattern
+# (docs/architecture/03-protocols.md §3.3, docs/notifications.md)
 # ---------------------------------------------------------------------------
 @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class NotifyResult:
     """Return of `Notifier.send()` / `Notifier.test()`.
 
-    Result-pattern is used ONLY for notifiers (docs/architecture/00-open-questions-resolved.md Q2). The
-    rest of the codebase raises `UpstreamError(category=...)` / `DomainError`.
+    Result-pattern is used ONLY for notifiers
+    (docs/architecture/00-open-questions-resolved.md Q2). The rest of the
+    codebase raises `UpstreamError(category=...)` / `DomainError`.
 
     Log-only contract for `detail`:
       * Written to `app.jsonl` and the `notifications.detail` column by
