@@ -56,15 +56,16 @@ bd close <id>         # Complete work
 
 1. Тесты зелёные, `ruff check` чистый, код закоммичен
 2. `bd close <id>`
-3. **Obsidian vault обновлён** (`docs/` = vault, `.obsidian/` внутри):
-   - **`docs/tasks/<bd-id>.md`** — создан по шаблону из `docs/tasks/README.md` (что/почему/связи/follow-up). Обязательно для каждой закрытой таски.
-   - **`docs/decisions-log.md`** — добавить ADR-NN если принято архитектурное решение (rationale + alternatives + consequences).
-   - **`docs/glossary.md`** — добавить запись если ввели новый термин/класс/паттерн.
-   - Связи между файлами через `[[wiki-links]]` (Obsidian-формат): `[[architecture]]`, `[[decisions-log#ADR-NN]]`, `[[glossary#Term]]`.
+3. **Obsidian vault обновлён** (`docs/` = vault, `.obsidian/` внутри) — ТОЛЬКО когда таска принесла новые знания о проекте:
+   - **`docs/decisions-log.md`** — ADR-NN если принято архитектурное решение (rationale + alternatives + consequences).
+   - **`docs/glossary.md`** — запись если введён новый термин/класс/паттерн.
+   - **`docs/architecture.md`** / другие существующие доки — обновить если изменилось то, что они описывают (контракты, потоки, инварианты).
+   - Связи через `[[wiki-links]]`: `[[architecture]]`, `[[decisions-log#ADR-NN]]`, `[[glossary#Term]]`.
+   - **НЕ создавать** task-логи / per-task файлы. Контекст работы хранится в bd (description/notes) и git-логе коммитов — это SSOT.
 
-Тривиальный fix без новых решений/терминов → достаточно одного абзаца в `docs/tasks/<bd-id>.md`.
+Тривиальный fix без новых решений/терминов → vault трогать не нужно, достаточно `bd close` + информативного commit-сообщения.
 
-**При делегировании задачи саб-агенту** оркестратор обязан включить в промпт инструкцию заполнить Obsidian как часть DoD и указать какие файлы трогать.
+**При делегировании задачи саб-агенту** оркестратор обязан включить в промпт инструкцию обновить Obsidian-vault (если есть что добавить) и явно запретить создание `docs/tasks/<id>.md`.
 
 ## Build & Test
 

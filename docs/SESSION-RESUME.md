@@ -32,16 +32,18 @@
 
 Дропнуто из MVP: `a4t.2` enrichment, `a4t.9` session monitor, `bye.6` PlaywrightLoginSession, `oxy.4` auth routes, `oxy.3` catalog routes, `oxy.7` templates. **MVP ≈ 27 тасок без FIXME** (29 включая 2 P0 FIXME).
 
-### DoD per task (новое в сессии #3)
+### DoD per task (актуализировано в сессии #4)
 
 Каждая закрытая bd-таска ОБЯЗАНА:
 1. Tests + ruff green, code committed
 2. `bd close <id>`
-3. `docs/tasks/<bd-id>.md` создан (см. `docs/tasks/README.md`)
-4. ADR в `decisions-log.md` если принято архитектурное решение
-5. Запись в `glossary.md` если введён новый термин/класс/Protocol
+3. Obsidian vault обновляется **только если таска принесла новые знания**:
+   - ADR в `docs/decisions-log.md` — для архитектурного решения
+   - Запись в `docs/glossary.md` — для нового термина/класса/Protocol
+   - Обновление существующих доков (`architecture.md` и т.п.) — если изменились описываемые контракты
+4. **НЕ создавать** `docs/tasks/<bd-id>.md` (директория удалена в сессии #4) — контекст таски хранится в bd (description/notes) и git-логе.
 
-При делегировании суб-агенту оркестратор включает эту инструкцию в промпт.
+При делегировании суб-агенту оркестратор включает эту инструкцию в промпт и явно запрещает создание per-task файлов.
 
 ## Где остановились (сессия #2, 13.05.2026)
 
