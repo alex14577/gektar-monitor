@@ -1,0 +1,914 @@
+    <!DOCTYPE html>
+    <html class="no-js" lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <link href="/frontend/web/assets/b526d9b5/themes/smoothness/jquery-ui.css?v=1772716999" rel="stylesheet">
+<link href="/frontend/web/assets/5ce74886/chosen.min.css?v=1772716999" rel="stylesheet">
+<link href="/frontend/web/css/chosen.css?v=1608303696" rel="stylesheet">
+<link href="/frontend/web/assets/7fc16622/css/perfect-scrollbar.css?v=1772716811" rel="stylesheet">
+<link href="/frontend/web/css/perfect-scrollbar.css?v=1491491046" rel="stylesheet">
+<link href="/frontend/web/css/normalize.css?v=1487606498" rel="stylesheet">
+<link href="/frontend/web/css/mainClear.css?v=1672156841" rel="stylesheet">
+<link href="/frontend/web/css/orgv_autocomplete_wrapper.css?v=1487606498" rel="stylesheet">
+<link href="/frontend/web/assets/fc8d14ce/css/app.min.css?v=1772716999" rel="stylesheet">
+<link href="/frontend/web/assets/23a8a5ca/export-checker.css?v=1772716809" rel="stylesheet">        <title>Мой профиль</title>
+    </head>
+    <body class="cabinet-page page-autorized ">
+                    
+<div class="public-warning  js-closable-public-warning">
+    <div class="public-warning__content">
+        <button class="btn-close js-close-public-warning"
+                data-url="/default/read-closable-alert"
+        ></button>
+        <p class="public-warning__header">Уважаемые пользователи! </p>
+         12 мая с 17:00 будут проводиться технические работы по обновлению ФИС НДВ. Некоторые компоненты Системы могут быть недоступны.    </div>
+</div>
+            <div id="header-lk" class="cabinet-page__header  header public-page-title
+">
+    <div class="header__part  header__part_side">
+        <a class="header__logo logo logo__lk" href="/"></a>
+    </div>
+    <div class="drop-menu">
+    <div class="drop-menu__head">
+        <div class="drop-menu__toggle">
+            <div class="line"></div>
+            <div class="line"></div>
+            <div class="line"></div>
+        </div>
+        <div class="drop-menu__info  menu-info">
+            <div class="menu-info__item">
+                <span>Мой профиль</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="menu  drop-menu__body ">
+        <div class="drop-menu__icon">
+            <a href="https://rosreestr.gov.ru" class="link-another-site link-another-site__ros" target="_blank"></a>
+            <a href="https://minvr.ru" class="link-another-site link-another-site__minvos" target="_blank"></a>
+        </div>
+        <nav id="w1" class="drop-menu__section drop-menu__section_user nav" activeCssClass="menu__link_active"><a class="menu__link  measNav js-nav_link" href="/support-measure" style="">Меры поддержки</a>
+<a class="menu__link  bpNav js-nav_link" href="/business-plan" style="">Бизнес-планы</a>
+<a class="menu__link storyNav js-nav_link" href="/best-practice" style="">Истории успеха</a>
+<a class="menu__link faqNav js-nav_link" href="/faq" style="">Вопрос-ответ</a>
+<a class="menu__link  newsNav js-nav_link" href="/news" style="">Новости</a>
+<a class="menu__link npaNav js-nav_link" href="/npa" style=""><span class="menu__text">Нормативное <span class="menu__text__regulation"></span>регулирование</span></a>
+<a class="menu__link eastNav js-nav_link" href="/default/maininfo" style="">О регионах</a></nav><nav id="w2" class="drop-menu__section drop-menu__section--narrow nav" activeCssClass="menu__link_active"><a class="menu__link menu__link_ico-12 js-choose-map" href="/cabinet/#" data-fareast-url="/default/map" data-arctic-url="/default/arctic-map" style="">Карта</a>
+<a class="menu__link menu__link_ico-11" href="/cabinet/statement" style="">Мой участок</a>
+<a class="menu__link menu__link_ico-6" href="/cabinet/delegate" style="">Представляемые заявители</a></nav>        <div class="header__user">
+            <div class="user__main">
+                <div class="user__link">
+                    <div class="user__links">
+                        <a class="user__link choose-area-btn js-action-login" data-info-url="/faq/index" href="/default/login">Войти</a>
+                        <a class="user__link choose-area-btn reg" data-info-url="/faq/index" href="https://esia.gosuslugi.ru/registration">Зарегистрироваться</a>
+                    </div>
+                </div>
+            </div>
+            <span class="sub_hide_menu">Через портал Gosuslugi.ru</span>
+        </div>
+    </div>
+    <div class="drop-menu__bar drop-menu__bar--mobile">
+        <nav class="drop-menu__bar-nav nav">
+            <button class="btn-menu drop-menu__bar-link" data-item="system">О системе</button>
+            <button class="btn-menu drop-menu__bar-link" data-item="reestr">Работа с реестрами</button>
+        </nav>
+        <div class="drop-menu__bar-close">
+            <svg>
+                <use xlink:href="/SVG/sprite.svg#fareast_delete_choice_cabinet"></use>
+            </svg>
+        </div>
+    </div>
+</div>
+    <div class="header__part header__part--menu">
+        <nav id="w3" class="header__menu menu nav" activeCssClass="menu__link_active"><a class="menu__link menu__link_ico-12 js-choose-map" href="/cabinet/#" data-fareast-url="/default/map" data-arctic-url="/default/arctic-map" style="">Карта</a>
+<a class="menu__link menu__link_ico-11" href="/cabinet/statement" style="">Мой участок</a>
+<a class="menu__link menu__link_ico-6" href="/cabinet/delegate" style="">Представляемые заявители</a></nav>    </div>
+    <div class="header__part  header__part_side">
+        <div class="header__user  user header__user_cabinet">
+            <div class="user__main">
+                <span class="user__name  user__toggle">
+                    <div class="icon cabinet__icon-myprofile-svg">
+                        <svg>
+                            <use xlink:href="/SVG/sprite.svg#fareast_user_cabinet"></use>
+                        </svg>
+                    </div>
+                    <span class="user__name-text">Чесноков А.Д.</span>
+                    <span class="user__name-title">Профиль пользователя</span>
+                    <div class="icon cabinet__icon-menu-arrow-svg">
+                        <svg>
+                            <use xlink:href="/SVG/sprite.svg#fareast_arrow_cabinet"></use>
+                        </svg>
+                    </div>
+                </span>
+                <div class="user__drop  menu  user__drop-body-profile">
+                    <div class="user__drop-additional-mobile">
+                                                <nav id="w4" class="drop-menu__section drop-menu__section--narrow nav" activeCssClass="menu__link_active"><a class="menu__link menu__link_ico-12 js-choose-map" href="/cabinet/#" data-fareast-url="/default/map" data-arctic-url="/default/arctic-map" style="">Карта</a>
+<a class="menu__link menu__link_ico-11" href="/cabinet/statement" style="">Мой участок</a>
+<a class="menu__link menu__link_ico-6" href="/cabinet/delegate" style="">Представляемые заявители</a></nav>                    </div>
+                    <div class="user__drop-body">
+                        <div class="user__drop-name-mobile">Чесноков А.Д.</div>
+                        <a class="menu__link" href="/cabinet/profile">
+                            <div class="icon cabinet__icon-myprofile-svg">
+                                <svg>
+                                    <use xlink:href="/SVG/sprite.svg#fareast_user_cabinet"></use>
+                                </svg>
+                            </div>
+                            <span class="menu__text">Мой профиль</span>
+                        </a>
+                                                    <a class="menu__link"
+                               href="/cabinet/system-news-list" data-value="(21)">
+                                <div class="icon cabinet__icon-news-svg">
+                                    <svg>
+                                        <use xlink:href="/SVG/sprite.svg#fareast_news_cabinet"></use>
+                                    </svg>
+                                </div>
+                                <span class="menu__text">Новости</span>
+                            </a>
+                                                                            <a class="menu__link"
+                               href="/cabinet/system-faq-list">
+                                <div class="icon cabinet__icon-news-svg">
+                                    <svg>
+                                        <use xlink:href="/SVG/sprite.svg#fareast_combined_shape"></use>
+                                    </svg>
+                                </div>
+                                <span class="menu__text">Вопрос-ответ</span>
+                            </a>
+                                                                            <a class="menu__link js-notification-count"
+                               href="/cabinet/notifications"
+                                <span>
+                                    </span>
+                                <div class="icon cabinet__icon-notification-svg ">
+                                    <svg>
+                                        <use xlink:href="/SVG/sprite.svg#fareast_bell_cabinet"></use>
+                                    </svg>
+                                </div>
+                                <span class="menu__text">
+                                    Оповещения
+                                     <span class="">
+                                         (0)
+                                     </span>
+                                </span>
+                            </a>
+                                                <a class="menu__link"
+                           href="/cabinet/log-entry-list">
+                            <div class="icon cabinet__icon-transaction-svg">
+                                <svg>
+                                    <use xlink:href="/SVG/sprite.svg#fareast_alert_log"></use>
+                                </svg>
+                            </div>
+                            <span class="menu__text">Журнал операций</span>
+                        </a>
+                        <a class="menu__link" href="/cabinet/statements-history">
+                            <div class="icon cabinet__icon-history_order-svg">
+                                <svg>
+                                    <use xlink:href="/SVG/sprite.svg#fareast_history_order"></use>
+                                </svg>
+                            </div>
+                            <span class="menu__text">История заявлений</span>
+                        </a>
+                                                <a class="menu__link  menu__link_ico-instruction--cabinet js-action_show_instructions"
+                           href="/default/modal-show-instructions">
+                            <div class="icon cabinet__icon-instructions-svg">
+                                <svg>
+                                    <use xlink:href="/SVG/sprite.svg#fareast_instrction_cabinet"></use>
+                                </svg>
+                            </div>
+                            <span class="menu__text">Скачать инструкции</span>
+                        </a>
+                                                                                            </div>
+
+                    <div class="user__foot">
+                        <form action="/default/logout" >
+
+                            <button class="user__logout btn_action_resolve">
+                                <div class="icon cabinet__icon-shape-svg">
+                                    <svg>
+                                        <use xlink:href="/SVG/sprite.svg#fareast_shape_cabinet"></use>
+                                    </svg>
+                                </div>
+                                <span>Выйти из системы</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+                            <div class="user__side">
+    <a class="notification-count " href="#">
+        <div class="icon cabinet__icon-svg">
+            <svg>
+                <use xlink:href="/SVG/sprite.svg#fareast_bell_cabinet"></use>
+            </svg>
+        </div>
+    </a>
+    <div class="user__drop-body-notification-profile">
+        <div class="user__drop-body-bar">
+            <span class="user__drop-body-title">Оповещения</span>
+            <div class="icon user__drop-body--close">
+                <svg>
+                    <use xlink:href="/SVG/sprite.svg#fareast_delete_choice_cabinet"></use>
+                </svg>
+            </div>
+        </div>
+        <div class="user__drop-body-content">
+                </div>
+        <div class="notification__content_footer">
+            <div class="notification__content_footer-count">
+                <a class="js-notification-count" href="/cabinet/notifications" data-value="(0)">
+                    Все оповещения
+                </a>
+            </div>
+            <div class="notification__content_footer-all">
+                <a href="/cabinet/notification-read-all">
+                    <div class="icon cabinet__icon-notall-svg">
+                        <svg>
+                            <use xlink:href="/SVG/sprite.svg#fareast_bell_notif_cabinet"></use>
+                        </svg>
+                    </div>
+                    <span>Прочитано все</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+                    </div>
+    </div>
+</div>
+
+            <div class="cabinet-page__main">
+                <!-- nav-bar -->
+<div class="cabinet-page__nav-bar nav-bar">
+    <nav id="w0" class="tabs-nav nav" activeCssClass="tabs-nav__link_active"><a class="tabs-nav__link tabs-nav__link_active" href="/cabinet/profile">Информация о заявителе</a>
+<a class="tabs-nav__link" href="/cabinet/children">Дети</a></nav>    <div class="nav-bar__side">
+            </div>
+</div>
+<!-- ./nav-bar -->
+
+    <!-- cabinet-page__content -->
+    <div class="cabinet-page__content cabinet-page-profile__content">
+        <div class="cabinet-page-content">
+
+            <div class="cabinet-page-content__main">
+
+                <div class="card card-cabinet">
+                    <div class="card__head top-bar card-cabinet__title">
+                        <h2 class="top-bar__title">Профиль пользователя</h2>
+                    </div>
+                    <div class="card__body widget widget_card card-cabinet__content">
+                        <!-- card-info -->
+                        <div class="card-info firefox-fix-flex js-scroll">
+                            <div class="card-cabinet-content__item">
+
+                                <div class="card-info__item card-info__item--active">
+                                    <div class="card-info-title chat__title-wrapper request-domain__block--notification-cabinet">
+                                        <h2 class="card-info-title__text">Основная информация</h2>
+                                        <div class="icon request-domain__nothint-svg chat__title-icon card-info-nothint__svg">
+                                            <svg>
+                                                <use xlink:href="/SVG/sprite.svg#fareast_info_cabinet"></use>
+                                            </svg>
+                                        </div>
+                                        <div class="chat__title-tooltip request-domain__title-notification">
+                                            <div class="chat__title-close-tooltip hide-desktop js-close-info-nothint">
+                                                <div class="mobile-block-modal__close-button"></div>
+                                            </div>
+                                            <p class="card-info-title-notification__text">
+                                                Данная информация берется из личного кабинета портала "Госуслуги".
+                                                Для изменения информации отредактируйте ее в личном кабинете портала
+                                                "Госуслуги".<br/> Данные обновятся при следующем входе в личный кабинет.
+                                            </p>
+                                        </div>
+                                                                                <div class="icon request-domain__nothint-svg j-refuse-personal-data-button"
+                                            title="Отзыв персональных данных"
+                                             data-url="/cabinet/check-is-available-refuse-of-personal-data">
+                                            <svg>
+                                                <use xlink:href="/SVG/sprite.svg#fareast_file_delete_icon"></use>
+                                            </svg>
+                                        </div>
+                                                                            </div>
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">ФИО</dt>
+                                        <dd class="card-info__value">Чесноков Александр Дмитриевич</dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Пол</dt>
+                                        <dd class="card-info__value">Мужской</dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Дата рождения</dt>
+                                        <dd class="card-info__value">27.02.1996</dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Гражданство</dt>
+                                        <dd class="card-info__value">РОССИЯ</dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Документ, удостоверяющий личность</dt>
+                                        <dd class="card-info__value">Паспорт гражданина РФ 4015 472805, выдан ТП №22 отдела УФМС России по Санкт-Петербургу и Ленинградской обл. в Калининском р-не гор.Санкт-Петербурга, код подразделения 780022, дата выдачи: 12.04.2016</dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">СНИЛС</dt>
+                                        <dd class="card-info__value">171-183-762 64</dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">ИНН</dt>
+                                        <dd class="card-info__value">421714580930</dd>
+                                    </dl>
+                                </div>
+
+                                <div class="card-info__item">
+                                    <div class="card-info-title">
+                                        <h2 class="card-info-title__text">Контактная информация</h2>
+                                    </div>
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Мобильный телефон</dt>
+                                        <dd class="card-info__value">+7(967)5525410</dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Адрес электронной почты</dt>
+                                        <dd class="card-info__value">
+                                            <a class="link js-source-email"
+                                               href="mailto:alexanc40@gmail.com">alexanc40@gmail.com</a>
+                                        </dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Почтовый адрес</dt>
+                                        <dd class="card-info__value js-source-post_address">
+                                            Россия, 194356, г. Санкт-Петербург, п. Парголово, ул. Архитектора Белова, д. 5, кв. 303                                        </dd>
+                                    </dl>
+
+                                    <dl class="card-info__entry">
+                                        <dt class="card-info__key">Адрес регистрации</dt>
+                                        <dd class="card-info__value js-source-address">Россия, 194358, г. Санкт-Петербург, п. Парголово, ул. Архитектора Белова, д. 5, стр. 1, корп. 1, кв. 303</dd>
+                                    </dl>
+                                </div>
+
+                                <form id="user-contact" class="card-info__item" action="/cabinet/profile" method="post">
+<input type="hidden" name="_csrf" value="VUhfTGh5aXQCMhN8KjAFGhAvGmFRNSQ9MwYcBRxLDC0aGyV1GjIxBQ==">                                                                <div class="card-info-title">
+                                    <h2 class="card-info-title__text">
+                                        Дополнительная информация
+                                                                                    <!--btn--edit--><b class="btn    card-info__hiding edit-contacts-btn"
+                                                               title="Редактировать">
+                                            <span class="icon cabinet__icon-edit-svg">
+                                                <svg>
+                                                    <use xlink:href="/SVG/sprite.svg#fareast_edit_cabinet"></use>
+                                                </svg>
+                                            </span>
+                                            </b>
+
+                                        <div class="card-info-title__edit-button-container">
+                                            <b class="btn  btn--ok2 ml15 card-info__displayed edit-contacts-btn btn_action_resolve btn-wto-text"
+                                               title="Сохранить"></b>
+                                            <b class="btn  btn--cancel  card-info__displayed btn_action_reject btn-wto-text"
+                                               title="Отменить"></b>
+                                        </div>
+                                                                            </h2>
+                                </div>
+                                <dl class="card-info__entry field-usercontact-phone">
+<dt class="card-info__key"><label class="control-label" for="usercontact-phone">Телефон</label></dt>
+<dd class="card-info__value">
+    <span class="card-info__empty card-info__edit-value card-info__edit-value-no-data">Телефон отсутствует</span>
+    <span class="card-info__edit-value card-info__edit-value-container"></span>
+    <input type="text" id="usercontact-phone" class="form__input  text-input  text-input_lg  card-info__edit-input" name="UserContact[PHONE]" data-value="">
+    <div class="help-block card-info__edit-input"></div>
+</dd>
+</dl>                                <dl class="card-info__entry field-usercontact-email">
+<dt class="card-info__key"><label class="control-label" for="usercontact-email">Почта</label></dt>
+<dd class="card-info__value">
+    <span class="card-info__empty card-info__edit-value card-info__edit-value-no-data">Нет данных</span>
+    <span class="card-info__edit-value card-info__edit-value-container"></span>
+    <input type="text" id="usercontact-email" class="form__input  text-input  text-input_lg  card-info__edit-input" name="UserContact[EMAIL]" data-value="">
+    <div class="help-block card-info__edit-input"></div>
+</dd>
+</dl>                                <dl class="card-info__entry field-applicant-documentsendtypeid">
+<dt class="card-info__key"><label class="control-label" for="applicant-documentsendtypeid">Способ получения проектов документов</label></dt>
+<dd class="card-info__value">
+    <span class="card-info__empty card-info__edit-value card-info__edit-value-no-data">Через ФИС «На Дальний Восток»</span>
+    <span class="card-info__edit-value card-info__edit-value-container"></span>
+    <select id="applicant-documentsendtypeid" class="select-custom  text-input_lg  card-info__edit-input form__input js-source-documentsendtypeid" name="Applicant[documentSendTypeId]" data-value="">
+<option value="">Через ФИС «На Дальний Восток»</option>
+<option value="1">Лично</option>
+<option value="2">Почта</option>
+<option value="4">Через ЕПГУ</option>
+<option value="3">Электронная почта</option>
+</select>
+    <div class="help-block card-info__edit-input"></div>
+</dd>
+</dl>
+                                <input type="submit" style="display:none">
+                                </form>                            </div>
+                        </div>
+                        <!-- ./card-info -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <!-- ./cabinet-page__content -->
+
+<!-- .moda-area  -->
+<div class="modal-area" id="addApplicant" style="display: none;">
+    <div class="modal  modal-invation  widget">
+        <div class="modal__head">
+            <div class="modal__tools  modal-tools">
+                <button class="modal-tool  modal-tool_close" type="button" onclick="$('#addApplicant').fadeOut();">
+                </button>
+            </div>
+            <h2 class="modal__title  align_left">Добавление заявителей</h2>
+        </div>
+
+        <div class="modal__body  card-info  invation">
+            <!-- .invation__head -->
+            <div class="card-info__head  invation__head">
+                <div class="invation__users-selected">
+                    <b class="invation__title  h4">Найти пользователей в системе (по СНИЛС)</b>
+                    <form class="search-form  search-form--lg  search-form--simple" action=""
+                          onsubmit="profile.inviteApplicants(event, 1069450)">
+                        <input type="text" id="search-users" class="search-form__input" name="user-name" placeholder="введите СНИЛС" data-plugin-inputmask="inputmask_0590018c">                        <div class="search-form__btn"></div>
+                    </form>
+
+                </div>
+            </div>
+            <!-- /.invation__head -->
+
+            <!-- .invation__body -->
+            <div class="card-info__body  invation__body">
+                <div class="invation__result-grid  result-grid">
+                    <div class="result-grid__col">
+                        <b class="result-grid__caption">Найденные пользователи</b>
+                        <div class="result-grid__col-in  js-scroll">
+                            <table class="table-point-users">
+                                <tbody id="result-search">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="result-grid__col">
+                        <b class="result-grid__caption">Выбранные пользователи</b>
+                        <div class="result-grid__col-in  js-scroll">
+                            <table class="table-point-users">
+                                <tbody id="added-users">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- /.invation__body -->
+        </div>
+
+        <div class="modal__foot">
+            <!-- .invation__foot -->
+            <div class="card-info__foot  invation__foot">
+                <a class="btn  btn_action_resolve  invation__btn"  href="#"
+                   onclick="profile.inviteApplicants(event, 1069450)">
+                    Добавить заявителей
+                </a>
+            </div>
+            <!-- /.invation__foot -->            
+        </div>
+    </div>
+</div>
+<!-- ./ .moda-area -->                                            </div>
+                <div class="cabinet-page__footer cabinet-footer">
+        <div>
+            <div class="cabinet-footer__text">
+                &copy; 2026 Министерство Российской Федерации по развитию Дальнего Востока и Арктики
+            </div>
+            <div class="cabinet-footer__numbers">
+                <a href="tel:+78002003251" class="cabinet-footer__link cabinet-footer__link--phone1">+7 800 200 32
+                    51</a>
+            </div>
+            <a data-url="/feedback/send"
+               class=" cabinet-footer__button button btn_action_callback js-send-feedback">Обратная связь</a>
+        </div>
+    </div>
+<!-- .modal-area Feedback -->
+<div class="modal-area" id="modal-feedback" style="display: none;"></div>
+<!-- ./ .modal-area -->
+
+<!-- .moda-area Feedback error -->
+<div class="modal-area" id="modal-feedback-error" style="display: none;">
+    <div class="modal modal--exception modal_md  widget">
+        <div class="modal__head">
+            <h2 class="modal__title modal__title--warning align_left">При отправке обращения возникла ошибка</h2>
+        </div>
+        <div class="modal__body">
+            <p class="modal-warning__text">Повторите операцию позже или обратитесь в<br> службу технической поддержки по телефону<br> 8 800 200 32 51</p>
+        </div>
+        <div class="modal__foot">
+            <button class="btn  btn_action_resolve--cancel"  type="button">Отмена</button>
+            <button class="btn  btn_wider  btn_action_resolve"  type="submit">Повторить попытку</button>
+        </div>
+    </div>
+</div>
+<!-- ./ .moda-area -->
+
+<!-- .modal-area Info Message -->
+<div class="modal-area" id="modal-info" style="display: none;">
+    <div class="modal  modal_sm  modal_confirm  widget">
+        <div class="modal__head">
+            <h2 class="modal__title  align_left"></h2>
+        </div>
+        <div class="modal__body">
+            <div id="modal-message-text"></div>
+        </div>
+        <div class="modal__foot">
+            <button class="btn  btn_sm  btn_action_resolve" id="modal-info-action-btn">Ок</button>
+        </div>
+
+    </div>
+</div>
+<!-- ./ .modal-area -->
+
+<!-- .modal-area Extended Info Message -->
+<div class="modal-area" id="modal-info-extended" style="display: none;">
+    <div class="modal  modal_md  widget">
+        <div class="modal__head">
+            <h2 class="modal__title  align_left"></h2>
+        </div>
+        <div class="modal__body js-scroll">
+            <p class="modal__main-text"></p>
+        </div>
+        <div class="modal__body modal__overflow modal__add-text js-scroll">
+        </div>
+        <div class="modal__foot">
+            <button class="btn  btn_wider  btn_action_resolve js-close-modal-area" data-dismiss="modal">Ок</button>
+        </div>
+    </div>
+</div>
+<!-- ./ .modal-area -->
+
+<!-- .moda-area Confirm modal -->
+<div class="modal-area" id="modal-confirm" style="display: none;">
+    <div class="modal  modal_md  widget">
+        <div class="modal__head">
+            <h2 class="modal__title  align_left" id="modal-confirm-head"></h2>
+        </div>
+        <div class="modal__body">
+            <p id="modal-confirm-text"></p>
+        </div>
+        <div class="modal__foot">
+            <button class="btn  btn_action_resolve--cancel" id="modal-confirm-cancel-btn">Нет</button>
+            <button class="btn  btn_action_resolve" id="modal-confirm-action-btn">Да</button>
+        </div>
+    </div>
+</div>
+<!-- ./ .moda-area -->
+
+<!-- .modal-area Error Message -->
+<div class="modal-area" id="modal-error" style="display: none;">
+    <div class="modal modal--exception modal_md  widget">
+        <div class="modal__head">
+            <h2 class="modal__title modal__title--error align_left" id="modal-error-heading"></h2>
+        </div>
+        <div class="modal__body">
+            <p id="modal-error-text"></p>
+        </div>
+        <div class="modal__foot">
+            <button class="btn  btn_wider  btn_action_resolve" id="modal-error-action-btn">Закрыть</button>
+        </div>
+    </div>
+</div>
+<!-- ./ .modal-area -->
+
+<!-- .modal-area Warning Message -->
+<div class="modal-area" id="modal-warning" style="display: none;">
+    <div class="modal modal--exception modal_md  widget">
+        <div class="modal__head">
+            <h2 class="modal__title modal__title--warning align_left" id="modal-warning-heading"></h2>
+        </div>
+        <div class="modal__body">
+            <p id="modal-warning-text"></p>
+        </div>
+        <div class="modal__foot">
+            <button class="btn btn_wider btn_action_resolve" id="modal-warning-action-btn">Закрыть</button>
+        </div>
+    </div>
+</div>
+<!-- ./ .modal-area -->
+
+<!-- .moda-area  -->
+<div class="modal-area modal-area_wide" id="user-profile-modal" style="display:none;">
+    <div class="modal modal_profile widget">
+        <div class="modal__head">
+            <h2 class="modal__title">Профиль участника</h2>
+            <button class="modal-tool modal-tool_close js-close-modal-area" type="button"></button>
+        </div>
+        <div class="modal__body js-scroll">
+        </div>
+    </div>
+</div>
+<!-- ./ .moda-area -->
+
+<!-- .moda-area  -->
+<div class="modal-area modal-area_wide" id="delegate-profile-modal" style="display:none;">
+    <div class="modal modal_profile widget">
+        <div class="modal__head">
+            <h2 class="modal__title">Профиль представителя</h2>
+            <button class="modal-tool modal-tool_close js-close-modal-area" type="button"></button>
+        </div>
+        <div class="modal__body js-scroll">
+        </div>
+    </div>
+</div>
+<!-- ./ .moda-area -->
+
+<!-- .moda-area  -->
+<div class="modal-area modal-area_wide" id="choose-map-modal" style="display:none;">
+    <div class="esia_auth-main_inner modal-area__choose-map js-scroll">
+        <div class="modal-area__choose-map__head">
+            <div class="esia_auth-head align_left">Выберите территорию</div>
+            <button class="modal-tool modal-tool_close js-close-modal-area" type="button"></button>
+        </div>
+        <div class="esia_auth-sub_head align_left">Укажите территорию, на которой вы желаете выбрать земельный участок</div>
+        <div class="esia_auth-body">
+            <div class="esia_auth-box box1">
+                <a href="#" class="btn_login_page js-choose-map-fareast">
+                    <span class="esia_auth-box_img">
+                        <img src="/frontend/web/img/map-fareast.png"
+                             alt="" class="left-plan">
+                    </span>
+                    <span class="esia_auth-box_text">Дальневосточный федеральный округ</span>
+                    <p class="esia_auth-box_sub-text">Амурская область, Еврейская автономная область, Забайкальский край, Камчатский край,
+                       Магаданская область, Приморский край, Республика Бурятия, Республика Саха (Якутия),
+                       Сахалинская область, Хабаровский край, Чукотский автономный округ</p>
+                </a>
+            </div>
+            <div class="esia_auth-box box2">
+                <a href="#" class="btn_login_page js-choose-map-arctic">
+                    <span class="esia_auth-box_img">
+                        <img src="/frontend/web/img/map-arctic.png"
+                             alt="" class="left-plan">
+                    </span>
+                    <span class="esia_auth-box_text">Арктическая зона Российской Федерации</span>
+                    <p class="esia_auth-box_sub-text">Мурманская область, Ненецкий автономный округ, Ямало-Ненецкий автономный округ,
+                        отдельные муниципальные образования Архангельской области, Красноярского края,
+                        Республики Карелия, Республики Коми, Ханты-Мансийского Автономного Округа - Югра</p>
+                </a>
+            </div>
+            <div class="clear_both"></div>
+        </div>
+    </div>
+</div>
+<!-- ./ .moda-area -->
+<div class="loader-area" style="display:none;">
+	<div class="loader-container">
+        <div class="preloader">
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+            <div><div></div></div>
+        </div>
+		<span class="loader__text">Пожалуйста, подождите, идет загрузка данных</span>
+	</div>
+</div>
+
+            
+                <div class="js-modal"></div>
+        <div id="export-checker" class="export-checker" style="display:none;"></div>        <script src="/frontend/web/assets/28297d82/jquery.js?v=1772716999"></script>
+<script src="/frontend/web/js/custom/profile.js?v=1630496407"></script>
+<script src="/frontend/web/assets/be778596/yii.js?v=1772716999"></script>
+<script src="/frontend/web/assets/be778596/yii.activeForm.js?v=1772716999"></script>
+<script src="/frontend/web/assets/9e1018b8/jquery.inputmask.bundle.js?v=1772717045"></script>
+<script src="/frontend/web/assets/b526d9b5/jquery-ui.js?v=1772716999"></script>
+<script src="/frontend/web/assets/5ce74886/chosen.jquery.min.js?v=1772716999"></script>
+<script src="/frontend/web/assets/7fc16622/js/perfect-scrollbar.jquery.js?v=1772716811"></script>
+<script src="/frontend/web/js/lie.polyfill.min.js?v=1517679706"></script>
+<script src="/frontend/web/js/respond.js?v=1487606498"></script>
+<script src="/frontend/web/js/scripts.js?v=1731085557"></script>
+<script src="/frontend/web/js/slick.min.js?v=1487606498"></script>
+<script src="/frontend/web/js/jquery.maskedinput.min.js?v=1487606498"></script>
+<script src="/frontend/web/js/jquery.inputmask.min.js?v=1553706163"></script>
+<script src="/frontend/web/js/jquery.floatThead.min.js?v=1487606498"></script>
+<script src="/frontend/web/js/custom/modals.js?v=1684417336"></script>
+<script src="/frontend/web/js/custom/global-ajax-loader.js?v=1627729237"></script>
+<script src="/frontend/web/js/jquery.cookie.js?v=1487606498"></script>
+<script src="/frontend/web/js/cabinet/common.js?v=1740735917"></script>
+<script src="/frontend/web/js/common.js?v=1639580463"></script>
+<script src="/frontend/web/assets/fc8d14ce/js/app.min.js?v=1772716999"></script>
+<script src="/frontend/web/assets/fc8d14ce/js/svgxuse.js?v=1772716999"></script>
+<script src="/frontend/web/assets/fc8d14ce/js/jquery.ellipsis.min.js?v=1772716999"></script>
+<script src="/frontend/web/js/admin/common.js?v=1731085557"></script>
+<script src="/frontend/web/assets/23a8a5ca/export-checker.js?v=1772716809"></script>
+<script type="text/javascript">jQuery(document).ready(function () {
+jQuery('#user-contact').yiiActiveForm([{"id":"usercontact-phone","name":"PHONE","container":".field-usercontact-phone","input":"#usercontact-phone","error":".help-block.card-info__edit-input","enableAjaxValidation":true,"validateOnChange":false,"validateOnBlur":false},{"id":"usercontact-email","name":"EMAIL","container":".field-usercontact-email","input":"#usercontact-email","error":".help-block.card-info__edit-input","enableAjaxValidation":true,"validateOnChange":false,"validateOnBlur":false},{"id":"applicant-documentsendtypeid","name":"documentSendTypeId","container":".field-applicant-documentsendtypeid","input":"#applicant-documentsendtypeid","error":".help-block.card-info__edit-input","enableAjaxValidation":true,"validateOnChange":false,"validateOnBlur":false}], []);
+var inputmask_0590018c = {"mask":"999-999-999 99"};
+$("#search-users").inputmask(inputmask_0590018c);
+
+            $(document).on("input", "#search-users", function(event){
+                var $this = $(this);
+                var val = $this.inputmask("unmaskedvalue") || "";
+                if ($this.data("old-val") != val) {
+                    $this.data("old-val", val);
+                    if (val.length >= 11) {
+                        var options = {"url":"\/cabinet\/search-users-for-delegate-applicant","dataType":"json","success":
+                                    function(data) {
+                                        var res;
+                                        try {
+                                            res = JSON.parse(data);
+                                        } catch (e){
+                                            res = null;
+                                        }
+                                        if (res && res.hasOwnProperty("status") && res.status == "error") {
+                                                feModals.showInfoModal(res.response);
+                                        } else {
+                                            var exists = $("#added-users tr").map(function(){
+                                                return $(this).data("user-id");
+                                            }).get();
+                                            $("#result-search").html(data.user);
+                                            if ($("#added-users tr").length >= 1) {
+                                                $("#result-search tr .js-add-heirs").css("visibility", "hidden");
+                                            }
+                                            $.each(exists, function(i, val){
+                                                $("#result-search tr[data-user-id=" + val + "]").remove();
+                                            });
+                                        }      
+                                    }
+                                }; 
+                        $.extend(true, options, {"data": {query : val}});                        
+                        setTimeout(function(){
+                            $.ajax(options);
+                        }, 100);
+                    }
+                }
+            });
+        
+    $(".edit-contacts-btn").on("click", function(){
+        var $form = $(this).closest("form");
+        if (!$form.hasClass("card-info__item_locked")) {
+            var saving = $form.hasClass("card-info__item_edited");
+            if (saving) {
+                $form.trigger("submit");
+            } else {
+                $form.addClass("card-info__item_edited");
+            }
+        }
+    });
+    
+    $(".j-refuse-personal-data-button").on("click", function() {
+        feModals.showConfirmModal(
+            'Отзыв согласия на обработку персональных данных', 
+            function() {  
+                $.ajax({
+                    url: $(".j-refuse-personal-data-button").data("url"),
+                    method: "POST",
+                    success: function(data) {
+                        if (data.success) {
+                            feModals.showConfirmModal(
+                                data.title, 
+                                function() {
+                                    globalAjaxLoader.show();
+                                    makeActionOnPersonalData(data);
+                                },
+                                function() {$("#modal-confirm").fadeOut(200);},
+                                data.description,
+                                'Да',
+                                'Нет'
+                            );
+                        } else {
+                            feModals.showWarningModal(
+                                'Отказ в отзыве персональных данных',
+                                '',
+                                data.description
+                            )
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        feModals.showErrorModal("Ошибка", "Ошибка при удалении", xhr.responseText);
+                    }
+                });
+            }, 
+            function() {$("#modal-confirm").fadeOut(200);}, 
+            '<p>Согласно ч. 5 ст. 21 ФЗ 152 в результате отзыва согласия на обработку персональных данных ' 
+            + 'будет произведена проверка на возможность уничтожения, либо на возможность обезличивания Ваших ' 
+            + 'персональных данных в Системе.</p><p>Если в Системе не было заявлений на предоставление земельного ' 
+            + 'участка, Вы не являетесь наследником, представляемым заявителем, участником группы или не приглашены ' 
+            + 'в группу, то Ваши персональные данные могут быть уничтожены. <span style="color:red">Ваша учетная ' 
+            + 'запись в Системе будет удалена.</span></p><p>Если в Системе были заявления, но на текущий момент ' 
+            + 'активных заявлений/договоров нет, то Ваши персональные данные могут быть обезличены. ' 
+            + '<span style="color:red">Ваша учетная запись в Системе будет удалена.</span></p><p>Если в Системе есть ' 
+            + 'активные заявления/договоры, либо вы приглашены в группу, являетесь участником группы, наследником, ' 
+            + 'представляемым заявителем, то обработка Ваших персональных данных не может быть прекращена. Данные не ' 
+            + 'могут быть уничтожены.</p>', 
+            'Отозвать', 
+            'Отменить'
+        );
+    });
+    
+    $("form.card-info__item").on("ajaxBeforeSend", function() {
+        $(this).addClass("card-info__item_locked");
+    }).on("ajaxComplete", function() {
+        $(this).removeClass("card-info__item_locked");
+    }).on("beforeValidate", function() {
+        var changed = false;
+        $(this)
+            .find(".card-info__value")
+            .find("select.form__input, input.form__input, textarea.form__input")
+            .each(function() {
+                if ($(this).val() !== $(this).attr("data-value")) {
+                    changed = true;
+                    return;
+                }
+            });
+        // Было ли удаление детей
+        changed = changed || $(this).closest("form.card-info__item").data("form-changed");
+        if (!changed) {
+            $(this).removeClass("card-info__item_edited");
+            $(this).removeClass("editable--changing");
+            $(this).find(".help-block").html("");
+        }
+        return changed;
+    }).on("afterValidate", function(e, messages) {
+        if (messages.success !== undefined) {
+            $(this).removeClass("card-info__item_edited");
+            $(this).removeClass("editable--changing");
+            if (messages.success) {
+                $(this)
+                    .find(".card-info__value")
+                    .find("select.form__input, input.form__input, textarea.form__input")
+                    .each(function() {
+                        var realValue = $(this).val() !== "" && $(this).find("option").length > 0 
+                            ? $(this).find("option:selected").text()
+                            : $(this).val();
+                        $parent = $(this).closest(".card-info__value");
+                        $parent.find(".card-info__edit-value-container").html(realValue);
+                        $parent.find(".card-info__edit-value-no-data").toggle($(this).val() === "");
+                        $(this).attr("data-value", $(this).val());
+                    });
+                var text = "Ваши данные были успешно сохранены.<br/>" + messages.message;
+                feModals.showInfoModal(text, function () {
+                    globalAjaxLoader.show();
+                    document.location.reload(true);
+                });
+            } else if (messages.deleteGroupMembershipError) {
+                feModals.showErrorModal(
+                    "Ошибка",
+                    "Ошибка удаления ребенка",
+                    messages.deleteGroupMembershipError, function () {                    
+                        document.location.reload(true);
+                    }
+                );                
+            } else {
+                feModals.showErrorModal(
+                    "Ошибка",
+                    "Ошибка сохранения",
+                    "Не удалось сохранить данные. Пожалуйста, обратитесь к администратору сайта."
+                );
+            }
+        } else {
+            feModals.showErrorModal(
+                "Ошибка",
+                "Ошибка ввода",
+                "Пожалуйста, исправьте ошибки"
+            );
+            
+        }
+    }).on("beforeSubmit", function() {
+        return false;
+    });
+    function makeActionOnPersonalData(actionData) {
+        $.ajax({
+            url: actionData.redirectUrl,
+            method: "POST",
+            success: function(data) {
+                globalAjaxLoader.hide();
+                if (data.success) {
+                    if (data.redirectUrl) {
+                        window.location = data.redirectUrl;
+                    } else {
+                        window.location.reload();
+                    }
+                } else {
+                    feModals.showWarningModal(
+                        'Отказ в отзыве персональных данных',
+                        '',
+                        data.description
+                    )
+                }
+            },
+            error: function(xhr, status, error) {
+                globalAjaxLoader.hide();
+                feModals.showErrorModal("Ошибка", "Ошибка при удалении", xhr.responseText);
+            }
+        });
+    }
+jQuery("#export-checker").exportChecker({"url":"\/export-file\/check-export","interval":1000,"checkConstantly":false});
+});</script>    </body>
+    </html>
