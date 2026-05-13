@@ -7,7 +7,8 @@ before applying or skipping the schema.
 Design decisions (brainstorm akv.2, locked — do not re-open):
 * MigrationRunner is typed as Callable[[sqlite3.Connection, int, int], None] | None
   (not a Protocol) to keep this module dependency-free of any runner class.
-  A concrete MigrationRunner class (Protocol or class) is introduced in akv.3.
+  The concrete ``SqliteMigrationRunner`` is introduced in akv.4
+  (``infra/sqlite/migrations.py``); its ``__call__`` matches this signature.
 * user_version is read OUTSIDE any transaction — PRAGMA user_version is a
   meta-operation and must not be wrapped in a writer tx (BEGIN IMMEDIATE).
 * Schema is applied via executescript() which manages its own transaction

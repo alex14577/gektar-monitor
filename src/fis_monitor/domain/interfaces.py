@@ -489,15 +489,57 @@ class AutostartManager(Protocol):
 class MigrationRunner(Protocol):
     """Schema migration runner (state.db ``user_version`` lifecycle).
 
-    Minimal surface — only the ``run`` method is required by callers.
-    Implementations are free to add introspection helpers.
+    Driven by ``init_db()`` at startup when DB ``user_version`` is older
+    than the application's ``latest_version``. The concrete implementation
+    (``infra/sqlite/migrations.SqliteMigrationRunner``) also exposes
+    ``__call__(conn, from_version, to_version)`` so it satisfies the
+    ``Callable[[Connection, int, int], None]`` signature accepted by
+    ``init_db``.
+
+    Contract for ``run_pending`` implementations:
+      * First action MUST be ``BEGIN IMMEDIATE`` on the supplied connection.
+      * After acquiring the writer lock, re-check ``PRAGMA user_version`` —
+        on mismatch raise ``ConcurrentMigrationError`` (TOCTOU defence,
+        bd issue ``1zk``).
+      * Apply every ``Migration.apply(conn)`` step inside the same tx.
+      * Update ``PRAGMA user_version`` to ``to_version`` in the same tx,
+        then ``COMMIT``. On any exception ``ROLLBACK`` and re-raise.
     """
 
-    def run(self, target_version: int) -> None:
-        """Apply all pending migrations up to ``target_version``.
+    def list_migrations(self) -> Sequence[Any]:
+        """Return all registered migrations, ordered by ``from_version`` asc.
 
-        Idempotent: calling with the current version or lower is a no-op.
-        Raises ``MigrationError`` (domain error subclass) on failure.
+        Returns ``Sequence[Migration]`` — typed as ``Sequence[Any]`` here
+        because ``Migration`` is an infra dataclass (``infra/sqlite/migrations``)
+        that depends on ``sqlite3.Connection``; the domain layer must not
+        import infra. Concrete implementations narrow the return type.
+        """
+        ...
+
+    def run_pending(
+        self, conn: Any, from_version: int, to_version: int
+    ) -> None:
+        """Apply chained migrations to take DB from ``from_version`` → ``to_version``.
+
+        ``conn`` is typed ``Any`` here to avoid importing ``sqlite3`` into
+        the domain layer; concrete implementations type it as
+        ``sqlite3.Connection``.
+
+        Raises:
+            ConcurrentMigrationError: user_version moved between init_db
+                read and BEGIN IMMEDIATE.
+            MigrationChainBroken: no continuous chain registered.
+        """
+        ...
+
+    def __call__(
+        self, conn: Any, from_version: int, to_version: int
+    ) -> None:
+        """Callable seam matching ``init_db``'s ``Callable[[Connection, int, int], None]``.
+
+        Required so a ``MigrationRunner`` can be passed directly as the
+        ``migration_runner=`` argument of ``init_db()``. Implementations
+        typically delegate to ``run_pending``.
         """
         ...
 

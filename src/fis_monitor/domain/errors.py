@@ -62,6 +62,45 @@ class MigrationRequired(DomainError):
         self.to_version = to_version
 
 
+class ConcurrentMigrationError(DomainError):
+    """Database `user_version` changed between init_db read and runner BEGIN IMMEDIATE.
+
+    Raised by ``SqliteMigrationRunner.run_pending`` after acquiring the writer
+    lock when ``PRAGMA user_version`` no longer equals the expected
+    ``from_version``.  Indicates a concurrent migration (another process /
+    worker) — defence-in-depth even when single-instance lock is in effect
+    (see bd issue ``1zk``).
+
+    PII contract: only version integers.
+    """
+
+    def __init__(self, expected_version: int, actual_version: int) -> None:
+        super().__init__(
+            f"Concurrent migration detected: expected user_version "
+            f"{expected_version}, found {actual_version}"
+        )
+        self.expected_version = expected_version
+        self.actual_version = actual_version
+
+
+class MigrationChainBroken(DomainError):
+    """No continuous migration chain from `from_version` to `to_version`.
+
+    Raised by ``SqliteMigrationRunner.run_pending`` when the registered
+    migrations cannot reach ``to_version`` from ``from_version`` by chaining
+    contiguous steps.  Configuration error — never recoverable at runtime.
+
+    PII contract: only version integers.
+    """
+
+    def __init__(self, from_version: int, to_version: int) -> None:
+        super().__init__(
+            f"No migration chain from version {from_version} to {to_version}"
+        )
+        self.from_version = from_version
+        self.to_version = to_version
+
+
 class ParseBugError(DomainError):
     """HTML/JSON shape diverged from parser expectations — unrecoverable cycle bug."""
 
