@@ -49,6 +49,21 @@ bd close <id>         # Complete work
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
+## Definition of Done (per bd task)
+
+Задача считается **DONE** только если выполнено ВСЁ:
+
+1. Тесты зелёные, `ruff check` чистый, код закоммичен
+2. `bd close <id>`
+3. **Obsidian vault обновлён** (`docs/` = vault, `.obsidian/` внутри):
+   - **`docs/tasks/<bd-id>.md`** — создан по шаблону из `docs/tasks/README.md` (что/почему/связи/follow-up). Обязательно для каждой закрытой таски.
+   - **`docs/decisions-log.md`** — добавить ADR-NN если принято архитектурное решение (rationale + alternatives + consequences).
+   - **`docs/glossary.md`** — добавить запись если ввели новый термин/класс/паттерн.
+   - Связи между файлами через `[[wiki-links]]` (Obsidian-формат): `[[architecture]]`, `[[decisions-log#ADR-NN]]`, `[[glossary#Term]]`.
+
+Тривиальный fix без новых решений/терминов → достаточно одного абзаца в `docs/tasks/<bd-id>.md`.
+
+**При делегировании задачи саб-агенту** оркестратор обязан включить в промпт инструкцию заполнить Obsidian как часть DoD и указать какие файлы трогать.
 
 ## Build & Test
 
