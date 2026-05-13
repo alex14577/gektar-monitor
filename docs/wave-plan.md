@@ -150,7 +150,7 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 6 — FastAPI Depends providers
 
-- [ ] `8ov.4` — Depends() providers per use case · haiku · ждёт `8ov.2`
+- [x] `8ov.4` — Depends() providers per use case · haiku · ждёт `8ov.2`
 
 ### Wave 7 — CSRF + read-side services
 
