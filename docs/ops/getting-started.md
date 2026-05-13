@@ -45,7 +45,7 @@ python -m fis_monitor.auth.playwright_login
 
 > **Никогда не передавай пароль ЕСИА в скрипт, env-переменную или конфиг.** Только интерактивный ввод в окне браузера.
 
-См. [[authentication]] для деталей.
+См. [[web/authentication]] для деталей.
 
 ## Запуск dev-сервера
 
@@ -73,13 +73,13 @@ pytest --fixtures            # список фикстур
 
 ## Что дальше
 
-- [[runbook]] — что делать, когда что-то ломается.
+- [[ops/runbook]] — что делать, когда что-то ломается.
 - [[decisions-log]] — все принятые архитектурные решения, источник истины.
-- [[mvp-scope]] — что входит и не входит в MVP.
+- [[product/mvp-scope]] — что входит и не входит в MVP.
 
 ## См. также
 
 - [[project-structure]]
-- [[runbook]]
-- [[authentication]]
+- [[ops/runbook]]
+- [[web/authentication]]
 - [[decisions-log]]

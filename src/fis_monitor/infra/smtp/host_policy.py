@@ -288,7 +288,7 @@ def _check_address(
     """Raise SmtpHostPolicyError if *addr* is in any blocked range.
 
     Cloud-metadata endpoints are checked explicitly BEFORE generic link-local so
-    the error message is specific (architecture.md §3.3).
+    the error message is specific (docs/architecture/03-protocols.md §3.3).
     """
     # Cloud metadata — explicit check first for precise error message.
     if addr in (_CLOUD_META_V4, _CLOUD_META_V6):

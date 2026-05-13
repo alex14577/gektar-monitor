@@ -2,7 +2,7 @@
 
 Architecture: infra/sqlite layer (Layer 0). Not a domain Protocol — concrete
 class accepted by repositories directly (domain does not know about sqlite3).
-See: docs/architecture.md §3.1, docs/decisions-log.md ADR-007.
+See: docs/architecture/03-protocols.md §3.1, docs/decisions/ADR-007-per-connection-pragma.md.
 
 PRAGMA split (ADR-007):
 - Persistent (schema.sql): journal_mode=WAL, auto_vacuum=INCREMENTAL
@@ -68,7 +68,7 @@ class ConnectionProvider:
 
         Safe to call from a shutdown thread (not necessarily the owning
         thread). Takes a snapshot of current connections before iterating to
-        avoid mutation during close (R3-minor pattern from architecture.md).
+        avoid mutation during close (R3-minor pattern from docs/architecture/03-protocols.md).
 
         Also clears the thread-local slot for the calling thread so that a
         subsequent get_connection() creates a fresh connection rather than

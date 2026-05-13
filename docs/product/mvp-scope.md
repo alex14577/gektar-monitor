@@ -64,4 +64,4 @@
 
 **Email — единственный канал push'а в MVP.** Если клиент часто в дороге без email-почты в телефоне — попросит Telegram, добавим в v2.
 
-См. также: [[decisions-log]], [[web-ui-architecture]], [[notifications]], [[monitoring-plan]].
+См. также: [[decisions-log]], [[web/ui-architecture]], [[notifications]], [[product/monitoring-plan]].

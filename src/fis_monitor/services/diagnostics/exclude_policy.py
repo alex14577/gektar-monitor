@@ -1,7 +1,8 @@
 """DiagnosticsExcludePolicy — PII exclude/redact rules for diagnostic.zip.
 
 PII MUST NOT leak through diagnostic dumps.  ``audit.jsonl`` is the only
-legal channel for PII data (see decisions-log ADR-012, ADR-017).
+legal channel for PII data (see docs/decisions/ADR-012-diagnostic-zip-allowlist-redactor.md,
+docs/decisions/ADR-017-secrets-secretstr-crash-dump-exclusion.md).
 
 Design principles
 -----------------

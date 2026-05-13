@@ -127,7 +127,7 @@ ZIP с логами + `state.db` (без секретов — пароли SMTP/
 ### GET /api/stream
 Long-lived SSE stream для live-обновлений UI. Реализация — `sse-starlette` (см. [[decisions-log]]).
 Origin-check как у CSRF, токен не требуется (GET, idempotent).
-Альтернативный путь `GET /events` — алиас (см. [[web-ui-architecture]]).
+Альтернативный путь `GET /events` — алиас (см. [[web/ui-architecture]]).
 
 #### Event: `lot.new`
 Новый лот появился в реестре.
@@ -179,8 +179,8 @@ Wizard первого запуска (см. [[decisions-log]] → «Onboarding 4
 
 ## См. также
 
-- [[web-ui-architecture]] — обоснование стека и маршрутов
-- [[monitoring-plan]] — цикл, очереди, безопасность
+- [[web/ui-architecture]] — обоснование стека и маршрутов
+- [[product/monitoring-plan]] — цикл, очереди, безопасность
 - [[notifications]] — плагин-архитектура каналов
 - [[config-reference]] — таблица ключей `config.json`
 - [[decisions-log]] — CSRF, bind, idempotency и прочие решения

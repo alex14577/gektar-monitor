@@ -61,4 +61,4 @@
 
 > Не дудосить гос-сервер. 1 запрос раз в 2-5 секунд при цикле каждые 30+ минут — социально приемлемо.
 
-См. также: [[architecture]], [[monitoring-plan]], [[cabinet-free-lot]].
+См. также: [[architecture]], [[product/monitoring-plan]], [[parser/cabinet-free-lot]].

@@ -1,6 +1,6 @@
 # Точка возобновления сессии (обновлено 13.05.2026 после сессии #3)
 
-Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md`.
+Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md` (stub-MOC; нужные секции — в `docs/architecture/`, `docs/decisions/`).
 
 ## Где остановились (сессия #3, 13.05.2026)
 
@@ -138,13 +138,13 @@ PM учитывает это как done — не дублирует в bootstra
 
 **Прочитать в порядке:**
 1. `docs/SESSION-RESUME.md` (этот файл)
-2. `docs/architecture.md` — финальная архитектура (~700+ строк, 5 раундов ревью)
-3. `docs/decisions-log.md` — ADR-001..021
-4. `docs/data-model.md` — Pydantic DTO
+2. `docs/architecture.md` — MOC, атомарные ноты в `docs/architecture/` (15 файлов, ~17 секций)
+3. `docs/decisions-log.md` — MOC, атомарные ADR в `docs/decisions/` (ADR-001..022)
+4. `docs/data-model.md` — MOC, атомарные ноты в `docs/data-model/` (lot/notifications/settings/sse/errors)
 5. `docs/notifications.md` — state machine отправки
 6. `docs/db/schema.sql` — канон схемы
 7. `docs/onboarding.md` — FSM
-8. `docs/runbook.md` — known-limitations
+8. `docs/ops/runbook.md` — known-limitations
 
 **bd-команды:**
 ```bash

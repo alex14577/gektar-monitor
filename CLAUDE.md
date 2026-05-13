@@ -57,10 +57,10 @@ bd close <id>         # Complete work
 1. Тесты зелёные, `ruff check` чистый, код закоммичен
 2. `bd close <id>`
 3. **Obsidian vault обновлён** (`docs/` = vault, `.obsidian/` внутри) — ТОЛЬКО когда таска принесла новые знания о проекте:
-   - **`docs/decisions-log.md`** — ADR-NN если принято архитектурное решение (rationale + alternatives + consequences).
+   - **`docs/decisions/ADR-NNN-<slug>.md`** — новый ADR-файл если принято архитектурное решение (rationale + alternatives + consequences). Затем добавить ссылку в `docs/decisions-log.md` (stub-MOC).
    - **`docs/glossary.md`** — запись если введён новый термин/класс/паттерн.
-   - **`docs/architecture.md`** / другие существующие доки — обновить если изменилось то, что они описывают (контракты, потоки, инварианты).
-   - Связи через `[[wiki-links]]`: `[[architecture]]`, `[[decisions-log#ADR-NN]]`, `[[glossary#Term]]`.
+   - **`docs/architecture/<NN-section>.md`** / **`docs/data-model/<topic>.md`** / другие существующие доки — обновить если изменилось то, что они описывают (контракты, потоки, инварианты).
+   - Связи через `[[wiki-links]]`: `[[architecture/03-protocols]]`, `[[decisions/ADR-NNN-<slug>|ADR-NNN]]`, `[[glossary#Term]]`.
    - **НЕ создавать** task-логи / per-task файлы. Контекст работы хранится в bd (description/notes) и git-логе коммитов — это SSOT.
 
 Тривиальный fix без новых решений/терминов → vault трогать не нужно, достаточно `bd close` + информативного commit-сообщения.
@@ -87,9 +87,9 @@ Sub-agent **не читает vault полностью** — читает выб
 Следствия для промпт-инжиниринга:
 
 1. **Цитировать canon-фрагменты прямо в промпте** — не «прочитай §X», а вставить блок цитаты с номером строк. Дороже в токенах, но дешевле reopen-цикла.
-2. **Указывать line-ranges**: `docs/architecture.md:340-360`, `docs/notifications.md:50-80`. Не «прочитай весь architecture.md».
+2. **Указывать конкретные атомарные файлы**: `docs/architecture/07-concurrency.md`, `docs/decisions/ADR-019-notification-state-machine.md`, `docs/data-model/notifications.md`. Vault реструктурирован в атомарные ноты (<500 строк каждая) — указывать файл целиком, line-ranges не нужны.
 3. **Pre-flight grep в промпте**: «перед кодом выполни `grep -rn "<key>" docs/` и выпиши **все** совпадения в отчёт». Форсирует широкое сканирование вместо точечного.
-4. **Atomic docs** (короткие файлы по теме) лучше для агентов чем монолитные сборники — целиком читаются, не скимятся.
+4. **Atomic docs** (короткие файлы по теме) лучше для агентов чем монолитные сборники — целиком читаются, не скимятся. После реструктуризации 2026-05-13: ADR → `docs/decisions/`, архитектурные секции → `docs/architecture/`, доменные модели → `docs/data-model/`.
 
 ## Build & Test
 

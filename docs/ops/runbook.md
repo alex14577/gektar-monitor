@@ -30,7 +30,7 @@
 - В логах `auth.session_expired`.
 
 **Действие.**
-1. В UI клиент нажимает **«Перелогиниться»** (см. [[web-ui-architecture]]).
+1. В UI клиент нажимает **«Перелогиниться»** (см. [[web/ui-architecture]]).
 2. Сервер запускает Playwright в **headed** режиме с `user_data_dir=./profile`.
 3. Клиент проходит ЕСИА (логин, пароль, 2FA) в открывшемся окне.
 4. После редиректа на ФИС cookies автоматически обновлены в `profile/`. Окно закрывается.
@@ -77,7 +77,7 @@ sqlite3 state.db "PRAGMA integrity_check;"
 2. Если процесса нет — удалить файл `{data_dir}/app.lock` (Windows: `%LOCALAPPDATA%\fis-monitor\app.lock`, Linux: `~/.local/share/fis-monitor/app.lock`).
 3. Запустить приложение заново.
 
-**Предотвращение.** Логика автозабора lock-файла при мёртвом PID — см. код-сниппет в [[monitoring-plan]] → «Защита от двух копий».
+**Предотвращение.** Логика автозабора lock-файла при мёртвом PID — см. код-сниппет в [[product/monitoring-plan]] → «Защита от двух копий».
 
 ## 5. Бот-ящик заблокирован Yandex (app-password отозван)
 
@@ -225,7 +225,7 @@ sqlite3 state.db "PRAGMA integrity_check;"
 
 ## См. также
 
-- [[monitoring-plan]]
+- [[product/monitoring-plan]]
 - [[notifications]]
-- [[authentication]]
+- [[web/authentication]]
 - [[decisions-log]]

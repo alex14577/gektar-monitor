@@ -114,7 +114,7 @@ def monitor_cycle(region: int):
 
 **Обновление 12.05.2026.** Detection пропавших лотов теперь IN-SCOPE.
 Реализован через отдельный background task `full_scan` (раз в сутки) —
-см. [[monitoring-plan]] → раздел «full_scan» и [[decisions-log]] → «Removal-detection».
+см. [[product/monitoring-plan]] → раздел «full_scan» и [[decisions-log]] → «Removal-detection».
 Без уведомлений: только серая карточка в ленте.
 
 ### 3. Первый запуск (`last_known_id = 0`)
@@ -158,4 +158,4 @@ def monitor_cycle(region: int):
 
 Добавить как отдельную фичу «Экспортировать всё в Excel» по клику клиента, не для мониторинга.
 
-См. также: [[server-performance]], [[cabinet-free-lot]], [[architecture]].
+См. также: [[ops/server-performance]], [[parser/cabinet-free-lot]], [[architecture]].

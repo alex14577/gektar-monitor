@@ -41,4 +41,4 @@
 `id_schema_check`: `ok | anomaly | confirmed`. Это единственный канал, по
 которому UI/runbook отличают «всё ок» от «нужно действие оператора».
 
-См. также: [[architecture]] §1/§7, [[runbook]] (раздел «Аномалии»).
+См. также: [[architecture]] §1/§7, [[ops/runbook]] (раздел «Аномалии»).

@@ -1,13 +1,13 @@
 # Оценка стоимости и сроков
 
-> Финальный MVP-скоуп — см. [[mvp-scope]] и [[decisions-log]]. Без каталога, без Telegram, без auto-update.
+> Финальный MVP-скоуп — см. [[product/mvp-scope]] и [[decisions-log]]. Без каталога, без Telegram, без auto-update.
 
 ## Базовый MVP
 
 | Этап | Часы | Стоимость (3.5к ₽/ч) |
 |---|---:|---:|
 | FastAPI + uvicorn + SQLite + single-instance + 127.0.0.1 + CSRF | 4 | 14 000 ₽ |
-| Парсер списка + sort/early-exit ([[sort-strategy]]) | 4 | 14 000 ₽ |
+| Парсер списка + sort/early-exit ([[parser/sort-strategy]]) | 4 | 14 000 ₽ |
 | Парсер детальной карточки + конвертация ДМС→десятичные | 3 | 10 500 ₽ |
 | Цикл мониторинга + lazy первый запуск + конфигурируемый интервал | 4 | 14 000 ₽ |
 | Lazy enrichment-worker (до 10 параллельно) | 3 | 10 500 ₽ |
@@ -68,4 +68,4 @@
 - VPS: 400–1500 ₽/мес
 - **Итого**: +100–150к ₽ к базе
 
-См. также: [[mvp-scope]], [[decisions-log]], [[risks-legal]].
+См. также: [[product/mvp-scope]], [[decisions-log]], [[product/risks-legal]].

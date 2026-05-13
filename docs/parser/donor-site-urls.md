@@ -1,7 +1,7 @@
 # URL-карта сайта-донора
 
 > URL-карта сайта-донора (НаДальнийВосток.рф), **НЕ наш HTTP API**.
-> Наш API — [[api-reference]].
+> Наш API — [[web/api-reference]].
 
 ## Публичные страницы (без авторизации)
 | URL | Содержание |
@@ -25,7 +25,7 @@
 | URL | Содержание |
 |---|---|
 | `/cabinet/profile` | Профиль пользователя |
-| `/cabinet/free-lot?region=N` | [[cabinet-free-lot|Реестр свободных лотов]] |
+| `/cabinet/free-lot?region=N` | [[parser/cabinet-free-lot|Реестр свободных лотов]] |
 | `/cabinet/free-lot-view?id=N` | Карточка лота |
 | `/cabinet/statement` | Заявления (просмотр/создание) |
 | `/cabinet/statements-history` | История заявлений |
@@ -47,4 +47,4 @@
 - В HTML страниц нет вызовов `fetch()`, `$.ajax({url:...})`, axios — только PJAX и единичные служебные хуки
 - В ЛК (`/cabinet/*`) тоже нет видимых API-токенов или JSON-эндпоинтов
 
-**Вывод:** парсить можно только HTML страниц. См. [[monitoring-plan]].
+**Вывод:** парсить можно только HTML страниц. См. [[product/monitoring-plan]].

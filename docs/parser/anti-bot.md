@@ -24,6 +24,6 @@
 ## Ограничения от Госуслуг (важнее)
 - ESIA_SESSION = 3 часа → каждые ~3 часа нужно проверять валидность сессии
 - Смена IP/устройства → может потребоваться 2FA при следующем входе
-- См. [[risks-legal]]
+- См. [[product/risks-legal]]
 
-См. также: [[authentication]], [[site-architecture]].
+См. также: [[web/authentication]], [[product/site-architecture]].

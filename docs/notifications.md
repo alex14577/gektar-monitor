@@ -293,7 +293,7 @@ Message-ID: <{lot_id}.{channel_id}.{sha256(recipient)[:16]}@fis-monitor.local>
 ```
 RFC 5322 §3.6.4 + RFC 5321: major MTA (Gmail, Yandex, Mail.ru, Outlook) дедуплицируют по Message-ID — повторное письмо с тем же ID отбрасывается на стороне получателя. `recipient` хешируется (sha256, 16 hex chars), чтобы не светить email в логах MTA-цепочки (Received: headers).
 
-Не блокер для MVP single-user. Документировано в [[runbook]] (сценарий «жалоба на дубль письма»).
+Не блокер для MVP single-user. Документировано в [[ops/runbook]] (сценарий «жалоба на дубль письма»).
 
 ### Hard-cap на общее число попыток (R4-M6)
 
@@ -325,7 +325,7 @@ if attempt_no > MAX_TOTAL_ATTEMPTS:
 - `POST /api/notifiers/{channel}/test` — отправить тестовое сообщение
 - `POST /api/notifiers/{channel}/discover` — v2, авто-обнаружение получателей (Telegram chat_id через `getUpdates`)
 
-Детали request/response — в [[api-reference]].
+Детали request/response — в [[web/api-reference]].
 
 ## Хранение секретов
 - **SMTP логин и пароль хранятся в `state.db`** (таблица user-state `smtp_credentials`), **не в `config.json`** (см. [[decisions-log]])
@@ -334,4 +334,4 @@ if attempt_no > MAX_TOTAL_ATTEMPTS:
 - В API-ответах все пароли/токены маскируются `***`
 - В UI пустое поле = «не менять текущее значение»
 
-См. также: [[web-ui-architecture]], [[decisions-log]], [[mvp-scope]], [[architecture]].
+См. также: [[web/ui-architecture]], [[decisions-log]], [[product/mvp-scope]], [[architecture]].
