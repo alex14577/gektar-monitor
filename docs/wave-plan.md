@@ -134,7 +134,7 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - [ ] `a4t.5` — OnboardingService (ждёт `akv.7`) · sonnet
 - [ ] `a4t.6` — SettingsService + SmtpTestService (ждёт `akv.7`) · sonnet
 - [ ] `a4t.2` — EnrichmentService (ждёт `bye.1`, `bye.2`) · haiku
-- [ ] `akv.8` — CyclesRepository · haiku · `repositories/cycles.py`
+- [x] `akv.8` — CyclesRepository · haiku · `repositories/cycles.py`
 - [ ] `tic.2` — EventSubscription + ConfigSubscription · haiku · `infra/event_bus/subscriptions.py`
 
 ### Wave 4 — Services tier 2 + EventBus fan-out
@@ -264,7 +264,17 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - **Hybrid vault правило периодически нарушается haiku-writer'ами** (bye.8 редактировал glossary напрямую). Контент бывает валидный — accept-with-note в Session log. Если кейс повторится — escalate до feedback memory.
 - **Autonomous fix-loop** (по правилу `[[autonomous-review-cycles]]`) отработал штатно: 3 параллельных fix-round'а + 3 параллельных round-2 review = APPROVE без user-pinging.
 
-**Следующая сессия #10:** Wave 3 (Services tier 1): `a4t.4`, `a4t.5`, `a4t.6`, `a4t.2`, `akv.8`, `tic.2`. Большинство haiku, NotifierRegistry — sonnet (cross-cutting + extension point).
+**Следующая сессия #10:** Wave 3 (Services tier 1): `a4t.4`, `a4t.5`, `a4t.6`, `a4t.2`, ~~`akv.8`~~ (готово), `tic.2`. Большинство haiku, NotifierRegistry — sonnet (cross-cutting + extension point).
+
+---
+
+### Session #10 (2026-05-13) — akv.8 отдельно
+
+**Цель:** `akv.8` — SqliteCyclesRepository.
+
+**Сделано:**
+- [x] `akv.8` — `SqliteCyclesRepository` реализован в `src/fis_monitor/infra/sqlite/repositories/cycles.py`. `open` / `close` / `list_recent` по контракту Protocol. `prune_older_than` с chunked DELETE (R3-M7, каждый batch — отдельная BEGIN IMMEDIATE tx). 16 тестов в `tests/infra/sqlite/test_cycles_repository.py` (включая `test_prune_older_than_chunked` с 2500 строками и `test_prune_chunked_releases_lock`). Миграция не нужна — таблица `cycles` уже есть в `docs/db/schema.sql`.
+- **vault:** no-op — реализация следует уже задокументированным паттернам (ADR-016 BEGIN IMMEDIATE, R3-M7 chunked DELETE); новых архитектурных решений нет.
 
 ---
 
