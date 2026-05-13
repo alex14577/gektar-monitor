@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "gektar_monitor",
+  "project_id": "6d8e658e-ac2c-47a0-a090-59848bef3b3e"
+}
