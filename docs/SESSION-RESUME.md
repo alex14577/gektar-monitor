@@ -1,6 +1,47 @@
-# Точка возобновления сессии (обновлено 13.05.2026 после сессии #2)
+# Точка возобновления сессии (обновлено 13.05.2026 после сессии #3)
 
 Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md`.
+
+## Где остановились (сессия #3, 13.05.2026)
+
+**Закрыты 2 таски + сетап Obsidian-vault.** Closed: `531.3` (compute_changes), `bye.3` (SmtpHostPolicy с DNS-blocklist).
+
+### Что сделано в сессии #3
+
+1. **bd `531.3` closed** (commit `6efb52c`) — pure `compute_changes(old, new, tracked)` в `domain/diff.py`. `ALLOWED_TRACKED_FIELDS` SSOT через `typing.get_args(TrackedField)`. `auction`/`list_presence` → `NotImplementedError` (fail fast, не утекает AttributeError из BEGIN IMMEDIATE tx). 19 тестов.
+2. **bd `bye.3` closed** (commits `5efdebe` + `fa44942`) — `DefaultSmtpHostPolicy.resolve_and_check`. Прошло Code Review + Security Engineer + повторное ревью. Финальное состояние:
+   - Thread-safe DNS timeout через `concurrent.futures.ThreadPoolExecutor.submit().result(timeout)` вместо process-global `socket.setdefaulttimeout`.
+   - TLD blocklist расширен `arpa` (RFC 8375 home.arpa, reverse-DNS зоны).
+   - Guard от malformed resolver output (non-tuple/wrong-length/empty sockaddr/non-str ip/non-subscriptable).
+   - `@runtime_checkable` Protocol, `assert→raise` для `-O`.
+   - 49 тестов + 1 skip (real-DNS smoke).
+3. **MVP scope зафиксирован**: без enrichment, без авторизации, без catalog. ≈27 тасок без FIXME (см. §MVP-план ниже).
+4. **Obsidian vault setup** (commit `6ddfd9c`): `docs/.obsidian/` создан, `docs/tasks/` с шаблоном. **DoD расширен**: каждая закрытая bd-таска требует `docs/tasks/<bd-id>.md` + ADR в `decisions-log.md` для архитектурных решений + запись в `glossary.md` для новых терминов. CLAUDE.md обновлён. Записано в bd memory.
+5. **Backfill Obsidian** (commit `688d886`): задним числом созданы task notes для 4 закрытых тасок (531.1, c0u, 531.3, bye.3), 9 новых записей в `glossary.md`, добавлен **ADR-022** (ALLOWED_TRACKED_FIELDS SSOT + SmtpHostPolicyError hierarchy).
+
+### С чего стартовать следующую сессию
+
+- `bd ready` — параллельная волна 1 (разные файлы, нет deps):
+  - **`531.2`** Protocols в `domain/interfaces.py` (Sonnet)
+  - **`akv.1`** ConnectionProvider в `infra/sqlite/` (Sonnet)
+  - **`0t8`** Diagnostics exclude-list (Sonnet)
+- После волны 1 — `akv.2` + `akv.3` (FIXME init_db/migration) последовательно, плюс `tic.1` EventBus параллельно.
+- `bye.4` (SmtpEmailNotifier manual STARTTLS) — разблокирован, но требует BEGIN IMMEDIATE state.db (зависит от `akv.7`).
+
+### MVP-scope (без enrichment, без auth, без catalog)
+
+Дропнуто из MVP: `a4t.2` enrichment, `a4t.9` session monitor, `bye.6` PlaywrightLoginSession, `oxy.4` auth routes, `oxy.3` catalog routes, `oxy.7` templates. **MVP ≈ 27 тасок без FIXME** (29 включая 2 P0 FIXME).
+
+### DoD per task (новое в сессии #3)
+
+Каждая закрытая bd-таска ОБЯЗАНА:
+1. Tests + ruff green, code committed
+2. `bd close <id>`
+3. `docs/tasks/<bd-id>.md` создан (см. `docs/tasks/README.md`)
+4. ADR в `decisions-log.md` если принято архитектурное решение
+5. Запись в `glossary.md` если введён новый термин/класс/Protocol
+
+При делегировании суб-агенту оркестратор включает эту инструкцию в промпт.
 
 ## Где остановились (сессия #2, 13.05.2026)
 
