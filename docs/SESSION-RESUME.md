@@ -1,10 +1,24 @@
-# Точка возобновления сессии (13.05.2026)
+# Точка возобновления сессии (обновлено 13.05.2026 после сессии #2)
 
 Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md`.
 
-## Где остановились
+## Где остановились (сессия #2, 13.05.2026)
 
-**Архитектура завершена** — пройдено 5 раундов ревью (Code Reviewer / Backend Architect / Security Engineer / Database Optimizer), документ зрелый, все эксперты сказали «ГОТОВО к старту кода». Сейчас стоп ровно перед написанием первой строчки use case'ов.
+**Domain DTO слой готов** (commits `81a78f9` + `e5551cb`). Закрыты bd `531.1` (базовые DTO) и `c0u` (extension для Protocol-швов). 85 unit-тестов green. Сейчас стоп перед стартом `531.2` Protocol-интерфейсов.
+
+### Что сделано в сессии #2
+1. **PM-декомпозиция**: 63 bd-issues (9 эпиков + 54 sub-tasks + 6 follow-up из ревью).
+2. **bd 531.1 closed** — Domain Pydantic DTOs (Lot, FieldChange, LotUpsertResult, ResolvedSmtpEndpoint, SsePayloadSchema, LotPublicDTO/UserDTO с raw_json exclude, ErrorCategory, SseCycleError/SmtpFailed, SmtpCredentials, DomainError hierarchy). Critical security fix: убран `SseCycleError.message` (PII vector).
+3. **bd c0u closed** — DTO extension: Settings tree, LotUserState, OnboardingState StrEnum, CycleResult, NotificationRecord (ADR-019 state machine), NotifierConfig, ParsedListRow/Detail, HttpResponse, LockHandle, NotifyResult, LoginOutcome (Literal), SessionStatus, SseSessionExpired/LotNew/LotStatus, SseEvent union (PEP 695), EventSubscription[T] generic Protocol, ConfigSubscription. data-model.md обновлён (SESSION_EXPIRED whitelist).
+4. **6 follow-up bd-issues** из ревью: `z9d` (move Subscription Protocols в interfaces.py в рамках 531.2), `0u7` (split models.py), `0t8` (diagnostics PII exclude-list для DiagnosticsService), `arl` (NotifierDispatcher NotifyResult.detail leak test), `vn5` (ADR pydantic[email]), `7pi` (LotUserState.note max_length).
+5. **3 follow-up из 531.1**: `ctz` (SmtpCredentials pickle hardening), `x2x` (Message-ID hash known-limit docs), `4kh` (errors.py PII-in-args docstring).
+
+### С чего стартовать следующую сессию
+- `bd ready` — следующая в очереди: **531.2 Protocols (interfaces.py)**. Brainstorm-документ уже подготовлен в сессии #2 (см. transcript) — решения: файл `interfaces.py` (по canon, НЕ `protocols.py`), ConnectionProvider исключить, UserStateRepository включить, runtime_checkable только Notifier+Clock, MigrationRunner Protocol НЕ создавать. 17 Protocol-ов: 4 Layer-0 + 7 Layer-1 + 7 Layer-2 + 1 Notifier.
+- После 531.2 закроется и `z9d` (перенести EventSubscription/ConfigSubscription).
+- Параллельно с 531.2 можно запускать P0 FIXME: `akv.2` (init_db PRAGMA user_version) и `akv.3` (Migration v1→v2).
+
+### Архитектура завершена
 
 ## Что сделано в этой сессии (13.05.2026)
 
