@@ -145,7 +145,8 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 5 — Composition assembly
 
-- [ ] `8ov.2` — build_container (5 слоёв топологически) — **критический путь, одиночка** · sonnet · ждёт `8ov.1`, `a4t.1`, `a4t.3`, `a4t.4`
+- [x] `d7k` — FullScanService minimal removal-detection (создан в Wave 5, чтобы `build_container` мог инстанцировать `Services.full_scan` реально, а не заглушкой) · sonnet · `services/full_scan.py`
+- [ ] `8ov.2` — build_container (5 слоёв топологически) — **критический путь, одиночка** · sonnet · ждёт `8ov.1`, `a4t.1`, `a4t.3`, `a4t.4`, `d7k`
 
 ### Wave 6 — FastAPI Depends providers
 

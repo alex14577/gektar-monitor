@@ -261,6 +261,7 @@ class FullScanService:
             logger.warning(
                 "full_scan: parse error for region=%s — skipping region",
                 region,
+                exc_info=True,
             )
             return set()
         except Exception:
