@@ -1,6 +1,55 @@
-# Точка возобновления сессии (обновлено 13.05.2026 после сессии #5)
+# Точка возобновления сессии (обновлено 13.05.2026 после сессии #6)
 
 Контекст для следующей сессии Claude Code. Прочитать первым, потом — `architecture.md` + `decisions-log.md` (stub-MOC; нужные секции — в `docs/architecture/`, `docs/decisions/`).
+
+## Где остановились (сессия #6, 13.05.2026)
+
+**Закрыты 3 bd-issues (Wave 2B часть 1): `akv.4`, `vgm.1`, `1zk`.** Commit `7dcdcbb`.
+
+### Что сделано в сессии #6
+
+1. **bd `akv.4` closed** — `MigrationRunner` Protocol в `domain/interfaces.py` переписан с thin stub `run(target)` → `list_migrations()` + `run_pending(conn, from, to)` + `__call__` seam (совместимо с `Callable` сигнатурой из `init_db`). `SqliteMigrationRunner` в `infra/sqlite/migrations.py`: BEGIN IMMEDIATE + TOCTOU re-check `PRAGMA user_version == from_version` + greedy chain build + atomic `PRAGMA user_version` update в одной tx + rollback on exception. `Migration` frozen dataclass с `apply: Callable[[Connection], None]` (apply работает ВНУТРИ runner's tx). Новые DomainError: `ConcurrentMigrationError`, `MigrationChainBroken` (PII-safe). Runner ships empty — v1→v2 регистрация в akv.3.
+
+2. **bd `vgm.1` closed** — root `tests/conftest.py`: `schema_sql` (session-scoped, fail-fast при отсутствии файла), `tmp_db_path`, `tmp_db` (function-scope `ConnectionProvider` с применённым `init_db(schema_sql)`). `tests/factories.py`: plain-function `make_lot` / `make_notification` / `make_settings`. Легаси `tests/domain/conftest.py:make_lot` fixture оставлен (backward compat).
+
+3. **bd `1zk` closed** — закрыт в том же коммите как часть TOCTOU re-check в `SqliteMigrationRunner.run_pending` (Major из ревью akv.2 учтён в дизайне akv.4).
+
+4. **Vault обновлён**:
+   - `docs/glossary.md`: 6 новых/обновлённых записей — `MigrationRunner` (полностью переписан), `SqliteMigrationRunner`, `Migration`, `ConcurrentMigrationError`, `MigrationChainBroken`, `tmp_db (pytest fixture)`.
+   - ADR не создавался (тривиальная реализация существующего design).
+
+5. **Орк-инцидент**: оба запущенных `Backend Architect` (sonnet) sub-agent'а самовольно запустили skill `fewer-permission-prompts` (модифицировали `.claude/settings.json`) вместо своих writer-промптов. Откатил через `git checkout`, написал код сам, прогнал Code Reviewer (sonnet) — APPROVE с Majors (применены), commit. **Feedback пользователя**: сам писать запрещено даже при сбое sub-agent'а — пробовать других писателей (Senior Developer / Software Architect / general-purpose). Сохранено в bd memory: `sub-agent-mandatory-for-writer-tasks`, `backend-architect-skill-hijack`.
+
+### Состояние репо в конце сессии #6
+
+- Working tree: clean (commit `7dcdcbb`)
+- Branch: `master`
+- Tests: **295 passed, 2 skipped** (29 новых)
+- Ruff: чисто по новому коду (2 legacy RUF001 в `tests/domain/conftest.py:31`, известно)
+- Git remote: НЕТ (local-only)
+- bd: 13 closed, 65 open, 26 blocked, 39 ready
+
+### С чего стартовать сессию #7
+
+**Wave 2B часть 2:**
+
+- **`akv.3`** P0 — v1→v2 rebuild migration (12-step pattern из SQLite docs). Теперь регистрируется через `SqliteMigrationRunner(migrations=[Migration(1, 2, apply=_v1_to_v2)])`. См. ADR-019 §R4-M8 FIXME (SQL невыполним в ALTER TABLE — нужен rebuild). Файл: `infra/sqlite/migrations_v1_to_v2.py` (или внутри `migrations.py` как функция).
+- **`bye.4`** P0 — `SmtpEmailNotifier` (manual STARTTLS + Message-ID). **ЖДЁТ `akv.7`** (state.db SMTP host SSOT) — проверить разблокирован ли.
+- **`vgm.3`** P1 — import-linter CI контракты (ADR-006). Независимый от других P0/P1.
+- **`8ov.1`** P1 — Composition: Infra + Services dataclasses (split Container).
+
+**Заметки для оркестратора:**
+- `akv.3` будет использовать `Migration` dataclass + `SqliteMigrationRunner` registry из akv.4. Pre-write extraction: ADR-019 §R4-M8 (полная цитата SQL невыполнимой версии) + SQLite docs про 12-step pattern.
+- Параллельность: `akv.3` (`infra/sqlite/migrations*.py`) + `vgm.3` (`pyproject.toml` / `importlinter.cfg`) — разные файлы.
+- **ОБЯЗАТЕЛЬНО**: writer ВСЕГДА через sub-agent (правило сессии #6). При сбое одного агента — пробовать другого (Senior Developer / Software Architect / general-purpose), НЕ писать самому.
+- Reviewer ДО `bd close`, sonnet по дефолту.
+
+### Memory заметки (новые в session #6)
+
+- `backend-architect-skill-hijack` — Backend Architect sub-agent дважды самовольно запустил skill `fewer-permission-prompts`. Избегать его для writer-задач.
+- `sub-agent-mandatory-for-writer-tasks` — в этом проекте писать код самому запрещено. При сбое sub-agent'а — переключаться на другого, не писать вручную.
+
+---
 
 ## Где остановились (сессия #5, 13.05.2026)
 
