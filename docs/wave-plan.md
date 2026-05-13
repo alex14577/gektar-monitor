@@ -146,7 +146,7 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 ### Wave 5 — Composition assembly
 
 - [x] `d7k` — FullScanService minimal removal-detection (создан в Wave 5, чтобы `build_container` мог инстанцировать `Services.full_scan` реально, а не заглушкой) · sonnet · `services/full_scan.py`
-- [ ] `8ov.2` — build_container (5 слоёв топологически) — **критический путь, одиночка** · sonnet · ждёт `8ov.1`, `a4t.1`, `a4t.3`, `a4t.4`, `d7k`
+- [x] `8ov.2` — build_container (5 слоёв топологически) — **критический путь, одиночка** · sonnet · ждёт `8ov.1`, `a4t.1`, `a4t.3`, `a4t.4`, `d7k`
 
 ### Wave 6 — FastAPI Depends providers
 
@@ -327,6 +327,29 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - **opus-reviewer для critical-таск** (a4t.3 state-machine + a4t.1 use-case) поймал semantic-bug в a4t.1 (`error_category="network"` для багов). Sonnet-reviewer мог пропустить — это уровень canon-cross-check, не code-quality.
 - **Sub-agent socket-error mid-fase** (a4t.1 round-1) — production-код дошёл до диска до краша. Recovery-стратегия: спавн второго writer'а для дописывания тестов под existing контракт (читает код как канон). Зафиксирована pattern.
 - **Acceptance contract divergence**: a4t.1 acceptance говорил «ConnectivityError vs UpstreamError vs ParseBugError» — в коде `ConnectivityError` не существовал; canon §08 описывает `UpstreamError(category=...)`. Решено через extension `UpstreamError.category` без создания дублирующего класса.
+
+---
+
+### Session #12 (2026-05-13) — Wave 5 (Composition assembly)
+
+**Цель:** `8ov.2` — единственная одиночка на critical path, blocking 8ov.3/8ov.4 и весь остаток MVP. Sub-task `d7k` создана для реального FullScanService (вместо stub) по запросу пользователя.
+
+**Сделано:**
+- `d7k` (`2064f14` + `6ac13de`) — `FullScanService` minimal removal-detection: scheduler по `monitoring.full_scan_time`, single-page-per-region MVP, mass-deactivate guard (empty seen_ids → abort), batched 50 + `stop_event.wait(0.05)` (НЕ time.sleep — R3-M2). 8 tests включая mid-scan shutdown responsiveness (B1/B2 fix-round). Reviewer fix-loop: round-1 NEEDS-WORK (2 blockers stop_event propagation + 1 major exc_info HTTP) → round-2 APPROVE с 1 lingering major (exc_info на ParseBugError, dofix one-liner оркестратором).
+- `8ov.2` — `build_container(settings, data_dir) -> Container` в `src/fis_monitor/composition.py` (415 LOC) + 11 tests. Топологическая сборка 5 слоёв per ADR-004 §4.2: Layer 0 (event_bus / locker / conn_provider / stub-clock / stub-config_source / cycle_progress_signal) → init_db schema migration → Layer 1 (5 real Sqlite-repos + stub user_state_repo) → Layer 2 (RequestsHttpClient / Selectolax-parsers / PlaywrightLoginSession / DefaultSmtpHostPolicy + stubs autostart/session_probe) → Layer 3 (ExplicitNotifierRegistry с email + browser, HeartbeatNotifier deferred → bd `czs`) → Layer 4 (NotifierDispatcher first, потом monitor_cycle/full_scan/enrichment/onboarding/settings_service/smtp_test). **9 inline stubs** для отложенных частей (`_NotImplementedClock`/`ConfigSource`/`UserStateRepository`/`AutostartManager`/`SessionProbe`/`LoginService`/`SessionMonitor`/`DiagnosticsService`/`LotQueryService`) — каждый raise NotImplementedError с указанием bd-task (bye.7/bye.9/a4t.7-9). Reviewer NEEDS-WORK round-1 (2 majors): M1 HeartbeatNotifier missing without paper trail → создан `czs`-task + комментарий в коде; M2 SmtpEmailNotifier instantiated twice → extracted в local `email_notifier`, reused в SmtpTestService. Также m1 minor `settings: object → Settings | None`. **Round-2 — all 306 unit tests green, ruff clean.**
+
+**Итог wave:** 2/2 closed (d7k + 8ov.2). Разблокированы: `8ov.3` (three-phase shutdown lifespan), `8ov.4` (FastAPI Depends providers).
+
+**Vault обновления (orchestrator):**
+- `docs/glossary.md` — +1 запись: FullScanService (под секцией «Сервисы Wave 4», corrected). build_container — НЕ требует отдельной записи (Container уже описан, build_container — стандартный composition-root паттерн).
+- Нет новых ADR (следуют ADR-004, ADR-005).
+- bd `czs` создан как P3 follow-up для HeartbeatNotifier.
+
+**Подтверждения / lessons workflow:**
+- **Sub-agent self-commit + bd close без review** (d7k writer закоммитил `2064f14` после fix-round'a без явной команды) — повтор паттерна из session #10 (akv.8 + tic.2). Оркестратор обогнал через re-review + дополнительный fix (M2 exc_info) + commit. Если повторится в третий раз → escalate в feedback memory.
+- **Sub-agent socket-error mid-write** (8ov.2 writer-фаза, 197s) — composition.py (406 LOC) на диске, тесты не написались. Оркестратор сам дописал тесты вместо повторного спавна — быстрее и контекст уже в голове. Pattern: при socket-error в большой Sonnet-task оркестратор оценивает остаток работы и решает сам/новый writer.
+- **Inline stubs vs Optional fields** (decision при старте): выбрана стратегия inline stubs в composition.py с raise NotImplementedError (vs Optional[X] = None в Container dataclass). Pro: канон-shape Infra/Services сохранён; Con: 9 минорных классов в одном файле, чуть-чуть шума. Trade-off в пользу cohesion канона.
+- **Минимальный FullScanService отдельной таской** (d7k spawned по запросу user) вместо stub — добавил полдня работы, но Wave 5 теперь имеет реальный removal-detection вместо placeholder'а. Канон не предписывал это решение — pure product call.
 
 ---
 
