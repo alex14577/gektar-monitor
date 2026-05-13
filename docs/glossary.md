@@ -85,6 +85,10 @@
 
 - **MigrationChainBroken** — `DomainError` в `domain/errors.py`. Поднимается когда в registered migrations нет непрерывной цепочки `from_version → to_version`. Атрибуты: `from_version: int`, `to_version: int`. Configuration-level ошибка (не runtime race). Реализовано в akv.4.
 
+- **SqliteSettingsRepository** — конкретная реализация `SettingsRepository` Protocol в `infra/sqlite/repositories/settings.py`. K/V на таблице `state`. Write-методы (`set`, `set_onboarding`) — внутри `BEGIN IMMEDIATE` + ROLLBACK on exception. Read-методы (`get`, `get_onboarding`) — без явной tx. `OnboardingState` сериализуется как `.value` под ключом `onboarding_state`; дефолт `OnboardingState.NOT_STARTED` если строки нет. `updated_at` стампится через injected `Clock.now()` (UTC, ISO 8601). Реализовано в akv.7.
+
+- **SqliteSmtpCredentialsRepository** — конкретная реализация `SmtpCredentialsRepository` Protocol в `infra/sqlite/repositories/smtp_credentials.py`. Singleton row `id=1` (enforced через `CHECK (id=1)` в schema). `save()` — атомарный `INSERT OR REPLACE` всех 6 полей (smtp_user, smtp_password, smtp_host, smtp_port, use_default, updated_at) в одной `BEGIN IMMEDIATE` tx — последний save wins consistently. `load()` использует **named columns** в SELECT (обходит column-order quirk после `v1_to_v2` migration — см. [[#v1_to_v2 (migration)]]), оборачивает `smtp_password` в `SecretStr`. `.get_secret_value()` вызывается строго один раз — в момент SQL binding, никогда в logs/exceptions/repr (ADR-017). Реализовано в akv.7.
+
 - **tmp_db (pytest fixture)** — function-scope в `tests/conftest.py`. Возвращает `ConnectionProvider` подключённый к свежему `tmp_path/state.db` с применённым `schema.sql` через `init_db()`. WAL-режим выставляется per-connection (`ConnectionProvider._configure`, ADR-007). Cleanup: `provider.close_all()` в `finally`. Companions: `tmp_db_path` (Path) и `schema_sql` (session-scoped str). Реализовано в vgm.1.
 
 ## Onboarding и конфигурация
