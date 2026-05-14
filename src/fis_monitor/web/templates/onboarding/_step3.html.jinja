@@ -1,4 +1,5 @@
 {# Step 3 — email получателя (куда слать) #}
+{% if data.error %}<div style="color:#c00; padding:8px 0; font-size:.875rem;" role="alert">{{ data.error }}</div>{% endif %}
 <h1>Кому слать уведомления</h1>
 <p class="wiz__sub">
   Адрес получателя — на него будут приходить письма от бот-ящика. Обычно это ваш личный email.

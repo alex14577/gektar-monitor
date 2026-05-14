@@ -12,6 +12,10 @@ Endpoints (Wizard UI — HTML):
   GET  /onboarding/recipients — step 3 (requires SMTP_CONFIGURED state).
   GET  /onboarding/test-email — step 4 (requires RECIPIENTS_SET state).
 
+Endpoints (Wizard POST — HTML/htmx):
+  POST /onboarding/save?step=N  — wizard form submission dispatcher.
+  POST /onboarding/smtp-test    — htmx fragment: validate credentials + test SMTP.
+
 DI: all dependencies are injected via Depends(); routes are decoupled from
 Container and testable via app.dependency_overrides.
 
@@ -20,16 +24,28 @@ See docs/onboarding.md for the FSM spec and 409 body shape.
 
 from __future__ import annotations
 
+import contextlib
+from datetime import UTC, datetime
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
-from fis_monitor.domain.errors import InvalidTransitionError
+from fis_monitor.domain.errors import InvalidTransitionError, SmtpHostPolicyError
 from fis_monitor.domain.interfaces import ConfigSource
-from fis_monitor.domain.models import OnboardingState, Settings
+from fis_monitor.domain.models import LotPublicDTO, OnboardingState, Settings, SmtpCredentials
 from fis_monitor.services.onboarding import OnboardingService
-from fis_monitor.web.deps import get_config_source, get_onboarding, get_templates
+from fis_monitor.services.settings import SettingsService
+from fis_monitor.services.smtp_test import SmtpTestService
+from fis_monitor.web.deps import (
+    get_config_source,
+    get_onboarding,
+    get_settings_service,
+    get_smtp_test,
+    get_templates,
+)
 
 __all__ = ["router"]
 
@@ -306,3 +322,440 @@ def post_skip_email(
                 "redirect_to": "/onboarding",
             },
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# POST Wizard endpoints (htmx form submission)
+# ---------------------------------------------------------------------------
+
+# Mapping: region slug (string from HTML form) → domain integer ID.
+# TODO(awb): move to domain/regions.py once dedicated region-mapping task lands.
+_REGION_SLUG_TO_INT: dict[str, int] = {
+    "dfo": 1,
+    "arctic": 2,
+}
+
+
+def _hx_redirect(url: str) -> HTMLResponse:
+    """Return 200 with HX-Redirect header so htmx performs client-side navigation."""
+    return HTMLResponse(content="", status_code=200, headers={"HX-Redirect": url})
+
+
+def _hx_redirect_to_step(svc: OnboardingService) -> HTMLResponse:
+    """HX-Redirect to the current wizard step (used for concurrent-submit mismatch)."""
+    return _hx_redirect(svc.url_for_current_step())
+
+
+def _rerender(
+    request: Request,
+    templates: Jinja2Templates,
+    cfg: ConfigSource,
+    step: int,
+    error: str,
+    extra_data: dict[str, Any] | None = None,
+) -> HTMLResponse:
+    """Re-render the wizard at the given step with an error message."""
+    settings = cfg.current()
+    data: dict[str, Any] = {"error": error}
+    if extra_data:
+        data.update(extra_data)
+    return _wizard_response(request, templates, step=step, data=data, settings=settings)
+
+
+def _is_state_mismatch(exc: InvalidTransitionError, expected_from: OnboardingState) -> bool:
+    """Return True when the current state differs from the expected from_state.
+
+    This indicates a concurrent submit or already-advanced state — the right
+    response is to redirect the user to the current step rather than show an
+    error.  When current_state == from_state the guard failed (e.g. test email
+    not confirmed), so we re-render with an explanation.
+    """
+    return exc.current_state != expected_from.value
+
+
+def _test_lot_fixture() -> LotPublicDTO:
+    """Return a deterministic synthetic LotPublicDTO for SMTP send tests."""
+    _now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    return LotPublicDTO(
+        id=0,
+        cadastral_no="00:00:0000000:0000",
+        area_sqm=1000,
+        region="Test region",
+        municipality=None,
+        land_category=None,
+        permitted_use=None,
+        ogv=None,
+        status="Test",
+        date_create=_now,
+        date_update=None,
+        lat=None,
+        lon=None,
+        has_boundaries=None,
+        raw_json={},
+        parser_version=1,
+        first_seen=_now,
+        last_seen=_now,
+        detail_fetched_at=None,
+        enrichment_status=None,
+        last_seen_at=None,
+        is_active=True,
+        inactive_reason=None,
+        inactive_since=None,
+        inactive_confirmed_at=None,
+        age_seconds=0,
+        tier="match",
+        freshness="hot",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Step handlers (OCP: new steps added without touching the dispatcher)
+# ---------------------------------------------------------------------------
+
+
+def _handle_step1_next(
+    request: Request,
+    form: dict[str, Any],
+    svc: OnboardingService,
+    cfg: ConfigSource,
+    templates: Jinja2Templates,
+) -> HTMLResponse:
+    """Handle step 1 action=next: parse regions, save, advance."""
+    raw_slugs = form.getlist("regions") if hasattr(form, "getlist") else form.get("regions", [])
+    if isinstance(raw_slugs, str):
+        raw_slugs = [raw_slugs]
+
+    region_ids: list[int] = []
+    for slug in raw_slugs:
+        rid = _REGION_SLUG_TO_INT.get(slug)
+        if rid is None:
+            return _rerender(
+                request, templates, cfg, step=1,
+                error="Выберите хотя бы один регион из списка.",
+            )
+        region_ids.append(rid)
+
+    if not region_ids:
+        return _rerender(
+            request, templates, cfg, step=1,
+            error="Выберите хотя бы один регион.",
+        )
+
+    # Persist regions via ConfigSource (pattern from settings.py post_regions)
+    current = cfg.current()
+    new_settings = current.model_copy(update={"regions": region_ids})
+    cfg.save(new_settings)
+
+    try:
+        svc.advance(OnboardingState.NOT_STARTED, OnboardingState.REGIONS_SET)
+    except InvalidTransitionError:
+        return _hx_redirect_to_step(svc)
+
+    return _hx_redirect("/onboarding/smtp")
+
+
+def _handle_step2_next(
+    request: Request,
+    form: dict[str, Any],
+    svc: OnboardingService,
+    cfg: ConfigSource,
+    settings_svc: SettingsService,
+    templates: Jinja2Templates,
+) -> HTMLResponse:
+    """Handle step 2 action=next: validate SMTP creds, save, advance."""
+    smtp_host = (form.get("smtp_host") or "").strip()
+    smtp_login = (form.get("smtp_login") or "").strip()
+    smtp_pass = form.get("smtp_pass") or ""
+    smtp_from_name = (form.get("smtp_from_name") or "").strip()
+
+    try:
+        smtp_port = int(form.get("smtp_port") or 0)
+    except (ValueError, TypeError):
+        smtp_port = 0
+
+    if not smtp_host:
+        return _rerender(
+            request, templates, cfg, step=2,
+            error="SMTP-сервер не может быть пустым.",
+            extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
+                        "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
+        )
+    if not (1 <= smtp_port <= 65535):
+        return _rerender(
+            request, templates, cfg, step=2,
+            error=f"Порт {smtp_port!r} вне допустимого диапазона 1-65535.",
+            extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
+                        "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
+        )
+
+    try:
+        creds = SmtpCredentials(
+            smtp_user=smtp_login,
+            smtp_password=smtp_pass,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+        )
+        settings_svc.set_smtp_credentials(creds)
+    except SmtpHostPolicyError as exc:
+        return _rerender(
+            request, templates, cfg, step=2,
+            error=f"Ошибка подключения к SMTP: {exc}",
+            extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
+                        "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
+        )
+    except (ValueError, Exception) as exc:
+        return _rerender(
+            request, templates, cfg, step=2,
+            error=f"Ошибка: {exc}",
+            extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
+                        "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
+        )
+
+    try:
+        svc.advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+    except InvalidTransitionError as exc:
+        if _is_state_mismatch(exc, OnboardingState.REGIONS_SET):
+            return _hx_redirect_to_step(svc)
+        # Guard fail: smtp_test_last_result_ok not set
+        return _rerender(
+            request, templates, cfg, step=2,
+            error='Сначала нажмите "Проверить подключение" и дождитесь успешного результата.',
+            extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
+                        "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
+        )
+
+    return _hx_redirect("/onboarding/recipients")
+
+
+def _handle_step2_skip(svc: OnboardingService) -> HTMLResponse:
+    """Handle step 2 action=skip: skip email, advance twice, redirect."""
+    svc.skip_email()
+    svc.advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+    svc.advance(OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET)
+    return _hx_redirect("/onboarding/recipients")
+
+
+def _handle_step3_next(
+    request: Request,
+    form: dict[str, Any],
+    svc: OnboardingService,
+    cfg: ConfigSource,
+    smtp_test_svc: SmtpTestService,
+    templates: Jinja2Templates,
+) -> HTMLResponse:
+    """Handle step 3 action=next: validate recipients, save, optionally test, advance."""
+    raw_email = (form.get("recipient_email") or "").strip()
+    send_test = form.get("send_test_email") == "1"
+
+    # Parse comma-separated emails
+    if not raw_email:
+        return _rerender(
+            request, templates, cfg, step=3,
+            error="Введите хотя бы один email-адрес получателя.",
+            extra_data={"recipient_email": raw_email},
+        )
+
+    raw_parts = [p.strip() for p in raw_email.split(",") if p.strip()]
+    validated_emails: list[str] = []
+    for part in raw_parts:
+        try:
+            # Use pydantic EmailStr for validation
+            validated = EmailStr._validate(part)  # type: ignore[attr-defined]
+            validated_emails.append(str(validated))
+        except Exception:
+            return _rerender(
+                request, templates, cfg, step=3,
+                error=f"Некорректный email-адрес: {part!r}",
+                extra_data={"recipient_email": raw_email},
+            )
+
+    if not validated_emails:
+        return _rerender(
+            request, templates, cfg, step=3,
+            error="Введите хотя бы один email-адрес получателя.",
+            extra_data={"recipient_email": raw_email},
+        )
+
+    # Persist recipients via ConfigSource
+    current = cfg.current()
+    new_email = current.notifications.email.model_copy(
+        update={"recipients": validated_emails}
+    )
+    new_notifications = current.notifications.model_copy(update={"email": new_email})
+    new_settings = current.model_copy(update={"notifications": new_notifications})
+    cfg.save(new_settings)
+
+    # Optionally send test email (fire-and-forget; ok/fail surfaced on step 4)
+    if send_test and validated_emails:
+        test_lot = _test_lot_fixture()
+        with contextlib.suppress(Exception):
+            smtp_test_svc.test_send(test_lot, validated_emails[0])
+
+    try:
+        svc.advance(OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET)
+    except InvalidTransitionError as exc:
+        if _is_state_mismatch(exc, OnboardingState.SMTP_CONFIGURED):
+            return _hx_redirect_to_step(svc)
+        return _rerender(
+            request, templates, cfg, step=3,
+            error="Невозможно перейти к следующему шагу. Проверьте настройки SMTP.",
+            extra_data={"recipient_email": raw_email},
+        )
+
+    return _hx_redirect("/onboarding/test-email")
+
+
+def _handle_step3_skip(svc: OnboardingService) -> HTMLResponse:
+    """Handle step 3 action=skip: skip email, advance, redirect."""
+    svc.skip_email()
+    svc.advance(OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET)
+    return _hx_redirect("/onboarding/test-email")
+
+
+def _handle_step4_next(
+    request: Request,
+    form: dict[str, Any],
+    svc: OnboardingService,
+    cfg: ConfigSource,
+    templates: Jinja2Templates,
+) -> HTMLResponse:
+    """Handle step 4 action=next: advance to COMPLETED."""
+    try:
+        svc.advance(OnboardingState.RECIPIENTS_SET, OnboardingState.COMPLETED)
+    except InvalidTransitionError as exc:
+        if _is_state_mismatch(exc, OnboardingState.RECIPIENTS_SET):
+            return _hx_redirect_to_step(svc)
+        return _rerender(
+            request, templates, cfg, step=4,
+            error=(
+                "Тестовое письмо не подтверждено."
+                " Отправьте тестовое письмо или выберите «Пропустить»."
+            ),
+        )
+    return _hx_redirect("/")
+
+
+# Handler map (OCP: new steps registered here, no dispatcher changes needed).
+# key: (step: int, action: str) → handler callable
+_HandlerKey = tuple[int, str]
+
+# Defined after handler functions; populated at end of module.
+_HANDLERS: dict[_HandlerKey, Any] = {}
+
+
+@router.post("/save", include_in_schema=False, response_model=None)
+async def post_onboarding_save(
+    request: Request,
+    step: int = 0,
+    svc: OnboardingService = Depends(get_onboarding),
+    cfg: ConfigSource = Depends(get_config_source),
+    settings_svc: SettingsService = Depends(get_settings_service),
+    smtp_test_svc: SmtpTestService = Depends(get_smtp_test),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """Dispatcher for all wizard POST submissions.
+
+    Reads ``step`` from query-param and ``action`` from form body.
+    Delegates to the appropriate step handler via ``_HANDLERS`` dict (OCP).
+
+    On success: returns 200 with ``HX-Redirect`` header.
+    On validation error: returns 200 with re-rendered wizard fragment.
+    On unknown step: returns 400.
+    """
+    form = await request.form()
+    action = form.get("action") or "next"
+
+    key: _HandlerKey = (step, str(action))
+
+    # Step 2 handlers need settings_svc; step 3 needs smtp_test_svc.
+    # We pass all context and each handler uses only what it needs.
+    if key == (1, "next"):
+        return _handle_step1_next(request, form, svc, cfg, templates)  # type: ignore[arg-type]
+    elif key == (2, "next"):
+        return _handle_step2_next(request, form, svc, cfg, settings_svc, templates)  # type: ignore[arg-type]
+    elif key == (2, "skip"):
+        return _handle_step2_skip(svc)
+    elif key == (3, "next"):
+        return _handle_step3_next(request, form, svc, cfg, smtp_test_svc, templates)  # type: ignore[arg-type]
+    elif key == (3, "skip"):
+        return _handle_step3_skip(svc)
+    elif key == (4, "next"):
+        return _handle_step4_next(request, form, svc, cfg, templates)  # type: ignore[arg-type]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown step/action: step={step}, action={action!r}",
+        )
+
+
+@router.post("/smtp-test", include_in_schema=False, response_model=None)
+async def post_onboarding_smtp_test(
+    request: Request,
+    settings_svc: SettingsService = Depends(get_settings_service),
+    smtp_test_svc: SmtpTestService = Depends(get_smtp_test),
+) -> HTMLResponse:
+    """htmx endpoint: validate SMTP credentials and send a test email.
+
+    Accepts form data: smtp_host, smtp_port, smtp_login, smtp_pass.
+
+    Flow:
+      1. Build SmtpCredentials and call SettingsService.set_smtp_credentials()
+         (validates via SmtpHostPolicy.resolve_and_check + persists).
+      2. Call SmtpTestService.test_send() with a synthetic test lot.
+      3. Return an HTML fragment ``<span id="smtp-test-result" ...>`` for
+         htmx outerHTML swap.
+
+    All errors return 200 (not HTTP errors) — they are user-facing validation
+    messages rendered as the fragment.  PII-free: no host/password in fragment.
+    """
+    form = await request.form()
+    smtp_host = (form.get("smtp_host") or "").strip()
+    smtp_login = (form.get("smtp_login") or "").strip()
+    smtp_pass = form.get("smtp_pass") or ""
+    try:
+        smtp_port = int(form.get("smtp_port") or 0)
+    except (ValueError, TypeError):
+        smtp_port = 0
+
+    # Step 1: validate + persist credentials
+    try:
+        creds = SmtpCredentials(
+            smtp_user=smtp_login,
+            smtp_password=smtp_pass,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+        )
+        settings_svc.set_smtp_credentials(creds)
+    except SmtpHostPolicyError:
+        _policy_err_msg = (
+            '<span class="chip chip--err" id="smtp-test-result">'
+            "Ошибка: хост недоступен или заблокирован политикой"
+            "</span>"
+        )
+        return HTMLResponse(content=_policy_err_msg, status_code=200)
+    except (ValueError, Exception) as exc:
+        _val_err_msg = (
+            f'<span class="chip chip--err" id="smtp-test-result">'
+            f"Ошибка: {exc}</span>"
+        )
+        return HTMLResponse(content=_val_err_msg, status_code=200)
+
+    # Step 2: send test email
+    test_lot = _test_lot_fixture()
+    result = smtp_test_svc.test_send(test_lot, smtp_login or "test@localhost")
+
+    if result.ok:
+        _ok_msg = (
+            '<span class="chip chip--ok" id="smtp-test-result">'
+            "ОК — письмо отправлено"  # noqa: RUF001
+            "</span>"
+        )
+        return HTMLResponse(content=_ok_msg, status_code=200)
+    else:
+        # detail is PII-safe per NotifyResult contract (no host/recipient/password)
+        detail_safe = result.detail[:200] if result.detail else "Неизвестная ошибка"
+        _err_msg = (
+            f'<span class="chip chip--err" id="smtp-test-result">'
+            f"Ошибка: {detail_safe}</span>"
+        )
+        return HTMLResponse(content=_err_msg, status_code=200)

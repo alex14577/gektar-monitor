@@ -115,6 +115,39 @@ async def onboarding_gate(request: Request, call_next):
 
 `advance()` использует `BEGIN IMMEDIATE` (см. ADR-016) — две вкладки не могут одновременно advance. Вторая увидит `InvalidTransitionError(current=<уже_новый>, requested=<старый>)` и редиректнется на свой step.
 
+## POST Wizard endpoints (htmx)
+
+Имплементированы в `web/routes/onboarding.py`.
+
+### `POST /onboarding/save?step=N`
+
+Единый htmx-диспетчер для form-сабмитов визарда. Читает `step` из query-param и `action` (`next` / `skip`) из form-body. Диспетчеризация через dict `_HANDLERS` (OCP — новые шаги регистрируются без правки диспетчера).
+
+Ответы:
+- **Success**: `200` + `HX-Redirect: /onboarding/<next-step>` — htmx выполняет навигацию.
+- **Validation error / guard fail**: `200` + re-render `wizard.html.jinja` с тем же `step` и `data.error` строкой.
+- **Concurrent submit / state mismatch**: `200` + `HX-Redirect: url_for_current_step()`.
+
+Step handlers:
+- Step 1 `next`: парсит `regions[]` slugs → `_REGION_SLUG_TO_INT` → `ConfigSource.save()` → `advance(NOT_STARTED, REGIONS_SET)`.
+- Step 2 `next`: валидирует SMTP поля → `SettingsService.set_smtp_credentials()` → `advance(REGIONS_SET, SMTP_CONFIGURED)`.
+- Step 2 `skip`: `skip_email()` → `advance(REGIONS_SET, SMTP_CONFIGURED)` → `advance(SMTP_CONFIGURED, RECIPIENTS_SET)`.
+- Step 3 `next`: валидирует email(s) → `ConfigSource.save(recipients)` → опц. `SmtpTestService.test_send()` → `advance(SMTP_CONFIGURED, RECIPIENTS_SET)`.
+- Step 3 `skip`: `skip_email()` → `advance(SMTP_CONFIGURED, RECIPIENTS_SET)`.
+- Step 4 `next`: `advance(RECIPIENTS_SET, COMPLETED)` → `HX-Redirect: /`.
+
+### `POST /onboarding/smtp-test`
+
+htmx-fragment эндпоинт (кнопка «Проверить подключение» на step 2).
+Принимает form-data: `smtp_host`, `smtp_port`, `smtp_login`, `smtp_pass`.
+
+Flow:
+1. `SettingsService.set_smtp_credentials(creds)` — DNS-check + persist.
+2. `SmtpTestService.test_send(test_lot, smtp_login)` — полный SMTP path.
+3. Возвращает `<span id="smtp-test-result" class="chip chip--ok|chip--err">` для htmx `outerHTML` swap.
+
+Всегда `200` (ошибки — пользовательские, не HTTP). PII-free: сырой detail из `NotifyResult` обрезается до 200 символов; `SmtpHostPolicyError` маппится в generic-сообщение без host/password.
+
 ## Тесты
 
 Layer 2 (unit, fakes):

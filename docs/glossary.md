@@ -308,6 +308,10 @@
 
 - **onboarding wizard GET routes** (`web/routes/onboarding.py`) — 5 UI-роутов поверх существующего JSON-API онбординг-роутера: `GET /onboarding` (bare entry, 302), `GET /onboarding/{regions,smtp,recipients,test-email}` (шаги 1-4). Каждый шаг проверяет FSM-state через `svc.current()`; несовпадение → 302 `no-store` на `svc.url_for_current_step()`. `_STEP_FOR_URL` — dict-константа как точка расширения (OCP). `_wizard_response` — внутренний helper для рендеринга, передаёт `settings` во все шаги (требует `base.html.jinja`). `response_model=None` — необходимо для union-типов возврата (`HTMLResponse | RedirectResponse`).
 
+- **`POST /onboarding/save` dispatcher** (`web/routes/onboarding.py`) — единый htmx-эндпоинт для form-сабмитов визарда. Диспетчеризует по `(step: int, action: str)` через `_HANDLERS`-dict (OCP-паттерн: новые шаги добавляются записью в dict, без правки диспетчера). Ответ всегда `200`: успех → `HX-Redirect` header (htmx выполняет навигацию без полной перезагрузки); validation error → re-render с `data.error`; concurrent-submit mismatch → `HX-Redirect` на текущий step. Использует `_is_state_mismatch()` для разделения guard-fail (re-render) и state-mismatch (redirect). DI через `get_settings_service` + `get_smtp_test` из `web/deps.py`.
+
+- **`POST /onboarding/smtp-test` htmx fragment** (`web/routes/onboarding.py`) — эндпоинт «Проверить подключение» на step 2. Принимает form-data (smtp_host, smtp_port, smtp_login, smtp_pass), вызывает `SettingsService.set_smtp_credentials()` (DNS + persist) затем `SmtpTestService.test_send()`. Возвращает `<span id="smtp-test-result" class="chip chip--ok|chip--err">` для htmx `outerHTML` swap. Всегда `200` — ошибки (включая `SmtpHostPolicyError`) рендерятся как fragment, не как HTTP error. PII-free: сырой detail ограничен 200 символами; host/password не попадают в fragment.
+
 ## См. также
 
 - [[decisions-log]]
