@@ -4,6 +4,9 @@ Provides:
 - `schema_sql`: canonical schema.sql contents (session-scoped, read once).
 - `tmp_db_path`: per-test path inside pytest's auto-cleaned tmp_path.
 - `tmp_db`:     per-test ConnectionProvider with the full schema applied.
+- `reset_fis_monitor_logger`: autouse fixture that resets the fis_monitor
+  logger handlers after each test so logging tests do not bleed into each
+  other (plg.1).
 
 WAL mode is applied per-connection by `ConnectionProvider._configure` (ADR-007).
 The schema (including `PRAGMA user_version = 2`) is applied by `init_db()`.
@@ -12,6 +15,7 @@ Function-scope by design — every test gets an isolated DB file. This avoids
 flaky test ordering caused by leaked writer state.
 """
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -24,6 +28,31 @@ from fis_monitor.infra.sqlite.init_db import init_db
 SCHEMA_SQL_PATH = (
     Path(__file__).resolve().parent.parent / "docs" / "db" / "schema.sql"
 )
+
+# ---------------------------------------------------------------------------
+# Logger isolation — keeps logging tests hermetic
+# ---------------------------------------------------------------------------
+
+_FIS_MONITOR_LOGGER = "fis_monitor"
+
+
+@pytest.fixture(autouse=True)
+def reset_fis_monitor_logger() -> Iterator[None]:
+    """Reset the ``fis_monitor`` logger to a clean state after every test.
+
+    Removes all handlers and re-enables propagation so that log output from
+    one test cannot affect another. This is especially important for tests in
+    ``tests/unit/utils/test_log.py`` that install handlers via ``setup_logging``.
+    """
+    import contextlib
+
+    yield
+    root_logger = logging.getLogger(_FIS_MONITOR_LOGGER)
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        with contextlib.suppress(Exception):
+            handler.close()
+    root_logger.propagate = True
 
 
 @pytest.fixture(scope="session")

@@ -173,7 +173,7 @@ def test_clean_shutdown(caplog):
         locker_factory=_make_locker_factory(locker),
     )
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.WARNING, logger="fis_monitor"):
         asyncio.run(_run_lifespan(app))
 
     # Lock: acquired once, released once.
@@ -261,7 +261,7 @@ def test_hung_pw_executor_warns_and_releases_lock(caplog):
     import time
     t_start = time.monotonic()
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.WARNING, logger="fis_monitor"):
         asyncio.run(_run_lifespan(app))
 
     elapsed = time.monotonic() - t_start
@@ -358,7 +358,7 @@ def test_phase1_raises_later_phases_still_run(caplog):
         locker_factory=_make_locker_factory(locker),
     )
 
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.ERROR, logger="fis_monitor"):
         asyncio.run(_run_lifespan(app))
 
     # Even though cancel_active_job raised, conn_provider.close_all and lock

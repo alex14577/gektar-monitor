@@ -182,7 +182,7 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 **10b — параллель (после 7vy):**
 - [x] `bye.9` (P0) — `SystemClock` + `WatchdogConfigSource` (Layer 0). Wave 10b-a — sequential first (конфликт по `app.py` с plg.1).
 - [ ] `b54` (P2) — SSE dedup (убрать двойную публикацию `SseLotNew`) → перенесено в 10c (конфликт с bye.9 по composition.py)
-- [ ] `plg.1` (P2) — structured JSON logger + DI factory → Wave 10b-b (sequential после bye.9)
+- [x] `plg.1` (P2) — structured JSON logger + DI factory · Wave 10b-b · sonnet writer + sonnet reviewer APPROVE (7 minors → 2 fixed inline, 5 deferred as commit-note)
 
 **10c — параллель (после bye.9):**
 - [ ] `vgj` (P0) — `MonitorCycleService.run_forever` scheduler в lifespan
@@ -541,6 +541,21 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 **Итог Wave 10b-a:** 1/1 closed. Разблокировано: 10b-b (plg.1), 10c (vgj/2s3/03y).
 
 **Следующая сессия:** Wave 10b-b — `plg.1` (sonnet writer), затем Wave 10c параллельная волна.
+
+### Session (2026-05-14, part 7) — Wave 10b-b (`plg.1`)
+
+**Цель:** structured JSON logger + DI factory + bootstrap/lifespan two-phase setup.
+
+**Сделано:**
+- `plg.1` — `JsonFormatter` (Clock-injected, reserved keys, ctx-namespaced extras, exc traceback, Pydantic/datetime in `_json_default`), `setup_logging` (idempotent sentinel pattern, dual-mode JSON/plain, two-phase bootstrap stderr→lifespan stdout, `propagate=True` для caplog), `get_logger` (thin stdlib alias). Integration: `main()` bootstrap-handler (stderr/WARNING) ДО `create_app()`; lifespan startup reconfigure (stdout/INFO); `logging.shutdown()` в phase 3 finally. `tests/conftest.py` — autouse fixture handler-cleanup. `tests/unit/test_lifespan.py` — caplog migrated to explicit `logger="fis_monitor"` (требуется при `propagate=True` + handler на named logger).
+- Writer: sonnet (general-purpose, выполнил ранее в предыдущей итерации работы; uncommitted state продолжен в этой сессии). Reviewer: sonnet (Code Reviewer) — verdict **APPROVE** с 7 minors (нет blockers, нет majors). Inline-fixes: docstring inaccuracy `propagate=False→True` (log.py + test_log.py header) + glossary AMEND (`без null'инга` → точная формулировка + smoke-test claim → architectural invariant). Остальные 5 minors (frozenset re-alloc, double `getMessage()`, late stdlib imports, fixture не сбрасывает level, FakeInfra `config_source` stub, LOG_JSON duplication) — отложены как commit-note для будущих чисток.
+- Suite: 918 passed / 3 skipped. Ruff clean.
+
+**Vault:** glossary +3 (`JsonFormatter`, `setup_logging`, `get_logger`) уже применён writer'ом + 2 reviewer-amends в текстах. ADR / architecture / data-model — no-op (logging — utility-tier, не architectural decision; rotation/redactor решения будут в `plg.3/4`).
+
+**Итог Wave 10b-b:** 1/1 closed. Разблокировано: `plg.2` (redactor pipeline) — но идёт в Wave 10d по плану.
+
+**Следующая сессия:** Wave 10c — `vgj` (P0 scheduler) + `2s3` (P1 settings POST routes) параллельно. Brainstorm уже выполнен (SA × 4 + SRE × 1 + SecEng × 2 в session part 6).
 
 ### Шаблон для будущих сессий
 

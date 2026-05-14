@@ -72,6 +72,7 @@ See: docs/architecture/04-composition-root.md §4.4, ADR-014.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -84,8 +85,10 @@ from fastapi.staticfiles import StaticFiles
 
 from fis_monitor.container import Container
 from fis_monitor.domain.models import Settings
+from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.thread_supervisor import ThreadSupervisor
+from fis_monitor.utils.log import setup_logging
 from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
 from fis_monitor.web.routes import auth, diagnostics, events, lots, notifications, onboarding
@@ -169,6 +172,19 @@ async def _lifespan_impl(
     # startup error path).
     try:
         # --- STARTUP -----------------------------------------------------------
+        # Reconfigure logging for full runtime (stdout, INFO).
+        # setup_logging is idempotent — replaces the bootstrap stderr handler.
+        import os as _os
+        import sys as _sys2
+
+        _json_fmt = _os.getenv("LOG_JSON", "1") == "1"
+        setup_logging(
+            clock=SystemClock(),
+            stream=_sys2.stdout,
+            level=logging.INFO,
+            json_format=_json_fmt,
+        )
+
         container = container_factory(settings, data_dir)
         app.state.container = container
 
@@ -298,6 +314,9 @@ async def _lifespan_impl(
                 logger.exception(
                     "lifespan: lock release failed — manual cleanup may be required"
                 )
+            # Flush and close all logging handlers (SLO-L2: zero loss on shutdown).
+            with contextlib.suppress(Exception):
+                logging.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +433,21 @@ def main() -> None:
     args = parser.parse_args()
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Bootstrap handler: captures catastrophic errors before lifespan startup
+    # (e.g. build_container failures).  Uses stderr so it does not mix with
+    # stdout in systemd journal.  Lifespan startup will replace it via the
+    # idempotent setup_logging call.
+    import os
+    import sys as _sys
+
+    _json = os.getenv("LOG_JSON", "1") == "1"
+    setup_logging(
+        clock=SystemClock(),
+        stream=_sys.stderr,
+        level=logging.WARNING,
+        json_format=_json,
+    )
 
     # importlib.import_module avoids a static import statement that would
     # violate the import-linter contract: app and composition are peers in the
