@@ -38,6 +38,7 @@ from fis_monitor.domain.models import Settings
 from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.config_source import WatchdogConfigSource
 from fis_monitor.infra.http.client import RequestsHttpClient
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
 from fis_monitor.infra.parsers.detail_parser import SelectolaxDetailParser
@@ -131,11 +132,11 @@ class _NotImplementedSessionMonitor:
 
 
 # ---------------------------------------------------------------------------
-# Torgi.gov.ru allowed hosts for PlaywrightLoginSession
+# Allowed hosts for PlaywrightLoginSession (надальнийвосток.рф, Punycode form)
 # ---------------------------------------------------------------------------
 _TORGI_ALLOWED_HOSTS: tuple[str, ...] = (
-    "torgi.gov.ru",
-    "www.torgi.gov.ru",
+    "xn--80aaggvgieoeoa2bo7l.xn--p1ai",  # Punycode for надальнийвосток.рф
+    "надальнийвосток.рф",  # unicode alias
 )
 
 
@@ -189,6 +190,11 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     smtp_creds_repo = SqliteSmtpCredentialsRepository(
         conn_provider=conn_provider, clock=clock
     )
+
+    # Build TorgiUrlBuilder from current settings (ADR-024).
+    # base_url trailing slash is stripped by TargetConfig validator at construction;
+    # no rstrip here.
+    url_builder = TorgiUrlBuilder(base_url=config_source.current().target.base_url)
 
     # ── Layer 2: infra adapters ─────────────────────────────────────────────
     http_session = requests.Session()
@@ -266,6 +272,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     enrichment = EnrichmentService(
         http=http_client,
         parser=detail_parser,
+        url_builder=url_builder,
     )
 
     filter_matcher = AllFiltersMatcher([RfSubjectFilterMatcher()])
@@ -282,6 +289,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         clock=clock,
         cycle_progress_signal=cycle_progress_signal,
         filter_matcher=filter_matcher,
+        url_builder=url_builder,
     )
 
     full_scan = FullScanService(
@@ -293,6 +301,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         clock=clock,
         event_bus=event_bus,
         cycle_progress_signal=cycle_progress_signal,
+        url_builder=url_builder,
     )
 
     onboarding = OnboardingService(

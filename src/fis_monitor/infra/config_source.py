@@ -179,6 +179,9 @@ class WatchdogConfigSource:
                 path.name,
             )
 
+        # Apply FIS_TARGET__* env overrides on top of file-loaded (or default) settings.
+        self._current = self._apply_env_overrides(self._current)
+
         # Content-hash of the last successfully parsed content (or b"" for defaults).
         self._last_content_hash: bytes = b""
 
@@ -286,6 +289,43 @@ class WatchdogConfigSource:
             )
 
     # ------------------------------------------------------------------
+    # Internal — env overrides
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _apply_env_overrides(settings: Settings) -> Settings:
+        """Apply FIS_TARGET__* env overrides on top of file-loaded Settings.
+
+        Supported (case-insensitive ENV name, lowercase model attr):
+          - FIS_TARGET__BASE_URL                  -> target.base_url
+          - FIS_TARGET__REQUEST_TIMEOUT_SECONDS   -> target.request_timeout_seconds (int)
+          - FIS_TARGET__USER_AGENT                -> target.user_agent
+
+        Implementation note: no pydantic-settings dependency (would be one
+        extra runtime dep for a 30-line concern). Manual via os.environ.
+        """
+        import os
+
+        overrides: dict[str, object] = {}
+        if v := os.environ.get("FIS_TARGET__BASE_URL"):
+            overrides["base_url"] = v
+        if v := os.environ.get("FIS_TARGET__REQUEST_TIMEOUT_SECONDS"):
+            try:
+                overrides["request_timeout_seconds"] = int(v)
+            except ValueError:
+                logger.debug(
+                    "config_source: FIS_TARGET__REQUEST_TIMEOUT_SECONDS=%r is not an int;"
+                    " keeping file value",
+                    v,
+                )
+        if v := os.environ.get("FIS_TARGET__USER_AGENT"):
+            overrides["user_agent"] = v
+        if not overrides:
+            return settings
+        new_target = settings.target.model_copy(update=overrides)
+        return settings.model_copy(update={"target": new_target})
+
+    # ------------------------------------------------------------------
     # Internal — FS event → debounce → reload
     # ------------------------------------------------------------------
 
@@ -348,6 +388,10 @@ class WatchdogConfigSource:
         # --- Parse ---
         try:
             new_settings = self._parser(raw)
+            # Re-apply env overrides on every reload — env wins over file
+            # (mirrors __init__ behaviour; otherwise FIS_TARGET__* values are
+            # silently dropped on the first config.json edit).
+            new_settings = self._apply_env_overrides(new_settings)
         except Exception as exc:
             # Log parse errors without PII: no raw exc repr, no field values.
             if isinstance(exc, ValidationError):

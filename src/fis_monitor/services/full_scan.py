@@ -44,14 +44,11 @@ from fis_monitor.domain.interfaces import (
     ListParser,
     LotRepository,
 )
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 
 logger = logging.getLogger(__name__)
 
-# Same default URL as MonitorCycleService (same list endpoint, same region param).
-_LIST_URL_DEFAULT = (
-    "https://torgi.gov.ru/new/public/lots/search"
-    "?catCode=10&lotStatus=PUBLISHED&region={region}&page=0&size=100"
-)
+_DEFAULT_URL_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
 
 
 def _next_scheduled_datetime(
@@ -118,7 +115,7 @@ class FullScanService:
         clock: Clock,
         event_bus: EventBus,
         cycle_progress_signal: threading.Event,
-        list_url_template: str = _LIST_URL_DEFAULT,
+        url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
         batch_size: int = 50,
         inter_batch_sleep_sec: float = 0.05,
     ) -> None:
@@ -130,7 +127,7 @@ class FullScanService:
         self._clock = clock
         self._event_bus = event_bus
         self._cycle_progress_signal = cycle_progress_signal
-        self._list_url_template = list_url_template
+        self._url_builder = url_builder
         self._batch_size = batch_size
         self._inter_batch_sleep_sec = inter_batch_sleep_sec
 
@@ -237,7 +234,7 @@ class FullScanService:
 
         MVP: single page; full pagination is out of scope.
         """
-        url = self._list_url_template.format(region=region)
+        url = self._url_builder.lot_list_url(region=region)
         try:
             response = self._http.get(url)
         except UpstreamError:

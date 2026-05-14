@@ -485,3 +485,76 @@ def test_real_watchdog_observer_triggers_reload(tmp_path: Path) -> None:
     finally:
         sub.unsubscribe()
         src.stop()
+
+
+# ---------------------------------------------------------------------------
+# FIS_TARGET__* env override tests
+# ---------------------------------------------------------------------------
+
+
+class TestApplyEnvOverrides:
+    """_apply_env_overrides applies FIS_TARGET__* env vars over parsed Settings."""
+
+    def test_base_url_override(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """FIS_TARGET__BASE_URL replaces target.base_url in current()."""
+        monkeypatch.setenv("FIS_TARGET__BASE_URL", "http://localhost:8765")
+        src = _make_source(tmp_path / "config.json")
+        assert src.current().target.base_url == "http://localhost:8765"
+
+    def test_timeout_override_valid_int(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """FIS_TARGET__REQUEST_TIMEOUT_SECONDS with a valid int is applied."""
+        monkeypatch.setenv("FIS_TARGET__REQUEST_TIMEOUT_SECONDS", "120")
+        src = _make_source(tmp_path / "config.json")
+        assert src.current().target.request_timeout_seconds == 120
+
+    def test_timeout_override_invalid_int_falls_back(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """FIS_TARGET__REQUEST_TIMEOUT_SECONDS=not-a-number silently keeps file value."""
+        monkeypatch.setenv("FIS_TARGET__REQUEST_TIMEOUT_SECONDS", "not-a-number")
+        src = _make_source(tmp_path / "config.json")
+        # Default value (90) is kept — no exception raised.
+        assert src.current().target.request_timeout_seconds == 90
+
+    def test_user_agent_override(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """FIS_TARGET__USER_AGENT replaces target.user_agent."""
+        monkeypatch.setenv("FIS_TARGET__USER_AGENT", "test-agent/9.9")
+        src = _make_source(tmp_path / "config.json")
+        assert src.current().target.user_agent == "test-agent/9.9"
+
+    def test_no_env_vars_leaves_defaults(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Without any FIS_TARGET__* vars, Settings remain at their defaults."""
+        for key in ("FIS_TARGET__BASE_URL", "FIS_TARGET__REQUEST_TIMEOUT_SECONDS",
+                    "FIS_TARGET__USER_AGENT"):
+            monkeypatch.delenv(key, raising=False)
+        src = _make_source(tmp_path / "config.json")
+        assert src.current().target.base_url == "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai"
+        assert src.current().target.request_timeout_seconds == 90
+        assert src.current().target.user_agent == "fis-monitor/0.1"
+
+    def test_env_override_survives_hot_reload(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """FIS_TARGET__* must win over file values even after a hot-reload.
+
+        Regression guard: previously _do_reload re-parsed the file without
+        re-applying env overrides — first config.json edit silently dropped
+        any FIS_TARGET__* the operator set at process start.
+        """
+        monkeypatch.setenv("FIS_TARGET__BASE_URL", "http://localhost:8765")
+        cfg = tmp_path / "config.json"
+        _write_settings(cfg, interval_minutes=10)
+        src = _make_source(cfg)
+        assert src.current().target.base_url == "http://localhost:8765"  # bootstrap
+
+        # Operator edits config.json — env must still win.
+        _write_settings(cfg, interval_minutes=20)
+        src._do_reload()
+        assert src.current().interval_minutes == 20  # file change applied
+        assert src.current().target.base_url == "http://localhost:8765"  # env retained

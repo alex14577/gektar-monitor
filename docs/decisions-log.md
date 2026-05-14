@@ -35,6 +35,7 @@
 - [[decisions/ADR-021-manual-starttls-connect-by-ip|ADR-021]] — Manual STARTTLS — обход smtplib server_hostname bug
 - [[decisions/ADR-022-allowed-tracked-fields-ssot-smtp-policy-error|ADR-022]] — ALLOWED_TRACKED_FIELDS SSOT + SmtpHostPolicyError наследует UpstreamError
 - [[decisions/ADR-023-configsource-save-extension|ADR-023]] — `ConfigSource.save()` расширяет существующий Protocol (без отдельного SettingsWriter)
+- [[decisions/ADR-024-target-config-and-url-builder|ADR-024]] — `TargetConfig` + `TorgiUrlBuilder`: config seam для реального target URL (`надальнийвосток.рф`); SMTP defaults → `infra/smtp/constants.py`
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

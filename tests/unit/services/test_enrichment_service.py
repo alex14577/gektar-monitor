@@ -9,7 +9,7 @@ Coverage targets (per task spec):
   isolation guarantee.
 - test_empty_input_returns_empty: enrich_lots([]) → [].
 - test_max_workers_1_serial: serial smoke — all lots processed.
-- test_url_template_used: http.get called with correct URL per lot.id.
+- test_url_builder_used: http.get called with correct URL per lot.id.
 - test_returned_order_matches_input: output order equals input order.
 - test_parser_version_mismatch_propagates: ParserVersionMismatch escapes.
 
@@ -27,6 +27,7 @@ import pytest
 
 from fis_monitor.domain.errors import ParseBugError, ParserVersionMismatch
 from fis_monitor.domain.models import HttpResponse, ParsedDetail
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
 from tests.factories import make_lot
 
@@ -51,11 +52,11 @@ class FakeHttpClient:
     Thread-safe: protected by a lock so tests can introspect call counts from
     the main thread after the pool finishes.
 
-    ``configure_for_lot`` is a convenience that builds the default-template URL.
-    For custom templates, use ``configure_url`` directly.
+    ``configure`` is a convenience that builds the default-builder URL for a lot_id.
+    For explicit URLs, use ``configure_url`` directly.
     """
 
-    _DEFAULT_TEMPLATE = "https://torgi.gov.ru/new/public/lots/lot/{lot_id}"
+    _DEFAULT_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
 
     def __init__(self) -> None:
         self._responses: dict[str, HttpResponse | BaseException] = {}
@@ -63,8 +64,8 @@ class FakeHttpClient:
         self._lock = threading.Lock()
 
     def configure(self, lot_id: int, response: HttpResponse | BaseException) -> None:
-        """Register a response/exception for the default-template URL for lot_id."""
-        url = self._DEFAULT_TEMPLATE.format(lot_id=lot_id)
+        """Register a response/exception for the default builder URL for lot_id."""
+        url = self._DEFAULT_BUILDER.lot_detail_url(lot_id=lot_id)
         self._responses[url] = response
 
     def configure_url(self, url: str, response: HttpResponse | BaseException) -> None:
@@ -100,11 +101,11 @@ class FakeHttpClient:
             return list(self._calls)
 
     def called_lot_ids(self) -> list[int]:
-        """Extract lot_id from the default-template URLs that were called."""
+        """Extract lot_id from the detail-page URLs that were called."""
         import re
         ids = []
         for url in self.calls:
-            m = re.search(r"/lot/(\d+)", url)
+            m = re.search(r"[?&]id=(\d+)", url)
             if m:
                 ids.append(int(m.group(1)))
         return ids
@@ -162,11 +163,14 @@ def _extract_lot_id_from_html(html: str) -> int:
     return int(m.group(1)) if m else -1
 
 
+_DEFAULT_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
+
+
 def _make_http_with_html(lot_ids: list[int]) -> FakeHttpClient:
     """Return a FakeHttpClient that returns HTML encoding lot_id for each lot."""
     client = FakeHttpClient()
     for lot_id in lot_ids:
-        url = f"https://torgi.gov.ru/new/public/lots/lot/{lot_id}"
+        url = _DEFAULT_BUILDER.lot_detail_url(lot_id=lot_id)
         client.configure_url(
             url,
             HttpResponse(
@@ -282,14 +286,14 @@ def test_max_workers_1_serial() -> None:
     assert all(r.enrichment_status == "done" for r in results)
 
 
-def test_url_template_used() -> None:
-    """http.get is called with the URL derived from url_template and lot.id."""
-    template = "https://example.com/lots/{lot_id}/detail"
+def test_url_builder_used() -> None:
+    """http.get is called with the URL produced by url_builder.lot_detail_url."""
+    custom_builder = TorgiUrlBuilder(base_url="http://localhost:8765")
     lot_ids = [501, 502]
     lots = [make_lot(id=lid) for lid in lot_ids]
     http = FakeHttpClient()
     for lid in lot_ids:
-        url = template.format(lot_id=lid)
+        url = custom_builder.lot_detail_url(lot_id=lid)
         http.configure_url(
             url,
             HttpResponse(
@@ -300,12 +304,12 @@ def test_url_template_used() -> None:
             ),
         )
     parser = FakeDetailParser()
-    svc = EnrichmentService(http=http, parser=parser, url_template=template)
+    svc = EnrichmentService(http=http, parser=parser, url_builder=custom_builder)
 
     svc.enrich_lots(lots, max_workers=2)
 
     urls = set(http.calls)
-    expected = {template.format(lot_id=lid) for lid in lot_ids}
+    expected = {custom_builder.lot_detail_url(lot_id=lid) for lid in lot_ids}
     assert urls == expected, f"Unexpected URLs: {urls}"
 
 
@@ -340,9 +344,10 @@ def test_parser_version_mismatch_propagates() -> None:
 
 
 def test_fake_http_client_all_methods_exercised() -> None:
-    """FakeHttpClient.get() and configure_url() — verify both work correctly."""
+    """FakeHttpClient.get(), configure_url(), configure() — verify all work correctly."""
     client = FakeHttpClient()
-    target_url = "https://torgi.gov.ru/new/public/lots/lot/999"
+    # configure_url: explicit URL
+    target_url = _DEFAULT_BUILDER.lot_detail_url(lot_id=999)
     client.configure_url(
         target_url,
         HttpResponse(status=200, text="<html/>", headers={}, final_url=target_url),
@@ -351,6 +356,15 @@ def test_fake_http_client_all_methods_exercised() -> None:
     assert resp.status == 200
     assert client.calls == [target_url]
     assert client.called_lot_ids() == [999]
+    # configure: convenience method using default builder URL
+    client2 = FakeHttpClient()
+    client2.configure(
+        111,
+        HttpResponse(status=200, text="<html/>", headers={}, final_url=""),
+    )
+    url_111 = _DEFAULT_BUILDER.lot_detail_url(lot_id=111)
+    resp2 = client2.get(url_111)
+    assert resp2.status == 200
 
 
 def test_fake_detail_parser_all_methods_exercised() -> None:

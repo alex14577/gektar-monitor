@@ -12,7 +12,7 @@ Design invariants:
 - ParserVersionMismatch propagates unmodified — caller (MonitorCycleService)
   decides whether to reparse or drop.
 - max_workers is a mandatory keyword passed by the caller from ConfigSource —
-  EnrichmentService does not know a default (rate-limits on torgi.gov.ru make
+  EnrichmentService does not know a default (rate-limits on the target site make
   the right value domain-specific / operator-configurable).
 - Order of returned lots matches input order.
 
@@ -30,10 +30,11 @@ from datetime import UTC, datetime
 from fis_monitor.domain.errors import ParserVersionMismatch
 from fis_monitor.domain.interfaces import DetailParser, HttpClient
 from fis_monitor.domain.models import Lot, ParsedDetail
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_URL_TEMPLATE = "https://torgi.gov.ru/new/public/lots/lot/{lot_id}"
+_DEFAULT_URL_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
 
 
 class EnrichmentService:
@@ -42,7 +43,7 @@ class EnrichmentService:
     Dependencies injected via constructor (DIP):
     - ``http``: ``HttpClient`` — synchronous HTTP GET seam.
     - ``parser``: ``DetailParser`` — parses detail-card HTML into ``ParsedDetail``.
-    - ``url_template``: format string with ``{lot_id}`` placeholder.
+    - ``url_builder``: ``TorgiUrlBuilder`` — composes detail-page URLs from lot_id.
     """
 
     def __init__(
@@ -50,11 +51,11 @@ class EnrichmentService:
         http: HttpClient,
         parser: DetailParser,
         *,
-        url_template: str = _DEFAULT_URL_TEMPLATE,
+        url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
     ) -> None:
         self._http = http
         self._parser = parser
-        self._url_template = url_template
+        self._url_builder = url_builder
 
     # ------------------------------------------------------------------
     # Public API
@@ -71,7 +72,7 @@ class EnrichmentService:
         Args:
             lots: Lots from the list-stage. May be empty.
             max_workers: Thread-pool size - MANDATORY kwarg. Caller reads
-                this from ``ConfigSource`` (4-8 for torgi.gov.ru rate limits).
+                this from ``ConfigSource`` (4-8 per target-site rate limits).
 
         Returns:
             List of ``Lot`` instances in the **same order as input**.
@@ -117,7 +118,7 @@ class EnrichmentService:
         ``ParserVersionMismatch`` (which intentionally escapes the
         per-lot guard).
         """
-        url = self._url_template.format(lot_id=lot.id)
+        url = self._url_builder.lot_detail_url(lot_id=lot.id)
         try:
             response = self._http.get(url)
             detail: ParsedDetail = self._parser.parse(response.text)

@@ -74,7 +74,7 @@ class EmailNotifierConfig(NotifierConfig):
 
     enabled: bool = False
     use_default_smtp: bool = True
-    smtp_host: str = "smtp.yandex.ru"
+    smtp_host: str | None = None
     smtp_port: int = Field(587, ge=1, le=65535)
     recipients: list[EmailStr] = Field(default_factory=list)
 

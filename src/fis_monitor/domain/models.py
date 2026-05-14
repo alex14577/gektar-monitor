@@ -37,6 +37,7 @@ from pydantic import (
     Field,
     SecretStr,
     StrictInt,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -373,7 +374,7 @@ class EmailConfig(BaseModel):
 
     enabled: bool = True
     use_default_smtp: bool = True
-    smtp_host: str = "smtp.yandex.ru"
+    smtp_host: str | None = None
     smtp_port: Annotated[int, Field(ge=1, le=65535)] = 587
     from_address: str | None = None
     recipients: list[EmailStr] = Field(default_factory=list)
@@ -438,6 +439,24 @@ class MonitoringConfig(BaseModel):
     full_scan_l2_priority_days: int = 7
 
 
+class TargetConfig(BaseModel):
+    """Целевой сайт (Программа «Дальневосточный гектар», Punycode-домен для requests
+    совместимости). Endpoint paths — доменные константы внутри TorgiUrlBuilder."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    base_url: str = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai"
+    request_timeout_seconds: Annotated[int, Field(ge=1, le=300)] = 90  # study: 80-150s/page
+    user_agent: str = "fis-monitor/0.1"
+
+    @field_validator("base_url", mode="after")
+    @classmethod
+    def _validate_base_url(cls, v: str) -> str:
+        if not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("base_url must start with http:// or https://")
+        return v.rstrip("/")
+
+
 class Settings(BaseModel):
     """Root `config.json` Pydantic model. Canon shape per docs/data-model/settings.md.
 
@@ -454,6 +473,7 @@ class Settings(BaseModel):
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
+    target: TargetConfig = Field(default_factory=TargetConfig)
 
 
 # ---------------------------------------------------------------------------

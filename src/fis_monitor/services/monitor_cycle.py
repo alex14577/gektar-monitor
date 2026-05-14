@@ -58,6 +58,7 @@ from fis_monitor.domain.models import (
     SseLotNew,
     TrackedField,
 )
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
 
 if TYPE_CHECKING:
@@ -78,10 +79,7 @@ DEFAULT_TRACKED_FIELDS: tuple[TrackedField, ...] = (
     "list_presence",
 )
 
-_LIST_URL_DEFAULT = (
-    "https://torgi.gov.ru/new/public/lots/search"
-    "?catCode=10&lotStatus=PUBLISHED&region={region}&page=0&size=100"
-)
+_DEFAULT_URL_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +189,7 @@ class MonitorCycleService:
         clock: Clock,
         cycle_progress_signal: threading.Event,
         filter_matcher: FilterMatcher,
-        list_url_template: str = _LIST_URL_DEFAULT,
+        url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
         enrichment_workers: int = 4,
     ) -> None:
         self._http = http
@@ -205,7 +203,7 @@ class MonitorCycleService:
         self._clock = clock
         self.cycle_progress_signal = cycle_progress_signal
         self._filter_matcher = filter_matcher
-        self._list_url_template = list_url_template
+        self._url_builder = url_builder
         self._enrichment_workers = enrichment_workers
 
     # Default poll interval used when ``interval_minutes`` is 0 (continuous mode).
@@ -340,7 +338,7 @@ class MonitorCycleService:
         """Inner cycle logic — called from ``run_cycle`` which wraps for unexpected errors."""
 
         # ---------- Step 2: fetch list page --------------------------------
-        url = self._list_url_template.format(region=region)
+        url = self._url_builder.lot_list_url(region=region)
         try:
             self.cycle_progress_signal.set()
             try:
