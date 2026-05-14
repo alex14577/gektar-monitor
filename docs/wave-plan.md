@@ -623,6 +623,19 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 
 **Итог Wave 10e:** 1/2 closed (vgm.5); 4fw defer. **Wave 10 завершён.** Wave 11 / cleanup-batch + bd `ydj` (P1 production wiring fix) для следующих сессий.
 
+### Session (2026-05-14, part 11) — P1 hotfix SSE routing (`50j`)
+
+**Цель:** Исправить 404 на `/sse/status`, `/sse/session`, `/sse/lots` — шаблоны подключались к несуществующим роутам.
+
+**Сделано:**
+- `gektar_monitor-50j` — унифицировал SSE routing: все три `sse-connect` → `/events` (commit 072b425). Onboarding gate whitelist `/sse/` → `/events`. Тест test_sse_whitelisted обновлён.
+
+**Vault:** ADR-025 (единый роут `/events` vs три отдельных); `docs/architecture/07-concurrency.md` §SSE security обновлён; `docs/decisions-log.md` + `ADR-025-sse-single-endpoint.md` созданы.
+
+**Suite:** все тесты зелёные, ruff: pre-existing UP037 в errors.py (не wave surface).
+
+**Итог:** 1/1 closed. No remote configured → git push не выполнен (локальный репо без remote).
+
 ### Шаблон для будущих сессий
 
 ```markdown
