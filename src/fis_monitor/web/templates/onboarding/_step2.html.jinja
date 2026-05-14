@@ -63,21 +63,12 @@
             hx-target="#smtp-test-result"
             hx-swap="outerHTML"
             hx-disabled-elt="this"
-            hx-indicator="#smtp-test-indicator"
-            hx-on:htmx:before-request="document.getElementById('smtp-test-result').hidden=true; document.getElementById('smtp-test-area').setAttribute('aria-busy','true');"
+            hx-on:htmx:before-request="const r=document.getElementById('smtp-test-result'); r.innerHTML='Проверяю… <span class=&quot;spinner-dots&quot; aria-hidden=&quot;true&quot;><span class=&quot;spinner-dots__dot&quot;></span><span class=&quot;spinner-dots__dot&quot;></span><span class=&quot;spinner-dots__dot&quot;></span></span>'; r.removeAttribute('hidden'); r.className='chip chip--pending'; document.getElementById('smtp-test-area').setAttribute('aria-busy','true');"
             hx-on:htmx:after-request="document.getElementById('smtp-test-area').removeAttribute('aria-busy');">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
       Проверить подключение
     </button>
-    <span id="smtp-test-indicator" class="chip htmx-indicator" aria-live="polite">
-      <span class="spinner-dots" aria-hidden="true">
-        <span class="spinner-dots__dot"></span>
-        <span class="spinner-dots__dot"></span>
-        <span class="spinner-dots__dot"></span>
-      </span>
-      Проверяю…
-    </span>
-    <span id="smtp-test-result" class="chip" hidden></span>
+    <span id="smtp-test-result" class="chip" hidden aria-live="polite"></span>
   </div>
 
   <div style="margin-top: 16px; padding: 12px 14px; background: var(--surface-2); border-radius: 8px; font-size: 0.875rem; color: var(--ink-2);">
