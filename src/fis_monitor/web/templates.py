@@ -12,11 +12,24 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
+from jinja2 import select_autoescape
 
 TEMPLATES_DIR: Path = Path(__file__).parent / "templates"
 STATIC_DIR: Path = Path(__file__).parent / "static"
 
 
 def build_templates() -> Jinja2Templates:
-    """Return a freshly configured Jinja2Templates pointing at the bundled dir."""
-    return Jinja2Templates(directory=str(TEMPLATES_DIR))
+    """Return a freshly configured Jinja2Templates pointing at the bundled dir.
+
+    Autoescape: project uses compound `.html.jinja` extension which is NOT
+    recognised by Jinja2's default `select_autoescape()` (it checks only
+    `html`/`htm`/`xml`). Without explicit configuration `{{ user_input }}`
+    in our templates is rendered raw — XSS-class vulnerability (Security F-01).
+    Explicit enabled_extensions list closes the gap.
+    """
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates.env.autoescape = select_autoescape(
+        enabled_extensions=("html", "htm", "xml", "jinja", "html.jinja"),
+        default_for_string=True,
+    )
+    return templates

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from fis_monitor.services.login import LoginBusyError, LoginService, LoginStatus
@@ -141,12 +141,15 @@ def auth_status(
     )
 
 
-@router.post("/cancel", status_code=204)
+@router.post("/cancel")
 def auth_cancel(
     svc: LoginService = Depends(get_login),
-) -> None:
+) -> Response:
     """Cancel the active login job.
 
-    Idempotent: returns 204 even if no job is running.
+    Idempotent: returns 204 даже если задача не активна.
+    Возвращаем явный Response(status_code=204) без content-type заголовка —
+    RFC 9110 запрещает body на 204 (Evidence Collector BUG-2).
     """
     svc.cancel_active_job()
+    return Response(status_code=204)

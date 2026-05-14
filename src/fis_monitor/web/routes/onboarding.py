@@ -530,10 +530,11 @@ def _handle_step2_next(
             smtp_port=smtp_port,
         )
         settings_svc.set_smtp_credentials(creds)
-    except SmtpHostPolicyError as exc:
+    except SmtpHostPolicyError:
+        # Не рендерим str(exc) — он содержит submitted hostname (PII per reviewer B1).
         return _rerender(
             request, templates, cfg, step=2,
-            error=f"Ошибка подключения к SMTP: {exc}",
+            error="SMTP-хост недоступен или заблокирован политикой безопасности.",
             extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
                         "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
         )
