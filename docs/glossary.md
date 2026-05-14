@@ -225,6 +225,18 @@
 
 - **SSE event discriminator invariant** — каждый член `SseEvent` union (`SseLotNew`, `SseLotStatus`, `SseCycleError`, `SseSmtpFailed`, `SseSessionExpired`) имеет `event: Literal["..."] = "..."` поле, **совпадающее** с ключами `SsePayloadSchema._BY_EVENT`. Нарушение → drift-guard дропнет event (`session.expired` ↔ `"expired"` mismatch был найден в oxy.6 review и пофикшен). Browser-side `EventSource.addEventListener(<event-type>, ...)` ловит по этому полю.
 
+## Сервисы (Wave 9)
+
+- **ThreadSupervisor** (`infra/thread_supervisor.py`) — менеджер supervised daemon-threads с общим `stop_event`. Имплементирует phase 1 (graceful) из ADR-014: `start(name, target)` запускает `daemon=True` thread с `target(stop_event)`; `shutdown(grace_timeout)` устанавливает stop_event и joins'ит каждый thread с **shared deadline budget** (`deadline = monotonic() + grace_timeout`) — итого ≤ grace_timeout независимо от числа потоков. Возвращает `ShutdownReport(clean, pending)`. Идемпотентен: повторный `shutdown()` → no-op с `clean=True`. Phase 2/3 (executors / lock release) живут в `lifespan()` — разные lifecycle concerns. См. [[architecture/04-composition-root]] §4.3.bis.
+
+- **Phase 1.5** — Playwright-specific teardown phase (ADR-014 R3-C3). Между phase 1 (supervisor shutdown) и phase 2 (forceful executors): `LoginService.cancel_active_job()` → `LoginSession.cancel()` → `browser.close()` извне worker-thread → `page.wait_for_url` развернётся с `TargetClosedError` за ~2-3 сек, job завершится с `LoginOutcome(success=False, error="cancelled")`. Затем `pw_executor.shutdown(wait=True, cancel_futures=True)` **wrapped в `Thread+join(5.0)`** (R4-M1) — на zombie Chromium процессе shutdown может зависнуть в C-extension, daemon-thread join с timeout 5s гарантирует bounded shutdown. На timeout → `logger.warning(...)`, Chromium zombify до interpreter exit.
+
+- **ContainerFactory** (`app.py`) — `Callable[[Settings | None, Path], Container]` type alias. DI seam в `create_app(*, container_factory, locker_factory)` для подмены `build_container` в тестах без monkey-patch внутренностей. **Required kwarg** (no default) — production caller передаёт `build_container` из `composition.py`; это инверсия зависимости (`app.py` не импортирует `composition.py`, satisfies import-linter constraint).
+
+- **OnboardingGateMiddleware** (`web/onboarding_gate.py`) — pure-ASGI middleware (mirrors `CsrfHostOriginMiddleware`), реализует server-enforced FSM gate per ADR-018. Whitelist prefixes: `/static/`, `/sse/`, `/api/health`, `/onboarding/` (с trailing `/` — boundary against lookalike `/onboarding-evil/`), `/auth/` + OPTIONS (CORS preflight). Для не-whitelist URL: `OnboardingQuery.current()` → если != `COMPLETED` → 302 redirect на `url_for_current_step()` + `Cache-Control: no-store` header. **НИКОГДА не читает query-params** — target всегда server-decided (ADR-018 #19). State queried exactly once per non-whitelisted request; ноль раз для whitelist (early-return до DB read).
+
+- **OnboardingQuery** (`web/onboarding_gate.py`) — narrow `Protocol` с 2 методами (`current() -> object`, `url_for_current_step() -> str`) — ISP seam для `OnboardingGateMiddleware`. `OnboardingService` имеет 7 публичных методов; middleware видит только нужные два, что упрощает фейки и предотвращает случайный coupling.
+
 ## См. также
 
 - [[decisions-log]]
