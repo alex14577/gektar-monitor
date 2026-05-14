@@ -14,7 +14,22 @@
 #   - Python 3.12+ available as `python3`
 #   - Internet access (pip + Playwright Chromium download)
 #   - ~2 GB free disk space under the project root (for venv + Chromium)
+#
+# Flags:
+#   --clean   Wipe venv, PyInstaller work dir, and PyInstaller cache before
+#             building.  Use this for release builds to guarantee a fully
+#             reproducible artefact from scratch.  Default behaviour is
+#             incremental (venv reused, PyInstaller analysis cache reused) —
+#             archive is still a real, complete distribution.
 set -euo pipefail
+
+CLEAN_BUILD=0
+for arg in "$@"; do
+    case "$arg" in
+        --clean) CLEAN_BUILD=1 ;;
+        *) printf 'Unknown flag: %s\n' "$arg" >&2; exit 2 ;;
+    esac
+done
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,24 +87,46 @@ log "Building version $VERSION → $ARCHIVE_PATH"
 # ---------------------------------------------------------------------------
 # Step 1: Clean stale build artefacts
 # ---------------------------------------------------------------------------
+# Always wipe _dist and _stage (they MUST be fresh — staging tree is what
+# becomes the archive, and PyInstaller's --distpath is rewritten anyway).
+# $VENV_DIR and $PYINSTALLER_WORK are cached for incremental builds; pass
+# --clean to force their removal for a fully reproducible release build.
+# $BROWSERS_DIR is never auto-wiped — playwright install chromium is
+# idempotent and reuses the already-downloaded Chromium (~280 MB).
+# To force redownload: rm -rf build/_browsers manually.
 log "Cleaning stale build artefacts..."
-rm -rf "$VENV_DIR" "$PYINSTALLER_DIST" "$PYINSTALLER_WORK" "$STAGE_DIR"
-# NB: $BROWSERS_DIR намеренно не удаляется — playwright install chromium
-# идемпотентен и переиспользует уже скачанный Chromium (~280 MB).
-# Чтобы форсировать перекачку: rm -rf build/_browsers вручную.
+rm -rf "$PYINSTALLER_DIST" "$STAGE_DIR"
+if [[ $CLEAN_BUILD -eq 1 ]]; then
+    log "  --clean: wiping venv and PyInstaller work dir"
+    rm -rf "$VENV_DIR" "$PYINSTALLER_WORK"
+fi
 
 # ---------------------------------------------------------------------------
-# Step 2: Create isolated venv + install project + PyInstaller
+# Step 2: Create / reuse venv + install project + PyInstaller
 # ---------------------------------------------------------------------------
-log "Creating build venv..."
-python3 -m venv "$VENV_DIR"
+# Incremental path: venv is reused across runs. `pip install -e .` is
+# idempotent and fast (~1-3 s on warm cache) — only re-resolves if
+# pyproject.toml dependencies changed. If `uv` is on PATH, use it for
+# pip operations (10-50× faster on cold cache, ~100× on warm).
+if [[ -d "$VENV_DIR" && -x "$VENV_DIR/bin/python" ]]; then
+    log "Reusing existing build venv (use --clean to recreate)"
+else
+    log "Creating build venv..."
+    python3 -m venv "$VENV_DIR"
+fi
 PIP="$VENV_DIR/bin/pip"
 PYTHON="$VENV_DIR/bin/python"
 
-log "Installing project and build tools..."
-"$PIP" install --quiet --upgrade pip
-"$PIP" install --quiet -e "$PROJECT_ROOT"
-"$PIP" install --quiet pyinstaller
+if command -v uv >/dev/null 2>&1; then
+    INSTALLER=(uv pip install --python "$PYTHON" --quiet)
+    log "Installing project and build tools (uv)..."
+else
+    INSTALLER=("$PIP" install --quiet)
+    log "Installing project and build tools (pip — install \`uv\` for 10× speedup)..."
+fi
+"${INSTALLER[@]}" --upgrade pip
+"${INSTALLER[@]}" -e "$PROJECT_ROOT"
+"${INSTALLER[@]}" pyinstaller
 
 # ---------------------------------------------------------------------------
 # Step 3: Download bundled Playwright Chromium
@@ -101,12 +138,15 @@ PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR" "$VENV_DIR/bin/playwright" install chro
 # Step 4: Run PyInstaller
 # ---------------------------------------------------------------------------
 log "Running PyInstaller..."
-"$VENV_DIR/bin/pyinstaller" \
-    "$SPEC_FILE" \
-    --distpath "$PYINSTALLER_DIST" \
-    --workpath "$PYINSTALLER_WORK" \
-    --clean \
-    --noconfirm
+# --clean wipes both _work/ AND the PyInstaller global cache (~/.cache/pyinstaller),
+# which forces full re-analysis of every dependency. We skip it on incremental
+# builds — PyInstaller is idempotent and reuses cached TOC/PYZ when sources are
+# unchanged. --noconfirm still overwrites existing _dist without prompting.
+PI_FLAGS=(--distpath "$PYINSTALLER_DIST" --workpath "$PYINSTALLER_WORK" --noconfirm)
+if [[ $CLEAN_BUILD -eq 1 ]]; then
+    PI_FLAGS+=(--clean)
+fi
+"$VENV_DIR/bin/pyinstaller" "$SPEC_FILE" "${PI_FLAGS[@]}"
 
 BINARY_DIR="$PYINSTALLER_DIST/fis-monitor"
 [[ -d "$BINARY_DIR" ]] || die "PyInstaller output not found at $BINARY_DIR"
@@ -137,7 +177,14 @@ install -m 0644 "$TEMPLATES_DIR/README.txt" "$STAGE_ROOT/README.txt"
 # ---------------------------------------------------------------------------
 log "Packing archive..."
 mkdir -p "$DIST_DIR"
-tar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" fis-monitor/
+# Use pigz (parallel gzip) if available — ~4-6× faster than gzip on multicore
+# for a 350-900 MB tarball. Output format is identical (.tar.gz, gzip stream).
+if command -v pigz >/dev/null 2>&1; then
+    tar -cf - -C "$STAGE_DIR" fis-monitor/ | pigz > "$ARCHIVE_PATH"
+else
+    log "  (install \`pigz\` for parallel gzip — 4-6× faster)"
+    tar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" fis-monitor/
+fi
 
 ARCHIVE_SIZE=$(du -sh "$ARCHIVE_PATH" | cut -f1)
 log "Archive size: $ARCHIVE_SIZE"
@@ -152,10 +199,12 @@ log "SHA-256: $(cat "${ARCHIVE_PATH}.sha256")"
 # Step 8: Cleanup build intermediates
 # ---------------------------------------------------------------------------
 log "Cleaning build intermediates..."
-rm -rf "$VENV_DIR" "$PYINSTALLER_DIST" "$PYINSTALLER_WORK" "$STAGE_DIR"
-# NB: $BROWSERS_DIR намеренно не удаляется — playwright install chromium
-# идемпотентен и переиспользует уже скачанный Chromium (~280 MB).
-# Чтобы форсировать перекачку: rm -rf build/_browsers вручную.
+# Only wipe what cannot be cached: _dist (PyInstaller raw output, already
+# staged) and _stage (staging tree, already packed). $VENV_DIR,
+# $PYINSTALLER_WORK and $BROWSERS_DIR are kept for incremental rebuilds —
+# pass --clean to wipe venv + work on the next run for a reproducible
+# release artefact.
+rm -rf "$PYINSTALLER_DIST" "$STAGE_DIR"
 
 # ---------------------------------------------------------------------------
 # Done
