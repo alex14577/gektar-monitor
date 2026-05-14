@@ -89,7 +89,7 @@ from fis_monitor.utils.log import setup_logging
 from fis_monitor.utils.log_filters import StackPIIFilter
 from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
-from fis_monitor.web.routes import auth, diagnostics, events, lots, notifications, onboarding
+from fis_monitor.web.routes import auth, cycle, diagnostics, events, lots, notifications, onboarding
 from fis_monitor.web.routes import main as main_routes
 from fis_monitor.web.routes import settings as settings_routes
 from fis_monitor.web.templates import STATIC_DIR, build_templates
@@ -387,6 +387,7 @@ def create_app(
         notifications.router,
         settings_routes.router,
         auth.router,
+        cycle.router,
         onboarding.router,
         diagnostics.router,
         events.router,

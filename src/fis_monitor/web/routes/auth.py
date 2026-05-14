@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from fis_monitor.services.login import LoginBusyError, LoginService, LoginStatus
+from fis_monitor.web._helpers import client_ip
 from fis_monitor.web.deps import get_login
 from fis_monitor.web.rate_limit import RateLimiter
 
@@ -45,29 +46,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _client_ip(request: Request) -> str:
-    """Extract the client IP from the request.
-
-    Falls back to ``"unknown"`` if the ASGI scope does not carry client info
-    (e.g., in unit tests using ``TestClient`` without an explicit client).
-
-    Note: multiple clients that lack ``request.client`` will share the same
-    ``"unknown"`` rate-limit bucket — they will compete for the same quota.
-
-    Loopback-only deployment per ADR-011. If a reverse-proxy is introduced,
-    switch to X-Forwarded-For with trust-gating (do NOT enable blindly — it is
-    a security pitfall without explicit trusted-proxy configuration).
-    """
-    if request.client is not None:
-        return request.client.host
-    return "unknown"
-
-
-# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -85,7 +63,7 @@ def auth_start(
         429 Too Many Requests — rate limit exceeded (1 req / 60 s per IP).
         503 Service Unavailable — executor not bound (startup incomplete).
     """
-    ip = _client_ip(request)
+    ip = client_ip(request)
     now = time.monotonic()
     if not _auth_rate_limiter.acquire(ip, now=now):
         raise HTTPException(

@@ -30,8 +30,11 @@ See docs/architecture/03-protocols.md §3 and docs/architecture/08-error-strateg
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import queue
 import threading
+import time
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -206,6 +209,11 @@ class MonitorCycleService:
         self._filter_matcher = filter_matcher
         self._url_builder = url_builder
         self._enrichment_workers = enrichment_workers
+        # Trigger queue: request_run_now() places a sentinel here; _wait_for_next_pass()
+        # consumes it to wake the scheduler early.  maxsize=1 ensures at most one
+        # pending sentinel exists; a second put_nowait raises queue.Full which is
+        # suppressed in request_run_now(), giving idempotent coalescing semantics.
+        self._trigger_q: queue.Queue[None] = queue.Queue(maxsize=1)
 
     # Default poll interval used when ``interval_minutes`` is 0 (continuous mode).
     _DEFAULT_POLL_INTERVAL_SEC: float = 60.0
@@ -215,6 +223,22 @@ class MonitorCycleService:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def request_run_now(self) -> None:
+        """Wake the scheduler for an immediate pass (non-blocking, idempotent).
+
+        Places a sentinel into ``_trigger_q`` so that ``_wait_for_next_pass``
+        returns early on the next inter-pass sleep.  The queue is bounded to
+        maxsize=1; if a sentinel is already pending (i.e. a previous
+        request_run_now call has not been consumed yet), queue.Full is raised
+        by put_nowait and suppressed — making this call a no-op.  A burst of
+        triggers therefore collapses into exactly one extra pass.
+
+        Thread-safe: may be called from any thread, including the ASGI request
+        handler thread.
+        """
+        with contextlib.suppress(queue.Full):
+            self._trigger_q.put_nowait(None)
 
     def run_forever(self, stop_event: threading.Event) -> None:
         """Scheduler loop: iterate configured regions, call run_cycle, sleep, repeat.
@@ -292,9 +316,53 @@ class MonitorCycleService:
                 "monitor_cycle: full pass done; sleeping %.0fs before next pass",
                 poll_interval,
             )
-            stop_event.wait(poll_interval)
+            self._wait_for_next_pass(stop_event, poll_interval)
 
         logger.info("monitor_cycle: scheduler stopped")
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    # Internal polling granularity for _wait_for_next_pass.
+    # Caps the latency between stop_event.set() and the scheduler exiting.
+    # Small enough for responsive shutdown; large enough to avoid busy-wait.
+    _STOP_CHECK_INTERVAL_SEC: float = 0.5
+
+    def _wait_for_next_pass(self, stop_event: threading.Event, timeout: float) -> None:
+        """Wait up to ``timeout`` seconds, returning early on a trigger or stop.
+
+        Because ``_trigger_q`` has maxsize=1, at most one sentinel can be
+        pending at any time — no drain loop is needed after a successful get().
+        A burst of ``request_run_now()`` calls still collapses into one extra
+        pass because every call beyond the first is suppressed by queue.Full.
+
+        Stop-event integration: the outer ``while not stop_event.is_set()`` loop
+        in ``run_forever`` rechecks stop_event immediately after this method
+        returns.  To keep shutdown latency bounded (the poll interval can be many
+        minutes), we poll ``stop_event`` every ``_STOP_CHECK_INTERVAL_SEC`` using
+        short ``queue.get()`` calls in a loop instead of one long blocking get.
+
+        Args:
+            stop_event: Scheduler stop signal — checked each polling slice.
+            timeout:    Maximum seconds to wait (the configured poll interval).
+        """
+        deadline = time.monotonic() + timeout
+        slice_sec = self._STOP_CHECK_INTERVAL_SEC
+
+        while not stop_event.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            wait = min(slice_sec, remaining)
+            try:
+                self._trigger_q.get(timeout=wait)
+                # Trigger received — wake up immediately.
+                # No drain needed: maxsize=1 guarantees the queue is now empty.
+                return
+            except queue.Empty:
+                # No trigger in this slice — loop and recheck stop_event.
+                continue
 
     def run_cycle(self, region: int) -> CycleResult:
         """Execute one monitor cycle for ``region``.
