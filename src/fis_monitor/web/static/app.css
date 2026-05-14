@@ -501,6 +501,7 @@ code, kbd, .mono { font-family: var(--font-mono); }
   display: grid; place-items: center;
   padding: 24px;
 }
+.modal-backdrop[hidden] { display: none; }
 .modal {
   background: var(--surface); color: var(--ink);
   border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
