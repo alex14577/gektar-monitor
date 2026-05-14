@@ -466,10 +466,9 @@ class Settings(BaseModel):
     model_config = _DOMAIN_MODEL_CONFIG
 
     mode: Literal["local", "server"] = "local"
-    # Default 10 min based on docs/ops/server-performance-v3.md: typical cycle
-    # = 1 request x ~71s with sort=-DATE_CREATE early-exit on page 1;
-    # ~6x headroom over render time. Prev default was 15 min (pre-research).
-    interval_minutes: Annotated[int, Field(ge=0, le=60)] = 10
+    # Default 1 min: отзывчивый out-of-box. Per docs/ops/server-performance-v3.md
+    # типичный цикл ~71s, 60s между full-pass — рабочая нижняя планка.
+    interval_minutes: Annotated[int, Field(ge=0, le=60)] = 1
     timezone: str = "Europe/Moscow"
     regions: list[int] = Field(default_factory=lambda: [1, 2])
     filters: FiltersConfig = Field(default_factory=FiltersConfig)

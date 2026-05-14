@@ -59,7 +59,7 @@ def test_settings_defaults_canon():
     """Defaults match data-model.md canon (mode=local, MSK, regions=[1,2])."""
     s = Settings()
     assert s.mode == "local"
-    assert s.interval_minutes == 10
+    assert s.interval_minutes == 1
     assert s.timezone == "Europe/Moscow"
     assert s.regions == [1, 2]
     assert isinstance(s.filters, FiltersConfig)
