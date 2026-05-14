@@ -53,13 +53,22 @@ class _FakeConnProvider:
     def close_all(self) -> None: ...
 
 
+class _FakeSseStreamer:
+    """Minimal fake SseStreamer — absorbs bind_executor() call from lifespan."""
+
+    def bind_executor(self, executor: Any) -> None: ...
+
+
 @dataclass
 class _FakeInfra:
     conn_provider: _FakeConnProvider = None  # type: ignore[assignment]
+    sse_streamer: _FakeSseStreamer = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.conn_provider is None:
             self.conn_provider = _FakeConnProvider()
+        if self.sse_streamer is None:
+            self.sse_streamer = _FakeSseStreamer()
 
 
 @dataclass

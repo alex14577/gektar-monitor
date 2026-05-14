@@ -64,6 +64,7 @@ from fis_monitor.infra.sqlite.repositories.smtp_credentials import (
 )
 from fis_monitor.infra.sse.browser_sse_notifier import BrowserSseNotifier
 from fis_monitor.infra.sse.bus import ThreadEventBus
+from fis_monitor.infra.sse.sse_stream import SseStreamer
 from fis_monitor.services.enrichment import EnrichmentService
 from fis_monitor.services.filter_matcher import AllFiltersMatcher, RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
@@ -235,6 +236,10 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     # R4-M12: SmtpHostPolicy — pure logic, no deps, instantiated in Layer 2.
     smtp_host_policy = DefaultSmtpHostPolicy()
 
+    # SseStreamer: constructed without executor (late-binding, ADR-014).
+    # Executor is bound in lifespan via container.infra.sse_streamer.bind_executor().
+    sse_streamer = SseStreamer(event_bus=event_bus)
+
     infra = Infra(
         clock=clock,
         event_bus=event_bus,
@@ -255,6 +260,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         session_probe=session_probe,
         autostart=autostart,
         smtp_host_policy=smtp_host_policy,
+        sse_streamer=sse_streamer,
     )
 
     # ── Layer 3: Notifiers + registry (assembled BEFORE Dispatcher) ─────────

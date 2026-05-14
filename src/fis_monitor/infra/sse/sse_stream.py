@@ -81,12 +81,30 @@ class SseStreamer:
         self,
         *,
         event_bus: EventBus,
-        sse_executor: ThreadPoolExecutor,
+        sse_executor: ThreadPoolExecutor | None = None,
         ping_interval: float = _DEFAULT_PING_INTERVAL,
     ) -> None:
         self._event_bus = event_bus
         self._sse_executor = sse_executor
         self._ping_interval = ping_interval
+
+    def bind_executor(self, executor: ThreadPoolExecutor) -> None:
+        """Bind the executor pool (called in lifespan, ADR-014 late-binding pattern).
+
+        Mirrors ``LoginService.bind_executor``: the executor is created in
+        lifespan *after* ``build_container()`` because executor construction is
+        a runtime-resource concern, not a wiring concern.  ``SseStreamer`` is
+        constructed without an executor in the composition root, then receives
+        one here once the lifespan has created the pool.
+
+        Safe to call before or after the first ``stream()`` call, as long as
+        it is called before any ``stream()`` call attempts to block on
+        ``run_in_executor``.  In production this is always done in lifespan
+        startup before any request is served.
+
+        See: ADR-014 (late-binding executor pattern).
+        """
+        self._sse_executor = executor
 
     async def stream(self) -> AsyncIterator[bytes]:
         """Async generator producing SSE-encoded bytes.
@@ -101,6 +119,12 @@ class SseStreamer:
         """
         import asyncio
 
+        if self._sse_executor is None:
+            raise RuntimeError(
+                "SseStreamer: no executor bound — call bind_executor() first"
+            )
+        sse_executor = self._sse_executor
+
         subscription: EventSubscription[SseEvent] = self._event_bus.subscribe()
         try:
             # Initial keep-alive so the client knows the connection is alive.
@@ -109,7 +133,7 @@ class SseStreamer:
             while True:
                 # Drain one batch — runs in sse_executor, does NOT block event loop.
                 events = await loop.run_in_executor(
-                    self._sse_executor,
+                    sse_executor,
                     self._drain_one,
                     subscription,
                 )

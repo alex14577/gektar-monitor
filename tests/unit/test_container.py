@@ -45,6 +45,7 @@ class TestInfraFrozen:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            sse_streamer=Mock(),
         )
 
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -103,6 +104,7 @@ class TestContainerNotFrozen:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            sse_streamer=Mock(),
         )
 
         services = Services(
@@ -164,6 +166,7 @@ class TestReprNoPII:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            sse_streamer=Mock(),
         )
 
         repr_str = repr(infra)
@@ -220,6 +223,7 @@ class TestReprNoPII:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            sse_streamer=Mock(),
         )
 
         services = Services(
@@ -270,6 +274,7 @@ class TestContainerConstruction:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            sse_streamer=Mock(),
         )
 
         services = Services(

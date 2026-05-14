@@ -50,6 +50,7 @@ from fis_monitor.infra.sqlite.connection import (
 if TYPE_CHECKING:
     from typing import Protocol
 
+    from fis_monitor.infra.sse.sse_stream import SseStreamer
     from fis_monitor.services.diagnostics import DiagnosticsService
     from fis_monitor.services.enrichment import EnrichmentService
     from fis_monitor.services.full_scan import FullScanService
@@ -79,9 +80,9 @@ class Infra:
         - clock, event_bus, conn_provider, locker, config_source, cycle_progress_signal
       Layer 1: repositories (depend on conn_provider)
         - lot_repo, user_state_repo, settings_repo, notif_repo, cycles_repo, smtp_creds_repo
-      Layer 2: external-system adapters (HTTP, parsers, login, SMTP)
+      Layer 2: external-system adapters (HTTP, parsers, login, SMTP, SSE)
         - http_client, list_parser, detail_parser, login_session, session_probe,
-          autostart, smtp_host_policy
+          autostart, smtp_host_policy, sse_streamer
 
     Frozen=True guarantees immutability — no runtime field mutations.
     repr=False prevents accidental secret leakage to crash logs via __repr__.
@@ -153,6 +154,15 @@ class Infra:
 
     smtp_host_policy: SmtpHostPolicy
     """SMTP endpoint validation: resolve hostname, check A/AAAA/MX, manual STARTTLS (ADR-021)."""
+
+    sse_streamer: SseStreamer
+    """Sync EventBus → async text/event-stream bridge for SSE fan-out.
+
+    Constructed without an executor in ``build_container()`` (composition root),
+    then receives one via ``bind_executor()`` in lifespan startup, mirroring the
+    late-binding pattern from ``LoginService`` (ADR-014).  The executor is a
+    runtime resource created after wiring is complete.
+    """
 
 
 @dataclass(frozen=True, repr=False)

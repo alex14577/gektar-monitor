@@ -84,9 +84,24 @@ class FakeLoginService:
         self.cancel_active_job_calls += 1
 
 
+class FakeSseStreamer:
+    """Minimal fake for SseStreamer — records bind_executor calls."""
+
+    def __init__(self) -> None:
+        self.bound_executor: object = None
+
+    def bind_executor(self, executor: object) -> None:
+        self.bound_executor = executor
+
+
 @dataclass
 class FakeInfra:
     conn_provider: FakeConnProvider
+    sse_streamer: FakeSseStreamer = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.sse_streamer is None:
+            self.sse_streamer = FakeSseStreamer()
 
 
 @dataclass
@@ -454,6 +469,34 @@ def test_pw_executor_bound_to_login_service():
     # bind_executor must have been called exactly once.
     assert login.bound_executor is not None, "bind_executor was never called"
     assert isinstance(login.bound_executor, ThreadPoolExecutor)
+
+
+# ---------------------------------------------------------------------------
+# Test 5b (ydj): sse_executor bound to SseStreamer.bind_executor at startup
+# ---------------------------------------------------------------------------
+
+
+def test_sse_executor_bound_to_sse_streamer():
+    """ydj: sse_streamer.bind_executor called with the sse_executor at startup."""
+    container, _login, _dispatcher, _full_scan, _conn_provider = _make_fake_container()
+    locker = FakeLocker()
+
+    def container_factory(settings, data_dir):
+        return container
+
+    app = create_app(
+        data_dir=Path("/tmp/fake"),
+        container_factory=container_factory,
+        locker_factory=_make_locker_factory(locker),
+    )
+
+    asyncio.run(_run_lifespan(app))
+
+    # bind_executor must have been called on sse_streamer.
+    assert container.infra.sse_streamer.bound_executor is not None, (
+        "SseStreamer.bind_executor was never called in lifespan"
+    )
+    assert isinstance(container.infra.sse_streamer.bound_executor, ThreadPoolExecutor)
 
 
 # ---------------------------------------------------------------------------

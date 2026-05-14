@@ -456,6 +456,46 @@ def test_alive_property_false_after_bus_unsubscribe():
 
 
 # ===========================================================================
+# 11. bind_executor / late-binding (ydj)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_stream_raises_without_executor():
+    """stream() raises RuntimeError if bind_executor() was never called."""
+    bus = ThreadEventBus()
+    streamer = SseStreamer(event_bus=bus)  # no sse_executor
+
+    with pytest.raises(RuntimeError, match="no executor bound"):
+        async for _chunk in streamer.stream():
+            break  # should never be reached
+
+
+@pytest.mark.asyncio
+async def test_stream_works_after_bind_executor():
+    """stream() works normally after bind_executor() is called."""
+    bus = ThreadEventBus()
+    streamer = SseStreamer(event_bus=bus)
+    executor = ThreadPoolExecutor(max_workers=1)
+    streamer.bind_executor(executor)
+
+    frames: list[bytes] = []
+    try:
+        async with asyncio.timeout(0.5):
+            async for chunk in streamer.stream():
+                frames.append(chunk)
+                if frames:  # got at least the initial ping
+                    break
+    except TimeoutError:
+        pass
+    finally:
+        executor.shutdown(wait=False)
+
+    assert frames, "Expected at least the initial ping frame"
+    assert frames[0] == b"event: ping\ndata: \n\n"
+
+
+# ===========================================================================
 # 11. wait_one blocking in a thread (integration-style)
 # ===========================================================================
 

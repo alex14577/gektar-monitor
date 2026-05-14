@@ -14,9 +14,13 @@ Strategy (minimal manual Container — no DB, no Playwright):
   OnboardingGateMiddleware checks svc.current() != "completed"; our FakeOnboarding
   returns OnboardingState.COMPLETED so the /events route is not redirected.
 
-  get_sse_streamer is overridden via app.dependency_overrides (because
-  container.infra.sse_streamer is not a dataclass field on Infra — see
-  composition.py vs container.py mismatch; override avoids AttributeError).
+  get_sse_streamer is overridden via app.dependency_overrides even though
+  container.infra.sse_streamer IS now a declared Infra dataclass field (fixed
+  in ydj).  The override is kept because this smoke test uses a hand-wired
+  Container built by _build_smoke_container(), not build_container().  The
+  hand-wired Infra receives _UnusedStub for sse_streamer (it is never touched
+  at runtime by the smoke), so we inject the real SseStreamer via dependency
+  override to exercise the SSE path without going through the Infra field.
 
   SSE streaming approach:
     TestClient manages the ASGI lifespan synchronously (uses anyio in a
@@ -223,6 +227,13 @@ def _build_smoke_container(
         def resolve_and_check(self, host: str, port: int) -> object:
             raise NotImplementedError
 
+    class _StubSseStreamer:
+        """Absorbs bind_executor() called by lifespan — smoke injects real SseStreamer
+        via dependency_overrides, so this stub is never used for actual streaming."""
+
+        def bind_executor(self, executor: object) -> None:
+            pass  # lifespan binds executor; smoke overrides get_sse_streamer anyway
+
     infra = Infra(  # type: ignore[arg-type]
         clock=unused,
         event_bus=event_bus,
@@ -243,6 +254,7 @@ def _build_smoke_container(
         session_probe=unused,
         autostart=unused,
         smtp_host_policy=_StubSmtpHostPolicy(),
+        sse_streamer=_StubSseStreamer(),
     )
 
     if use_raising_monitor:
@@ -351,8 +363,9 @@ def test_smoke_e2e_happy_path(tmp_path: Path) -> None:
         locker_factory=_locker_factory,
         port=8765,
     )
-    # get_sse_streamer override: container.infra.sse_streamer is not a declared
-    # Infra dataclass field, so we inject via FastAPI dependency override.
+    # get_sse_streamer override: smoke uses hand-wired Container (_build_smoke_container),
+    # not build_container().  Infra.sse_streamer holds _UnusedStub here; we inject
+    # the real SseStreamer via dependency override to exercise the SSE route.
     app.dependency_overrides[get_sse_streamer] = lambda: streamer
 
     # Result container shared between threads.

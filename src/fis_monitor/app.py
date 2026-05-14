@@ -196,6 +196,7 @@ async def _lifespan_impl(
         # sse_executor: SSE q.get — separate pool, not shared with FastAPI handlers.
         sse_executor = ThreadPoolExecutor(max_workers=64, thread_name_prefix="sse-wait")
         app.state.sse_executor = sse_executor
+        container.infra.sse_streamer.bind_executor(sse_executor)  # ydj late-binding ADR-014
 
         # enrichment_pool: for future bind_executor on EnrichmentService (follow-up).
         # EnrichmentService.bind_executor does not exist yet; stored on app.state for
