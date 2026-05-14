@@ -195,8 +195,8 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - [x] `plg.4` (P2) — SecretStr repr/str/model_dump_json tests + import-linter `domain_no_logging` contract · sonnet writer + sonnet reviewer APPROVE 0/0
 
 **10e:**
-- [ ] `vgm.5` — E2E smoke (lifespan up → cycle → SSE → shutdown). Теперь реально возможно — есть scheduler + ConfigSource.
-- [ ] `4fw` (P3) — `config_subscription.unsubscribe` в lifespan phase 2 (мелочь)
+- [x] `vgm.5` — E2E smoke (lifespan up → SSE event → shutdown → lock released). Sonnet writer + sonnet reviewer APPROVE+2majors → fix-iter 1 APPROVE. Strategy: hand-wired minimal Container (no DB, no Playwright) + async SSE consumer в daemon thread. Found production wiring gap: `container.infra.sse_streamer` не существует → bd `ydj` (P1).
+- [ ] `4fw` (P3) — `config_subscription.unsubscribe` в lifespan phase 2. Defer: требует `MonitorCycleService.on_config_reload()` который сейчас не существует. Текущий cycle уже re-reads `config_source.current()` каждую итерацию loop'а, push-уведомления не критичны для MVP.
 
 ### Side-track (параллельно с Wave 2-8) — Logging
 
@@ -600,6 +600,23 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 **Итог Wave 10d:** 3/3 closed. Разблокировано: `vgm.5` (E2E smoke) + `4fw` (config_subscription.unsubscribe).
 
 **Следующая сессия:** Wave 10e — `vgm.5` + `4fw`. **Финальная wave до MVP.** После — Wave 11 (post-MVP tooling: fake-site, TargetConfig/FisUrlBuilder, smtp_host cleanup) и follow-up batch (vgj/dmu/4fw мелочи).
+
+### Session (2026-05-14, part 10) — Wave 10e (`vgm.5`)
+
+**Цель:** Финальная Wave 10 — E2E smoke test. `4fw` defer (требует design `on_config_reload` на MonitorCycleService; cycle уже re-reads `config_source.current()` каждую итерацию).
+
+**Сделано:**
+- `vgm.5` — `tests/integration/test_smoke_e2e.py` (~470 LOC, 2 теста: happy-path event flow + error-path lock release). Sonnet writer → reviewer APPROVE+2majors → fix-iter 1 APPROVE.
+  - **Strategy:** hand-wired минимальный Container (без `build_container` — избегаем real SQLite init + Playwright import-time). Fake `monitor_cycle.run_forever` публикует `SseLotNew` через `ThreadEventBus` каждые 100ms; SSE consumer в daemon asyncio thread читает напрямую из `SseStreamer.stream()` (не через HTTP). TestClient управляет lifespan в main thread.
+  - **Production-bug найден:** `container.infra.sse_streamer` НЕ существует в `Infra` dataclass (web/deps.py:113 пытается прочитать). `/events` endpoint крашнулся бы AttributeError на первом запросе. Smoke обходит через `app.dependency_overrides[get_sse_streamer]`. Зафиксировано в bd **`ydj`** (P1). Smoke с этим override'ом не сможет ловить regression этого участка wiring'а — trade-off зафиксирован в test docstring.
+  - **Fix-iter 1:** M1 collapsed double warning-suppression → один декоратор; M2 introduced `_UnusedStub` (raises on attribute access) для незатронутых полей + collapsed per-field `type: ignore` в один; m5 `LotPublicDTO.model_validate` вместо dict-unpack.
+- `4fw` defer — описан в bd description, требует MonitorCycleService.on_config_reload (отдельное design-решение). Текущая ситуация: cycle re-reads `config_source.current()` каждую итерацию loop'а, push-уведомление о reload не критично для MVP.
+
+**Vault:** glossary no-op (test-only). bd `ydj` (P1) создан как follow-up для SseStreamer wiring gap.
+
+**Suite:** 1034 passed / 3 skipped (+2 от Wave 10d). Ruff clean.
+
+**Итог Wave 10e:** 1/2 closed (vgm.5); 4fw defer. **Wave 10 завершён.** Wave 11 / cleanup-batch + bd `ydj` (P1 production wiring fix) для следующих сессий.
 
 ### Шаблон для будущих сессий
 
