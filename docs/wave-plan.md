@@ -636,6 +636,19 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 
 **Итог:** 1/1 closed. No remote configured → git push не выполнен (локальный репо без remote).
 
+### Session (2026-05-14, part 12) — Distribution packaging (`7y3`)
+
+**Цель:** PyInstaller --onedir release archive для Linux x86_64 + Windows заглушка.
+
+**Сделано:**
+- `gektar_monitor-7y3` — `build/fis-monitor.spec`, `scripts/build_release.sh`, `scripts/build_release.ps1`, `scripts/templates/{run.sh,run.bat,README.txt}`. Критический фикс: spec ссылался на несуществующий `src/fis_monitor/db/schema.sql`; реальный путь `docs/db/schema.sql` с destination `docs/db/` (→ `_internal/docs/db/` в onedir). Smoke-test пройден: архив 342 МБ, `./run.sh` запускается, `curl http://127.0.0.1:8000/` → HTTP 200, 10226 байт HTML.
+
+**Vault:** ADR-026 (PyInstaller --onedir vs --onefile, bundled Chromium, build-on-target); `docs/operations/release-build.md` (новый); glossary +2 термина (release archive, launcher); decisions-log обновлён.
+
+**Suite:** 1149 passed, 3 skipped. ruff: all checks passed.
+
+**Итог:** 1/1 closed (`7y3`).
+
 ### Шаблон для будущих сессий
 
 ```markdown

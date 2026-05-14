@@ -37,6 +37,7 @@
 - [[decisions/ADR-023-configsource-save-extension|ADR-023]] — `ConfigSource.save()` расширяет существующий Protocol (без отдельного SettingsWriter)
 - [[decisions/ADR-024-target-config-and-url-builder|ADR-024]] — `TargetConfig` + `TorgiUrlBuilder`: config seam для реального target URL (`надальнийвосток.рф`); SMTP defaults → `infra/smtp/constants.py`
 - [[decisions/ADR-025-sse-single-endpoint|ADR-025]] — SSE routing: единственный роут `/events`, фильтрация по `sse-swap` на клиенте
+- [[decisions/ADR-026-distribution-packaging-pyinstaller|ADR-026]] — Distribution packaging: PyInstaller --onedir + bundled Chromium, build-on-target strategy
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES
