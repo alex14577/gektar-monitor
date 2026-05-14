@@ -237,6 +237,12 @@
 
 - **OnboardingQuery** (`web/onboarding_gate.py`) — narrow `Protocol` с 2 методами (`current() -> object`, `url_for_current_step() -> str`) — ISP seam для `OnboardingGateMiddleware`. `OnboardingService` имеет 7 публичных методов; middleware видит только нужные два, что упрощает фейки и предотвращает случайный coupling.
 
+## Веб-стек (Wave 10 — entrypoint + mount)
+
+- **`_LazyOnboardingProxy`** (`app.py`) — thin composition-root adapter, реализующий `OnboardingQuery` Protocol. Держит ссылку на `FastAPI` instance, разрешает `OnboardingService` через `app.state.container.services.onboarding` на каждом вызове `current()` / `url_for_current_step()`. Решает chicken-and-egg: `OnboardingGateMiddleware` регистрируется в `create_app()` ДО запуска lifespan, а Container ещё не построен. **Инвариант**: первый HTTP-request приходит только после завершения lifespan startup — к этому моменту `app.state.container` всегда заполнен. Конструктор не трогает `app.state` (lazy по определению). См. [[architecture/04-composition-root]], [[onboarding]].
+
+- **`main()`** (`app.py`) — console-script entry point из `pyproject.toml` (`fis-monitor = "fis_monitor.app:main"`). argparse: `--data-dir` (default `./var`), `--host` (default `127.0.0.1`), `--port` (default `8000`). `importlib.import_module("fis_monitor.composition")` (runtime, не top-level) сохраняет import-linter контракт (`app` ⟂ `composition`). `args.port` передаётся И в `create_app(port=...)` (для `loopback_csrf_config`), И в `uvicorn.run(port=...)` — port alignment guaranteed.
+
 ## См. также
 
 - [[decisions-log]]

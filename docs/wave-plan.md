@@ -172,9 +172,31 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - [x] `oxy.2` — Onboarding-gate middleware · sonnet · `web/onboarding_gate.py`
 - [x] `8ov.3` — three-phase shutdown lifespan + ThreadSupervisor + j19 bind_executor · sonnet · `app.py` + `infra/thread_supervisor.py`
 
-### Wave 10 — E2E smoke
+### Wave 10 — Запускаемый сервис (scope-shift 2026-05-14)
 
-- [ ] `vgm.5` — smoke end-to-end (lifespan → cycle → SSE → shutdown) · sonnet · ждёт `8ov.3`, `oxy.6`
+Изначальный Wave 10 = только `vgm.5` (E2E smoke). После trace-агента по цепочке «фильтр → email + SSE» выявлены 5 gap'ов, которые не дают сервису работать как мониторинг. Scope расширен на «довести до запускаемого состояния», далее E2E и logging.
+
+**10a — HTTP entrypoint (текущая волна):**
+- [x] `7vy` — `main()` + mount routes/middleware/static/templates · sonnet (writer) + sonnet (reviewer APPROVE) · `app.py`, `tests/unit/test_app_wiring.py`
+
+**10b — параллель (после 7vy):**
+- [ ] `bye.9` (P0) — реальный `WatchdogConfigSource` вместо `_NotImplementedConfigSource` (Layer 0)
+- [ ] `b54` (P2) — SSE dedup (убрать двойную публикацию `SseLotNew`)
+- [ ] `plg.1` (P2) — structured JSON logger + DI factory
+
+**10c — параллель (после bye.9):**
+- [ ] `vgj` (P0) — `MonitorCycleService.run_forever` scheduler в lifespan
+- [ ] `2s3` (P1) — `ConfigSource.save()` + POST `/settings/regions` + POST `/settings/recipients`
+- [ ] `plg.2` (P1) — redactor pipeline (RecipientFilter + StackPIIFilter)
+
+**10d — параллель (после vgj + plg.2):**
+- [ ] `03y` (P1) — `FilterMatcher` по `rf_subjects` в `MonitorCycleService`
+- [ ] `plg.3` (P2) — audit/app/requests channels + rotation
+- [ ] `plg.4` (P2) — SecretStr repr тест + import-linter security contract
+
+**10e:**
+- [ ] `vgm.5` — E2E smoke (lifespan up → cycle → SSE → shutdown). Теперь реально возможно — есть scheduler + ConfigSource.
+- [ ] `4fw` (P3) — `config_subscription.unsubscribe` в lifespan phase 2 (мелочь)
 
 ### Side-track (параллельно с Wave 2-8) — Logging
 
@@ -473,6 +495,27 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 **Следующая сессия:** Wave 10 — `vgm.5` E2E smoke (lifespan → cycle → SSE → shutdown). **Последняя wave до MVP**. После — Wave 11 (post-MVP tooling: fake-site, TargetConfig/FisUrlBuilder, smtp_host cleanup) либо follow-up batch (vgj/dmu/4fw + плагины логирования из side-track).
 
 ---
+
+### Session (2026-05-14, part 5) — Wave 10 scope-shift + 10a (`7vy`)
+
+**Цель:** Wave 10. Изначально планировался только `vgm.5` (E2E smoke), но пользователь спросил «как запустить сервис?» и trace-агент по цепочке «фильтр → email + SSE» выявил 5 gap'ов:
+
+1. `main()` отсутствует (pyproject объявляет console-script, но функции нет).
+2. `MonitorCycleService.run_forever` не существует → нет supervised scheduler'а (bd `vgj`, был P2 → P0).
+3. `_NotImplementedConfigSource` стаб → runtime-crash на первом тике (bd `bye.9`, был P2 → P0).
+4. Нет endpoint'ов POST `/settings/regions`, `/settings/recipients` + нет `ConfigSource.save()` (bd `2s3`, был P2 → P1).
+5. `FiltersConfig.rf_subjects` не матчится в `MonitorCycleService` (bd `03y` создан, P1).
+6. `SseLotNew` публикуется дважды (bd `b54` создан, P2).
+
+Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 дубликата bd-issues, созданных оркестратором по невнимательности, superseded на оригиналы (`4ue→bye.9`, `dbl→vgj`, `y92→2s3`).
+
+**Сделано:**
+- `7vy` — `create_app()` смонтировала 7 routers (`/lots`, `/notifications`, `/settings`, `/auth`, `/onboarding`, `/diagnostics`, `/events`) + `/static` + `Jinja2Templates` в `app.state.templates`. Подключены `OnboardingGateMiddleware` (inner, через `_LazyOnboardingProxy`) и `CsrfHostOriginMiddleware` (outer). Добавлена `main()` с argparse (`--data-dir`, `--host`, `--port`) — runtime-import `composition` через `importlib` сохраняет import-linter контракт. 3 unit-теста (`tests/unit/test_app_wiring.py`). Reviewer (sonnet): APPROVE с одним AMEND на glossary draft (отсутствие wiki-links — оркестратор применил с `[[architecture/04-composition-root]]` + `[[onboarding]]`). 887 passed, 3 skipped, ruff clean. Smoke `TestClient.get("/onboarding/state")` → 200 (background-thread `NotImplementedError` от full_scan/dispatcher — known noise, исчезнет с `bye.9`).
+- Vault: glossary +2 (`_LazyOnboardingProxy`, `main()`).
+
+**Итог Wave 10a:** 1/1 closed. Разблокировано: вся Wave 10b.
+
+**Следующая сессия:** Wave 10b параллельно — `bye.9` (P0, критический путь) + `b54` (P2, изолирован) + `plg.1` (logging core). 3 writer-агента, нулевое пересечение файлов.
 
 ### Шаблон для будущих сессий
 

@@ -77,11 +77,17 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from fis_monitor.container import Container
 from fis_monitor.domain.models import Settings
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.thread_supervisor import ThreadSupervisor
+from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
+from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
+from fis_monitor.web.routes import auth, diagnostics, events, lots, notifications, onboarding
+from fis_monitor.web.routes import settings as settings_routes
+from fis_monitor.web.templates import STATIC_DIR, build_templates
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +100,31 @@ LockerFactory = Callable[[Path], FileLocker]
 
 def _default_locker_factory(data_dir: Path) -> FileLocker:
     return FileLocker(path=data_dir / "app.lock")
+
+
+# ---------------------------------------------------------------------------
+# Lazy proxy — resolves OnboardingService from app.state at request time
+# ---------------------------------------------------------------------------
+
+
+class _LazyOnboardingProxy:
+    """Adapter, lazy over Container.  Implements OnboardingQuery Protocol.
+
+    Middleware is constructed before the lifespan starts, so a direct reference
+    to OnboardingService is not yet available.  The proxy holds a reference to
+    the FastAPI instance and resolves the service on each request via
+    ``app.state.container``.  By the time the first request arrives the lifespan
+    has already run and populated ``app.state.container``.
+    """
+
+    def __init__(self, app: FastAPI) -> None:
+        self._app = app
+
+    def current(self) -> object:
+        return self._app.state.container.services.onboarding.current()
+
+    def url_for_current_step(self) -> str:
+        return self._app.state.container.services.onboarding.url_for_current_step()
 
 
 # ---------------------------------------------------------------------------
@@ -270,11 +301,12 @@ def create_app(
     *,
     container_factory: ContainerFactory,
     locker_factory: LockerFactory = _default_locker_factory,
+    port: int = 8000,
 ) -> FastAPI:
-    """Create and return a FastAPI instance with lifespan attached.
+    """Create and return a FastAPI instance with lifespan, routes, and middleware.
 
-    ``Container`` is stored in ``app.state.container``.  No routes or
-    middleware are mounted here — those live in follow-up tasks.
+    ``Container`` is stored in ``app.state.container``.  All seven routers are
+    registered and both CSRF + OnboardingGate middleware are mounted here.
 
     ``container_factory`` is mandatory (no default) so that ``app.py`` does not
     import ``fis_monitor.composition`` — import-linter places them in the same
@@ -290,6 +322,8 @@ def create_app(
                            ``composition.build_container``; tests pass a fake.
         locker_factory:    DI seam for tests — defaults to
                            ``FileLocker(data_dir / "app.lock")``.
+        port:              TCP port the server will listen on.  Used to derive
+                           loopback CSRF allow-lists.  Defaults to 8000.
 
     Returns:
         Configured ``FastAPI`` instance.  Start it with uvicorn or ASGI runner.
@@ -306,4 +340,82 @@ def create_app(
         ):
             yield
 
-    return FastAPI(lifespan=_lifespan)
+    app = FastAPI(lifespan=_lifespan)
+
+    # --- Templates ---------------------------------------------------------
+    app.state.templates = build_templates()
+
+    # --- Static files ------------------------------------------------------
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    # --- Routers -----------------------------------------------------------
+    for r in (
+        lots.router,
+        notifications.router,
+        settings_routes.router,
+        auth.router,
+        onboarding.router,
+        diagnostics.router,
+        events.router,
+    ):
+        app.include_router(r)
+
+    # --- Middleware (last add_middleware = outermost ASGI layer) ------------
+    # OnboardingGate is inner (closer to route handlers); CSRF is outer.
+    # _LazyOnboardingProxy defers Container lookup until request time, after
+    # lifespan startup has populated app.state.container.
+    app.add_middleware(OnboardingGateMiddleware, svc=_LazyOnboardingProxy(app))
+    host_allowlist, origin_whitelist = loopback_csrf_config(port=port)
+    # Store origin_whitelist on app.state so get_csrf_origin_whitelist() in
+    # deps.py can serve it to the SSE events route without coupling to container.
+    app.state.csrf_origin_whitelist = origin_whitelist
+    app.add_middleware(
+        CsrfHostOriginMiddleware,
+        host_allowlist=host_allowlist,
+        origin_whitelist=origin_whitelist,
+    )
+
+    return app
+
+
+# ---------------------------------------------------------------------------
+# Console-script entry point
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Console-script entry point declared in pyproject.toml as ``fis-monitor``."""
+    import argparse
+
+    import uvicorn
+
+    parser = argparse.ArgumentParser(
+        prog="fis-monitor",
+        description="Дальневосточный гектар lot-monitoring service.",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("./var"),
+        help="Application data directory (DB, lock file).  Created if absent.",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address.")
+    parser.add_argument("--port", type=int, default=8000, help="TCP port.")
+    args = parser.parse_args()
+
+    args.data_dir.mkdir(parents=True, exist_ok=True)
+
+    # importlib.import_module avoids a static import statement that would
+    # violate the import-linter contract: app and composition are peers in the
+    # same tier and cannot cross-import at the module level.
+    import importlib
+
+    composition = importlib.import_module("fis_monitor.composition")
+    build_container = composition.build_container
+
+    application = create_app(
+        args.data_dir,
+        container_factory=build_container,
+        port=args.port,
+    )
+    uvicorn.run(application, host=args.host, port=args.port)
