@@ -39,7 +39,7 @@ class UpstreamError(DomainError):
         "network", "http_5xx", "http_4xx", "redirect_login", "timeout"
     ]
 
-    def __init__(self, message: str, *, category: "UpstreamError.UpstreamCategory") -> None:
+    def __init__(self, message: str, *, category: UpstreamError.UpstreamCategory) -> None:
         super().__init__(message)
         self.category = category
 

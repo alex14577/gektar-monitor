@@ -41,6 +41,7 @@ config.json
 # Local artifacts
 monitor.zip
 *.local
+*.spec.bak
 
 # OS
 .DS_Store

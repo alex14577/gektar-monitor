@@ -81,6 +81,30 @@ _STEP_FOR_URL: dict[str, tuple[OnboardingState, int]] = {
 # ---------------------------------------------------------------------------
 
 
+def _validate_smtp_input(
+    smtp_host: str,
+    smtp_login: str,
+    smtp_pass: str,
+    smtp_port: int,
+) -> str | None:
+    """Validate SMTP form fields; return a human-readable error string or None.
+
+    Pure function — no side effects, easily unit-testable.
+    Covers the same invariants enforced by SettingsService.set_smtp_credentials()
+    so that the web layer can return a structured 200 fragment instead of letting
+    a ValueError propagate into a 500.
+    """
+    if not smtp_host:
+        return "Укажите SMTP-сервер."
+    if not smtp_login:
+        return "Укажите логин."
+    if not smtp_pass:
+        return "Укажите пароль."
+    if not (1 <= smtp_port <= 65535):
+        return f"Порт вне диапазона 1-65535: {smtp_port!r}."
+    return None
+
+
 def _mismatch_redirect(svc: OnboardingService) -> RedirectResponse:
     """Return a 302 redirect to the current wizard step with no-store cache."""
     return RedirectResponse(
@@ -507,17 +531,11 @@ def _handle_step2_next(
     except (ValueError, TypeError):
         smtp_port = 0
 
-    if not smtp_host:
+    _input_err = _validate_smtp_input(smtp_host, smtp_login, smtp_pass, smtp_port)
+    if _input_err:
         return _rerender(
             request, templates, cfg, step=2,
-            error="SMTP-сервер не может быть пустым.",
-            extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
-                        "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
-        )
-    if not (1 <= smtp_port <= 65535):
-        return _rerender(
-            request, templates, cfg, step=2,
-            error=f"Порт {smtp_port!r} вне допустимого диапазона 1-65535.",
+            error=_input_err,
             extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
                         "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
         )
@@ -780,7 +798,19 @@ async def post_onboarding_smtp_test(
     except (ValueError, TypeError):
         smtp_port = 0
 
-    # Step 1: validate + persist credentials
+    # Step 1: validate input fields before touching the service layer.
+    # _validate_smtp_input is a pure function shared with _handle_step2_next (DRY).
+    _input_err = _validate_smtp_input(smtp_host, smtp_login, smtp_pass, smtp_port)
+    if _input_err:
+        return HTMLResponse(
+            content=(
+                f'<span class="chip chip--err" id="smtp-test-result">'
+                f"{_input_err}</span>"
+            ),
+            status_code=200,
+        )
+
+    # Step 1b: persist credentials (may raise SmtpHostPolicyError / ValidationError)
     try:
         creds = SmtpCredentials(
             smtp_user=smtp_login,

@@ -36,7 +36,7 @@ from fis_monitor.web.deps import (
     get_smtp_test,
     get_templates,
 )
-from fis_monitor.web.routes.onboarding import router
+from fis_monitor.web.routes.onboarding import _validate_smtp_input, router
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 from tests.factories import make_settings
 
@@ -773,3 +773,146 @@ def test_smtp_test_calls_settings_service_then_smtp_test() -> None:
 
     assert resp.status_code == 200
     assert calls == ["set_creds", "test_send"]
+
+
+# ---------------------------------------------------------------------------
+# _validate_smtp_input — pure-function unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_validate_smtp_input_empty_host_returns_error() -> None:
+    """Empty smtp_host → returns non-None error string."""
+    err = _validate_smtp_input("", "user@example.com", "secret", 587)
+    assert err is not None
+    assert "SMTP" in err or "сервер" in err.lower()
+
+
+def test_validate_smtp_input_empty_login_returns_error() -> None:
+    """Empty smtp_login → returns non-None error string."""
+    err = _validate_smtp_input("smtp.example.com", "", "secret", 587)
+    assert err is not None
+    assert "логин" in err.lower()
+
+
+def test_validate_smtp_input_empty_password_returns_error() -> None:
+    """Empty smtp_pass → returns non-None error string."""
+    err = _validate_smtp_input("smtp.example.com", "user@example.com", "", 587)
+    assert err is not None
+    assert "пароль" in err.lower()
+
+
+def test_validate_smtp_input_port_zero_returns_error() -> None:
+    """Port 0 → returns non-None error string mentioning range."""
+    err = _validate_smtp_input("smtp.example.com", "user@example.com", "secret", 0)
+    assert err is not None
+    assert "65535" in err or "диапазон" in err.lower() or "порт" in err.lower()
+
+
+def test_validate_smtp_input_port_out_of_range_returns_error() -> None:
+    """Port 99999 → returns non-None error string."""
+    err = _validate_smtp_input("smtp.example.com", "user@example.com", "secret", 99999)
+    assert err is not None
+
+
+def test_validate_smtp_input_valid_returns_none() -> None:
+    """All valid fields → returns None (no error)."""
+    err = _validate_smtp_input("smtp.example.com", "user@example.com", "secret", 587)
+    assert err is None
+
+
+# ---------------------------------------------------------------------------
+# POST /onboarding/smtp-test — invalid-input 200-fragment tests
+# ---------------------------------------------------------------------------
+
+
+def test_smtp_test_empty_host_returns_err_fragment_not_500() -> None:
+    """POST /onboarding/smtp-test with empty smtp_host → 200 chip--err, no 500."""
+    app, _, _, f_settings_svc, _ = _make_app(
+        onboarding_state=OnboardingState.REGIONS_SET,
+    )
+    client = _client(app)
+
+    resp = client.post(
+        "/onboarding/smtp-test",
+        data={
+            "smtp_host": "",
+            "smtp_port": "587",
+            "smtp_login": "bot@example.com",
+            "smtp_pass": "secret",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "chip--err" in resp.text
+    assert 'id="smtp-test-result"' in resp.text
+    # Service must NOT be called — validation short-circuits before it
+    assert len(f_settings_svc.set_smtp_credentials_calls) == 0
+
+
+def test_smtp_test_empty_login_returns_err_fragment() -> None:
+    """POST /onboarding/smtp-test with empty smtp_login → 200 chip--err."""
+    app, _, _, f_settings_svc, _ = _make_app(
+        onboarding_state=OnboardingState.REGIONS_SET,
+    )
+    client = _client(app)
+
+    resp = client.post(
+        "/onboarding/smtp-test",
+        data={
+            "smtp_host": "smtp.example.com",
+            "smtp_port": "587",
+            "smtp_login": "",
+            "smtp_pass": "secret",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "chip--err" in resp.text
+    assert 'id="smtp-test-result"' in resp.text
+    assert len(f_settings_svc.set_smtp_credentials_calls) == 0
+
+
+def test_smtp_test_empty_password_returns_err_fragment() -> None:
+    """POST /onboarding/smtp-test with empty smtp_pass → 200 chip--err."""
+    app, _, _, f_settings_svc, _ = _make_app(
+        onboarding_state=OnboardingState.REGIONS_SET,
+    )
+    client = _client(app)
+
+    resp = client.post(
+        "/onboarding/smtp-test",
+        data={
+            "smtp_host": "smtp.example.com",
+            "smtp_port": "587",
+            "smtp_login": "bot@example.com",
+            "smtp_pass": "",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "chip--err" in resp.text
+    assert 'id="smtp-test-result"' in resp.text
+    assert len(f_settings_svc.set_smtp_credentials_calls) == 0
+
+
+def test_smtp_test_invalid_port_returns_err_fragment() -> None:
+    """POST /onboarding/smtp-test with port=0 → 200 chip--err."""
+    app, _, _, f_settings_svc, _ = _make_app(
+        onboarding_state=OnboardingState.REGIONS_SET,
+    )
+    client = _client(app)
+
+    resp = client.post(
+        "/onboarding/smtp-test",
+        data={
+            "smtp_host": "smtp.example.com",
+            "smtp_port": "0",
+            "smtp_login": "bot@example.com",
+            "smtp_pass": "secret",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "chip--err" in resp.text
+    assert 'id="smtp-test-result"' in resp.text
+    assert len(f_settings_svc.set_smtp_credentials_calls) == 0
