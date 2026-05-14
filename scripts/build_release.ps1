@@ -85,9 +85,12 @@ Write-Step "Building version $VERSION → $ArchivePath"
 # Step 1: Clean
 # ---------------------------------------------------------------------------
 Write-Step "Cleaning stale build artefacts..."
-@($VenvDir, $BrowsersDir, $PyiDist, $PyiWork, $StageDir) | ForEach-Object {
+@($VenvDir, $PyiDist, $PyiWork, $StageDir) | ForEach-Object {
     if (Test-Path $_) { Remove-Item $_ -Recurse -Force }
 }
+# NB: $BrowsersDir не удаляется — playwright install chromium идемпотентен
+# и переиспользует уже скачанный Chromium. Чтобы форсировать перекачку —
+# Remove-Item build\_browsers -Recurse -Force вручную.
 
 # ---------------------------------------------------------------------------
 # Step 2: venv + install
@@ -177,9 +180,12 @@ Write-Step "SHA-256: $Hash"
 # Step 8: Cleanup
 # ---------------------------------------------------------------------------
 Write-Step "Cleaning build intermediates..."
-@($VenvDir, $BrowsersDir, $PyiDist, $PyiWork, $StageDir) | ForEach-Object {
+@($VenvDir, $PyiDist, $PyiWork, $StageDir) | ForEach-Object {
     if (Test-Path $_) { Remove-Item $_ -Recurse -Force }
 }
+# NB: $BrowsersDir не удаляется — playwright install chromium идемпотентен
+# и переиспользует уже скачанный Chromium. Чтобы форсировать перекачку —
+# Remove-Item build\_browsers -Recurse -Force вручную.
 
 # ---------------------------------------------------------------------------
 # Done

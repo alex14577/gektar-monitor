@@ -73,7 +73,10 @@ log "Building version $VERSION → $ARCHIVE_PATH"
 # Step 1: Clean stale build artefacts
 # ---------------------------------------------------------------------------
 log "Cleaning stale build artefacts..."
-rm -rf "$VENV_DIR" "$BROWSERS_DIR" "$PYINSTALLER_DIST" "$PYINSTALLER_WORK" "$STAGE_DIR"
+rm -rf "$VENV_DIR" "$PYINSTALLER_DIST" "$PYINSTALLER_WORK" "$STAGE_DIR"
+# NB: $BROWSERS_DIR намеренно не удаляется — playwright install chromium
+# идемпотентен и переиспользует уже скачанный Chromium (~280 MB).
+# Чтобы форсировать перекачку: rm -rf build/_browsers вручную.
 
 # ---------------------------------------------------------------------------
 # Step 2: Create isolated venv + install project + PyInstaller
@@ -149,7 +152,10 @@ log "SHA-256: $(cat "${ARCHIVE_PATH}.sha256")"
 # Step 8: Cleanup build intermediates
 # ---------------------------------------------------------------------------
 log "Cleaning build intermediates..."
-rm -rf "$VENV_DIR" "$BROWSERS_DIR" "$PYINSTALLER_DIST" "$PYINSTALLER_WORK" "$STAGE_DIR"
+rm -rf "$VENV_DIR" "$PYINSTALLER_DIST" "$PYINSTALLER_WORK" "$STAGE_DIR"
+# NB: $BROWSERS_DIR намеренно не удаляется — playwright install chromium
+# идемпотентен и переиспользует уже скачанный Chromium (~280 MB).
+# Чтобы форсировать перекачку: rm -rf build/_browsers вручную.
 
 # ---------------------------------------------------------------------------
 # Done
