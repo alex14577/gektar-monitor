@@ -81,7 +81,7 @@ class SqliteNotificationsRepository:
         Returns ``True`` if a new row was created (slot is fresh),
         ``False`` if the slot already existed in any status.
         """
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             cur = conn.execute(
@@ -100,7 +100,7 @@ class SqliteNotificationsRepository:
         self, lot_id: int, channel: str, recipient: str
     ) -> Literal["pending", "sent", "permanent_fail"] | None:
         """Return the current status, or ``None`` if no slot exists yet."""
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute(
             "SELECT status FROM notifications"
             " WHERE lot_id = ? AND channel = ? AND recipient = ?",
@@ -121,7 +121,7 @@ class SqliteNotificationsRepository:
         (``sent`` or ``permanent_fail``) — R4-C4 race; caller MUST skip send.
         """
         at_iso = at.isoformat()
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             cur = conn.execute(
@@ -146,7 +146,7 @@ class SqliteNotificationsRepository:
     ) -> None:
         """Transition ``pending → sent``.  No-op if already in another status."""
         at_iso = at.isoformat()
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
@@ -165,7 +165,7 @@ class SqliteNotificationsRepository:
         self, lot_id: int, channel: str, recipient: str
     ) -> None:
         """Transition ``pending → permanent_fail``.  No-op if already terminal."""
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
@@ -187,7 +187,7 @@ class SqliteNotificationsRepository:
         Cutoff = now() - age.
         """
         cutoff = (self._clock.now() - age).isoformat()
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute(
             f"SELECT {_SELECT_COLUMNS} FROM notifications"
             " WHERE status = 'pending'"
@@ -201,7 +201,7 @@ class SqliteNotificationsRepository:
         """Return the most recently sent notifications (``status='sent'``),
         ordered by ``sent_at DESC``.
         """
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute(
             f"SELECT {_SELECT_COLUMNS} FROM notifications"
             " WHERE status = 'sent'"

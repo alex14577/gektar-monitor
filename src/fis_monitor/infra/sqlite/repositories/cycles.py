@@ -121,7 +121,7 @@ class SqliteCyclesRepository:
         The row is created with ``status='open'``.
         """
         at_iso = _iso(at)
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             cur = conn.execute(
@@ -143,7 +143,7 @@ class SqliteCyclesRepository:
         Raises ``RuntimeError`` if ``cycle_id`` is not found (rowcount == 0).
         Uses ``BEGIN IMMEDIATE`` per ADR-016.
         """
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             cur = conn.execute(
@@ -179,7 +179,7 @@ class SqliteCyclesRepository:
         Excludes open cycles (``status='open'``).
         Read-only — no explicit transaction (auto-commit, per ADR-016).
         """
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute(
             f"SELECT {_SELECT_COLUMNS} FROM cycles"
             " WHERE status != 'open'"
@@ -217,7 +217,7 @@ class SqliteCyclesRepository:
         Returns total number of rows deleted.
         """
         cutoff = _iso(self._clock.now() - age)
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         total_deleted = 0
 
         while True:

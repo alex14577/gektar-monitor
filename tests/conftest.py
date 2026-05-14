@@ -88,7 +88,7 @@ def tmp_db(
     """Per-test SQLite DB with the full schema applied.
 
     Yields a `ConnectionProvider` — tests grab connections via
-    `provider.get_connection()`. The provider is closed in teardown so
+    `provider.get()`. The provider is closed in teardown so
     no sqlite3 handles leak (important on Windows where unclosed handles
     block tmp_path cleanup).
     """

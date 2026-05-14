@@ -104,7 +104,7 @@ def test_save_twice_is_singleton(tmp_db: ConnectionProvider) -> None:
     repo.save(_make_creds(smtp_host="first.example.com"))
     repo.save(_make_creds(smtp_host="second.example.com"))
 
-    conn: sqlite3.Connection = tmp_db.get_connection()
+    conn: sqlite3.Connection = tmp_db.get()
     count = conn.execute(
         "SELECT COUNT(*) FROM smtp_credentials WHERE id = 1"
     ).fetchone()[0]
@@ -113,7 +113,7 @@ def test_save_twice_is_singleton(tmp_db: ConnectionProvider) -> None:
 
 def test_check_constraint_id_must_be_1(tmp_db: ConnectionProvider) -> None:
     """Direct INSERT with id=2 raises IntegrityError (CHECK id=1)."""
-    conn: sqlite3.Connection = tmp_db.get_connection()
+    conn: sqlite3.Connection = tmp_db.get()
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
             """
@@ -180,7 +180,7 @@ def test_updated_at_advances_on_each_save(tmp_db: ConnectionProvider) -> None:
 
 
 def _get_updated_at(provider: ConnectionProvider) -> str:
-    conn = provider.get_connection()
+    conn = provider.get()
     row = conn.execute(
         "SELECT updated_at FROM smtp_credentials WHERE id = 1"
     ).fetchone()
@@ -194,7 +194,7 @@ def test_use_default_false_round_trip(tmp_db: ConnectionProvider) -> None:
     repo.save(_make_creds(use_default=False))
 
     # Verify raw DB value is 0 (int)
-    conn: sqlite3.Connection = tmp_db.get_connection()
+    conn: sqlite3.Connection = tmp_db.get()
     raw = conn.execute(
         "SELECT use_default FROM smtp_credentials WHERE id = 1"
     ).fetchone()[0]

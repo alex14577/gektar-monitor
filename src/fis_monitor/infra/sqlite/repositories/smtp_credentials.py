@@ -55,7 +55,7 @@ class SqliteSmtpCredentialsRepository:
         smtp_password is wrapped in SecretStr (ADR-017).
         use_default is stored as INTEGER 0/1 — converted to bool on load.
         """
-        conn: sqlite3.Connection = self._conn_provider.get_connection()
+        conn: sqlite3.Connection = self._conn_provider.get()
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """
@@ -87,7 +87,7 @@ class SqliteSmtpCredentialsRepository:
         smtp_password: get_secret_value() for plaintext storage (ADR-017).
         use_default: bool → int (0/1) for SQLite CHECK constraint.
         """
-        conn: sqlite3.Connection = self._conn_provider.get_connection()
+        conn: sqlite3.Connection = self._conn_provider.get()
         now = self._clock.now().isoformat()
         # ADR-017: get_secret_value() — only place where plaintext is extracted.
         password_plain = creds.smtp_password.get_secret_value()

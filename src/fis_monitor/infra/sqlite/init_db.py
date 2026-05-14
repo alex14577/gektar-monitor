@@ -78,7 +78,7 @@ def init_db(
         MigrationRequired:  DB ``user_version`` is *less* than ``latest_version``
                             and no ``migration_runner`` was provided.
     """
-    conn = provider.get_connection()
+    conn = provider.get()
 
     # Read current version OUTSIDE any transaction (PRAGMA is a meta-operation).
     current: int = conn.execute("PRAGMA user_version").fetchone()[0]

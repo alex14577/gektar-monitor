@@ -32,7 +32,10 @@ from fis_monitor.infra.sqlite.repositories.settings import SqliteSettingsReposit
 from fis_monitor.infra.sqlite.repositories.smtp_credentials import (
     SqliteSmtpCredentialsRepository,
 )
+from fis_monitor.infra.sqlite.repositories.user_state import SqliteUserStateRepository
+from fis_monitor.services.diagnostics.service import DiagnosticsService
 from fis_monitor.services.full_scan import FullScanService
+from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
 from fis_monitor.services.onboarding import OnboardingService
@@ -60,6 +63,7 @@ class TestBuildContainerLayerTopology:
 
     def test_layer_1_repositories(self, container: Container) -> None:
         assert isinstance(container.infra.lot_repo, SqliteLotRepository)
+        assert isinstance(container.infra.user_state_repo, SqliteUserStateRepository)
         assert isinstance(container.infra.settings_repo, SqliteSettingsRepository)
         assert isinstance(container.infra.notif_repo, SqliteNotificationsRepository)
         assert isinstance(container.infra.cycles_repo, SqliteCyclesRepository)
@@ -81,6 +85,8 @@ class TestBuildContainerLayerTopology:
         assert isinstance(container.services.monitor_cycle, MonitorCycleService)
         assert isinstance(container.services.full_scan, FullScanService)
         assert isinstance(container.services.onboarding, OnboardingService)
+        assert isinstance(container.services.diagnostics, DiagnosticsService)
+        assert isinstance(container.services.lot_query, LotQueryService)
 
 
 class TestNotifierRegistryBeforeDispatcher:

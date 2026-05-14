@@ -259,7 +259,7 @@ class SqliteLotRepository:
             if field not in ALLOWED_TRACKED_FIELDS:
                 raise ValueError(f"Unknown tracked field {field!r}")
 
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             # Step 2 — SELECT existing row inside tx.
@@ -400,7 +400,7 @@ class SqliteLotRepository:
 
     def get(self, lot_id: int) -> Lot | None:
         """Return the lot by primary key, or ``None`` if not found."""
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute(
             f"SELECT {_LOT_SELECT} FROM lots WHERE id = ?",
             (lot_id,),
@@ -413,7 +413,7 @@ class SqliteLotRepository:
 
     def list_active(self, *, limit: int, offset: int) -> list[Lot]:
         """Return active lots ordered by ``date_create DESC``."""
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute(
             f"SELECT {_LOT_SELECT} FROM lots"
             " WHERE is_active = 1"
@@ -432,7 +432,7 @@ class SqliteLotRepository:
     def get_last_known_id(self, region: int) -> int | None:
         """Return the last known lot-id for a region, or ``None``."""
         key = f"last_known_id_{region}"
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute("SELECT value FROM state WHERE key = ?", (key,))
         row = cur.fetchone()
         cur.close()
@@ -444,7 +444,7 @@ class SqliteLotRepository:
         """Persist the last known lot-id for a region.  BEGIN IMMEDIATE."""
         key = f"last_known_id_{region}"
         now_iso = _iso(self._clock.now())
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
@@ -471,7 +471,7 @@ class SqliteLotRepository:
             return
         at_iso = _iso(at)
         placeholders = ",".join("?" for _ in lot_ids)
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
@@ -487,7 +487,7 @@ class SqliteLotRepository:
     def mark_inactive(self, lot_id: int, reason: str, at: datetime) -> None:
         """Mark a lot as inactive.  BEGIN IMMEDIATE."""
         at_iso = _iso(at)
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
@@ -514,7 +514,7 @@ class SqliteLotRepository:
         Selects lots where ``enrichment_status`` is NULL or ``'pending'``
         AND ``detail_fetched_at`` is NULL.  Cursor closed before return.
         """
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         cur = conn.execute(
             "SELECT id FROM lots"
             " WHERE (enrichment_status IS NULL OR enrichment_status = 'pending')"

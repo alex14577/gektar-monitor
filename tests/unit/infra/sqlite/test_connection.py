@@ -27,7 +27,7 @@ def test_per_thread_isolation(tmp_path: Path) -> None:
 
     def worker() -> None:
         try:
-            conn = provider.get_connection()
+            conn = provider.get()
             connections.append(conn)
         except Exception as exc:
             errors.append(exc)
@@ -59,7 +59,7 @@ def _pragma(conn: sqlite3.Connection, name: str) -> object:
 def test_pragma_settings(tmp_path: Path) -> None:
     """PRAGMA values must match the spec (ADR-007)."""
     provider = ConnectionProvider(db_path=tmp_path / "state.db")
-    conn = provider.get_connection()
+    conn = provider.get()
 
     # journal_mode: WAL (persistent, but safe to check)
     assert _pragma(conn, "journal_mode") == "wal"
@@ -95,11 +95,11 @@ def test_pragma_settings(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def test_close_all_then_get_raises_runtime_error(tmp_path: Path) -> None:
-    """close_all() is a terminal operation; get_connection() must raise
+    """close_all() is a terminal operation; get() must raise
     RuntimeError afterwards in the same thread."""
     provider = ConnectionProvider(db_path=tmp_path / "state.db")
 
-    conn = provider.get_connection()
+    conn = provider.get()
     # confirm connection is alive
     conn.execute("SELECT 1").fetchone()
 
@@ -109,9 +109,9 @@ def test_close_all_then_get_raises_runtime_error(tmp_path: Path) -> None:
     with pytest.raises(sqlite3.ProgrammingError):
         conn.execute("SELECT 1").fetchone()
 
-    # get_connection() in any thread must now raise RuntimeError
+    # get() in any thread must now raise RuntimeError
     with pytest.raises(RuntimeError, match="closed"):
-        provider.get_connection()
+        provider.get()
 
 
 # ---------------------------------------------------------------------------
@@ -120,11 +120,11 @@ def test_close_all_then_get_raises_runtime_error(tmp_path: Path) -> None:
 
 def test_close_all_from_other_thread_invalidates_provider(tmp_path: Path) -> None:
     """close_all from a different thread must close registered connections
-    and make subsequent get_connection() in any thread raise."""
+    and make subsequent get() in any thread raise."""
     provider = ConnectionProvider(tmp_path / "test.db")
 
     # Thread A creates a connection
-    conn_a = provider.get_connection()
+    conn_a = provider.get()
     conn_a.execute("CREATE TABLE t (id INTEGER)")
 
     # Thread B (shutdown thread) closes everything
@@ -132,9 +132,9 @@ def test_close_all_from_other_thread_invalidates_provider(tmp_path: Path) -> Non
     shutdown_thread.start()
     shutdown_thread.join(timeout=2.0)
 
-    # Thread A's stale conn must not be usable; new get_connection must raise.
+    # Thread A's stale conn must not be usable; new get() must raise.
     with pytest.raises(RuntimeError, match="closed"):
-        provider.get_connection()
+        provider.get()
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +146,7 @@ def test_registry_no_dead_refs(tmp_path: Path) -> None:
     registry -- the provider does not hold a lingering strong reference."""
     provider = ConnectionProvider(db_path=tmp_path / "state.db")
 
-    conn = provider.get_connection()
+    conn = provider.get()
     conn_id = id(conn)
 
     # Verify connection is tracked
@@ -170,11 +170,11 @@ def test_registry_no_dead_refs(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def test_same_thread_same_connection(tmp_path: Path) -> None:
-    """Calling get_connection() twice in the same thread returns the identical
+    """Calling get() twice in the same thread returns the identical
     object."""
     provider = ConnectionProvider(db_path=tmp_path / "state.db")
-    conn1 = provider.get_connection()
-    conn2 = provider.get_connection()
+    conn1 = provider.get()
+    conn2 = provider.get()
     assert conn1 is conn2
 
 
@@ -197,7 +197,7 @@ def test_configure_failure_does_not_leak_connection(tmp_path: Path) -> None:
     with patch.object(provider, "_configure", failing_configure), pytest.raises(
         RuntimeError, match="simulated configure failure"
     ):
-        provider.get_connection()
+        provider.get()
 
     # Registry must be empty — no leaked entry
     with provider._lock:

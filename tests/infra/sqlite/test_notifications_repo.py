@@ -63,7 +63,7 @@ def _make_repo(
 
 def _direct_fetch(tmp_db: ConnectionProvider) -> tuple | None:
     """Read raw row from DB for assertion — bypasses repo layer."""
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     cur = conn.execute(
         "SELECT lot_id, channel, recipient, status, attempt_no,"
         "       last_attempt_at, sent_at"

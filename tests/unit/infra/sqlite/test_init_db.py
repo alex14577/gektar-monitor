@@ -58,7 +58,7 @@ def test_init_db_fresh_db_applies_schema(tmp_path: Path) -> None:
 
     init_db(provider, schema_sql=schema_sql, latest_version=2)
 
-    conn = provider.get_connection()
+    conn = provider.get()
     assert _pragma(conn, "user_version") == 2
     tables = _table_names(conn)
     assert "notifications" in tables, "notifications table must be created"
@@ -84,7 +84,7 @@ def test_init_db_already_current_is_noop(tmp_path: Path) -> None:
     # Second call must be silent (no error, no state change)
     init_db(provider, schema_sql=schema_sql, latest_version=2)
 
-    conn = provider.get_connection()
+    conn = provider.get()
     assert _pragma(conn, "user_version") == 2
     provider.close_all()
 

@@ -40,7 +40,7 @@ class SqliteSettingsRepository:
 
     def get(self, key: str) -> str | None:
         """Return the value for *key*, or ``None`` if not present."""
-        conn: sqlite3.Connection = self._conn_provider.get_connection()
+        conn: sqlite3.Connection = self._conn_provider.get()
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT value FROM state WHERE key = ?", (key,)
@@ -49,7 +49,7 @@ class SqliteSettingsRepository:
 
     def set(self, key: str, value: str) -> None:
         """Upsert *key*/*value* inside a BEGIN IMMEDIATE transaction (ADR-016)."""
-        conn: sqlite3.Connection = self._conn_provider.get_connection()
+        conn: sqlite3.Connection = self._conn_provider.get()
         now = self._clock.now().isoformat()
         conn.execute("BEGIN IMMEDIATE")
         try:

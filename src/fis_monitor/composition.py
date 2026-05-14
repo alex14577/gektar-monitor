@@ -18,15 +18,10 @@ static) but will explode at runtime.  This is intentional: build_container is
 a *structural* assembler, not a runtime exerciser.
 
 Stubbed fields and their tracking tasks:
-  - clock            → bye.9 (SystemClock)
-  - config_source    → bye.9 (WatchdogConfigSource)
-  - user_state_repo  → bye.7 (SqliteUserStateRepository)
   - autostart        → a4t.9 (platform-specific AutostartManager)
   - session_probe    → a4t.8 (HttpSessionProbe)
   - login            → real LoginService (executor bound in lifespan per j19)
   - session_monitor  → a4t.7 (SessionMonitor)
-  - diagnostics      → a4t.8 (DiagnosticsService)
-  - lot_query        → a4t.7 (LotQueryService)
 
 See: docs/architecture/04-composition-root.md §4.2
 """
@@ -62,13 +57,17 @@ from fis_monitor.infra.sqlite.repositories.settings import SqliteSettingsReposit
 from fis_monitor.infra.sqlite.repositories.smtp_credentials import (
     SqliteSmtpCredentialsRepository,
 )
+from fis_monitor.infra.sqlite.repositories.user_state import SqliteUserStateRepository
 from fis_monitor.infra.sse.browser_sse_notifier import BrowserSseNotifier
 from fis_monitor.infra.sse.bus import ThreadEventBus
 from fis_monitor.infra.sse.sse_stream import SseStreamer
+from fis_monitor.services.diagnostics.exclude_policy import DiagnosticsExcludePolicy
+from fis_monitor.services.diagnostics.service import DiagnosticsService
 from fis_monitor.services.enrichment import EnrichmentService
 from fis_monitor.services.filter_matcher import AllFiltersMatcher, RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
 from fis_monitor.services.login import LoginService
+from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
 from fis_monitor.services.onboarding import OnboardingService
@@ -93,20 +92,6 @@ def _load_schema_sql() -> str:
 #   - Has a single docstring stating the deferred bd-issue
 #   - Raises NotImplementedError("<class> impl deferred to <task>") on all methods
 # ---------------------------------------------------------------------------
-
-class _NotImplementedUserStateRepository:
-    """Stub for UserStateRepository until bye.7 lands (SqliteUserStateRepository)."""
-
-    def get(self, lot_id: int) -> object:
-        raise NotImplementedError(
-            "_NotImplementedUserStateRepository.get() deferred to bye.7"
-        )
-
-    def save(self, state: object) -> None:
-        raise NotImplementedError(
-            "_NotImplementedUserStateRepository.save() deferred to bye.7"
-        )
-
 
 class _NotImplementedAutostartManager:
     """Stub for AutostartManager until a4t.9 lands (platform-specific impl)."""
@@ -145,24 +130,6 @@ class _NotImplementedSessionMonitor:
         )
 
 
-class _NotImplementedDiagnosticsService:
-    """Stub for DiagnosticsService until a4t.8 lands."""
-
-    def generate_bundle(self) -> object:
-        raise NotImplementedError(
-            "_NotImplementedDiagnosticsService.generate_bundle() deferred to a4t.8"
-        )
-
-
-class _NotImplementedLotQueryService:
-    """Stub for LotQueryService until a4t.7 lands."""
-
-    def recent_feed(self, *, limit: int) -> list:
-        raise NotImplementedError(
-            "_NotImplementedLotQueryService.recent_feed() deferred to a4t.7"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Torgi.gov.ru allowed hosts for PlaywrightLoginSession
 # ---------------------------------------------------------------------------
@@ -189,9 +156,11 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     Raises:
         FrozenInstanceError: never (Container is mutable; Infra/Services are frozen).
 
-    Note: Several Infra/Services fields are stubbed pending bd-issues
-    (bye.7, bye.9, a4t.7-a4t.9). Stubs raise NotImplementedError on call.
-    Build is structural, not runtime — assembled but not exercised.
+    Note: Three Infra/Services fields remain stubbed pending deferred
+    bd-issues (autostart=bye.7, session_probe=a4t.9, session_monitor=a4t.9).
+    Those stubs raise NotImplementedError on call. Every other field is a
+    real implementation — build_container is fully runtime-exercisable on
+    the monitoring + notification paths.
     """
     # ── Layer 0: systemwide utilities ──────────────────────────────────────
     clock = SystemClock()
@@ -213,7 +182,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
 
     # ── Layer 1: repositories (depend on conn_provider + clock) ────────────
     lot_repo = SqliteLotRepository(conn_provider=conn_provider, clock=clock)
-    user_state_repo = _NotImplementedUserStateRepository()
+    user_state_repo = SqliteUserStateRepository(conn_provider=conn_provider, clock=clock)
     settings_repo = SqliteSettingsRepository(conn_provider=conn_provider, clock=clock)
     notif_repo = SqliteNotificationsRepository(conn_provider=conn_provider, clock=clock)
     cycles_repo = SqliteCyclesRepository(conn_provider=conn_provider, clock=clock)
@@ -345,8 +314,19 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     )
 
     session_monitor = _NotImplementedSessionMonitor()
-    diagnostics = _NotImplementedDiagnosticsService()
-    lot_query = _NotImplementedLotQueryService()
+    exclude_policy = DiagnosticsExcludePolicy()
+    diagnostics = DiagnosticsService(
+        data_dir=data_dir,
+        conn_provider=conn_provider,
+        clock=clock,
+        exclude_policy=exclude_policy,
+    )
+    lot_query = LotQueryService(
+        lot_repo=lot_repo,
+        user_state_repo=user_state_repo,
+        conn_provider=conn_provider,
+        clock=clock,
+    )
 
     services = Services(
         notifier_dispatcher=notifier_dispatcher,

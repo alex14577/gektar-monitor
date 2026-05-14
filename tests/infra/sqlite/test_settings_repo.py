@@ -80,7 +80,7 @@ def test_set_is_idempotent_overwrites_value(tmp_db: ConnectionProvider) -> None:
 
 
 def _get_updated_at(provider: ConnectionProvider, key: str) -> str:
-    conn = provider.get_connection()
+    conn = provider.get()
     row = conn.execute("SELECT updated_at FROM state WHERE key = ?", (key,)).fetchone()
     assert row is not None
     return row[0]
@@ -128,7 +128,7 @@ def test_set_and_get_onboarding_round_trip_all_states(tmp_db: ConnectionProvider
 
 def test_parallel_set_from_different_connections(tmp_db: ConnectionProvider) -> None:
     """Two separate connection objects can set different keys without conflict."""
-    # We simulate two independent 'callers' by calling get_connection() on
+    # We simulate two independent 'callers' by calling get() on
     # different ConnectionProvider instances that share the same db path.
     # Since ConnectionProvider is per-thread, we run each set on a thread.
     from pathlib import Path

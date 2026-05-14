@@ -299,7 +299,7 @@ def test_init_db_invokes_runner_and_verifies_user_version(tmp_path: Path) -> Non
             latest_version=2,
             migration_runner=runner,
         )
-        conn = provider.get_connection()
+        conn = provider.get()
         assert _uv(conn) == 2
         tables = {
             r[0]

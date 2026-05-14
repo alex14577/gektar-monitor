@@ -35,12 +35,12 @@ class ConnectionProvider:
 
     Usage:
         provider = ConnectionProvider(db_path=Path("state.db"))
-        conn = provider.get_connection()   # per-thread, idempotent
+        conn = provider.get()   # per-thread, idempotent
         ...
         provider.close_all()               # shutdown — terminal; provider not reusable
 
     After close_all() the provider is permanently closed.  Any subsequent
-    call to get_connection() raises RuntimeError.  This matches the
+    call to get() raises RuntimeError.  This matches the
     shutdown semantics described in ADR-007.
     """
 
@@ -60,7 +60,7 @@ class ConnectionProvider:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_connection(self) -> sqlite3.Connection:
+    def get(self) -> sqlite3.Connection:
         """Return the per-thread sqlite3.Connection, creating it if needed.
 
         Raises RuntimeError if close_all() has already been called.
@@ -84,7 +84,7 @@ class ConnectionProvider:
         docs/architecture/03-protocols.md).
 
         After this call the provider is permanently closed.  Subsequent
-        calls to get_connection() will raise RuntimeError in all threads.
+        calls to get() will raise RuntimeError in all threads.
         """
         with self._lock:
             self._closed = True

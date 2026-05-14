@@ -87,7 +87,7 @@ class SqliteUserStateRepository:
     # ------------------------------------------------------------------
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = self._conn_provider.get_connection()
+        conn = self._conn_provider.get()
         conn.row_factory = sqlite3.Row
         return conn
 

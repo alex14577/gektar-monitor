@@ -91,7 +91,7 @@ def _make_result(
 
 def _direct_fetch(tmp_db: ConnectionProvider, cycle_id: int) -> tuple | None:
     """Read raw row from DB for assertion — bypasses repo layer."""
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     cur = conn.execute(
         "SELECT id, region, started_at, finished_at, status,"
         "       lots_fetched, new_lots, error, id_schema_check"
@@ -388,7 +388,7 @@ class TestPruneOlderThan:
         assert total_deleted == N_OLD
 
         # All recent cycles must survive
-        conn = tmp_db.get_connection()
+        conn = tmp_db.get()
         remaining = conn.execute(
             "SELECT COUNT(*) FROM cycles WHERE status != 'open'"
         ).fetchone()[0]

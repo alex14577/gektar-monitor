@@ -63,7 +63,7 @@ def _make_repo(
 
 def _rtree_count(tmp_db: ConnectionProvider, lot_id: int) -> int:
     """Count rows in lots_rtree for a given lot_id."""
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     cur = conn.execute("SELECT COUNT(*) FROM lots_rtree WHERE id = ?", (lot_id,))
     count: int = cur.fetchone()[0]
     cur.close()
@@ -74,7 +74,7 @@ def _rtree_coords(
     tmp_db: ConnectionProvider, lot_id: int
 ) -> tuple[float, float] | None:
     """Return (lat, lon) stored in lots_rtree, or None if absent."""
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     cur = conn.execute(
         "SELECT min_lat, min_lon FROM lots_rtree WHERE id = ?", (lot_id,)
     )
@@ -132,7 +132,7 @@ def test_upsert_status_change_writes_history(tmp_db: ConnectionProvider) -> None
     assert change.new_value == "Зарезервирован"
 
     # Verify lots_history row with json-encoded values.
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     cur = conn.execute(
         "SELECT field, old_value, new_value FROM lots_history WHERE lot_id = ?",
         (3,),
@@ -273,7 +273,7 @@ def test_mark_seen_bulk_updates_timestamps(tmp_db: ConnectionProvider) -> None:
     seen_at = datetime(2026, 5, 13, 14, 0, 0, tzinfo=UTC)
     repo.mark_seen([20, 21, 22], at=seen_at)
 
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     for lot_id in [20, 21, 22]:
         cur = conn.execute("SELECT last_seen, last_seen_at FROM lots WHERE id = ?", (lot_id,))
         row = cur.fetchone()
@@ -461,7 +461,7 @@ def test_mark_seen_timezone_roundtrip(tmp_db: ConnectionProvider) -> None:
     aware_time = datetime(2026, 5, 13, 15, 30, 0, tzinfo=UTC)
     repo.mark_seen([60], at=aware_time)
 
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     cur = conn.execute("SELECT last_seen_at FROM lots WHERE id = ?", (60,))
     raw = cur.fetchone()[0]
     cur.close()
@@ -509,8 +509,8 @@ class _FailingConnProvider:
         self._real = real_provider
         self._inject_failure = False
 
-    def get_connection(self) -> object:  # type: ignore[override]
-        conn = self._real.get_connection()
+    def get(self) -> object:  # type: ignore[override]
+        conn = self._real.get()
         if self._inject_failure:
             return _FailOnHistoryConnection(conn)
         return conn
@@ -543,7 +543,7 @@ def test_upsert_rollback_on_mid_write_error_undoes_partial_changes(
     fetched = repo.get(70)
     assert fetched is not None
     assert fetched.status == "Свободен"
-    conn = tmp_db.get_connection()
+    conn = tmp_db.get()
     cur = conn.execute("SELECT COUNT(*) FROM lots_history WHERE lot_id = 70")
     assert cur.fetchone()[0] == 0
     cur.close()
@@ -562,7 +562,7 @@ def test_first_upsert_with_coords_creates_exactly_one_rtree_row(
     lot = make_lot(id=100, lat=48.48, lon=135.08)
     repo.upsert(lot, tracked=[])
 
-    cur = tmp_db.get_connection().execute(
+    cur = tmp_db.get().execute(
         "SELECT COUNT(*) FROM lots_rtree WHERE id = 100"
     )
     assert cur.fetchone()[0] == 1
