@@ -108,6 +108,74 @@ UPX is disabled (`upx=False`) in the spec. Do not enable it — UPX can corrupt 
 
 The spec (`build/fis-monitor.spec`) is platform-neutral; it works on any host PyInstaller supports.
 
+## CI: GitHub Actions
+
+Workflow: `.github/workflows/release.yml`
+
+### Триггеры
+
+| Событие | Что происходит |
+|---|---|
+| `git push origin vX.Y.Z` | Собирает обе платформы, создаёт GitHub Release |
+| Run workflow (Actions UI) | Собирает обе платформы, артефакты доступны 90 дней; Release **не** создаётся |
+
+### Pipeline
+
+```
+push tag v* ──► build (ubuntu-latest)   ──► release (create GitHub Release)
+             └► build (windows-latest) ─┘
+```
+
+`fail-fast: false` — падение Windows-билда не отменяет Linux-билд.
+
+### Jobs
+
+**`build`** (matrix: ubuntu-latest / windows-latest):
+1. `actions/checkout@v4`
+2. `actions/setup-python@v5` с Python 3.12, кэш pip
+3. `actions/cache@v4` для Playwright Chromium — путь `build/_browsers`, ключ `playwright-<OS>-<hash(pyproject.toml)>`
+4. Запуск скрипта сборки с `PLAYWRIGHT_BROWSERS_PATH=$GITHUB_WORKSPACE/build/_browsers`:
+   - Linux: `bash scripts/build_release.sh`
+   - Windows: `pwsh -ExecutionPolicy Bypass -File scripts/build_release.ps1`
+5. `actions/upload-artifact@v4` — загружает `dist/*`, retention 90 дней
+
+**`release`** (только на тег-пуш, depends on build):
+1. `actions/download-artifact@v4` — скачивает все артефакты
+2. `softprops/action-gh-release@v2` — создаёт Release с автоматическим changelog и прикладывает `.tar.gz` / `.zip` + `.sha256`
+
+### Где смотреть логи
+
+Actions tab → выбрать запуск → выбрать job (ubuntu-latest / windows-latest).
+
+Полный лог через CLI:
+```bash
+gh run list --workflow=release.yml   # найти run ID
+gh run view <run-id> --log           # весь лог
+gh run view <run-id> --log --job build  # только build-job
+```
+
+### Скачивание артефактов
+
+```bash
+gh run download <run-id>             # скачать все артефакты в текущий каталог
+gh run download <run-id> -n fis-monitor-Linux   # только Linux
+gh run download <run-id> -n fis-monitor-Windows # только Windows
+```
+
+### Восстановление упавшего Windows-билда
+
+1. Смотреть лог: `gh run view <id> --log` — найти строку `[build ERROR]` или PowerShell exception.
+2. Частые причины:
+   - `python` не найден в PATH (setup-python добавляет `python`, не `python3`)
+   - Path-separator `\` в строках, которые передаются в shell-контекст
+   - Line endings CRLF в скрипте (если редактировалось на Windows)
+3. Фикс: минимальное изменение в `scripts/build_release.ps1`, commit, push тега заново или ручной dispatch.
+4. После 3 итераций без результата — оставить Linux зелёным, задокументировать known issue в README.
+
+### Первый прогон
+
+Playwright Chromium (~280 MB) скачивается заново при первом запуске или при изменении `pyproject.toml`. Это нормально — последующие прогоны используют кэш.
+
 ## See also
 
 - [[decisions/ADR-026-distribution-packaging-pyinstaller|ADR-026]] — rationale for PyInstaller --onedir, bundled Chromium, build-on-target

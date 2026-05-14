@@ -23,6 +23,22 @@ Playwright (embedded threadpool), Jinja2, HTMX, sse-starlette, platformdirs.
 
 Полный список и обоснование — в [`docs/decisions-log.md`](docs/decisions-log.md).
 
+## Релизы
+
+```bash
+# Тегированный релиз
+git tag v0.1.0
+git push origin v0.1.0
+# → GitHub Actions соберёт обе платформы и создаст Release
+
+# Ручной запуск без тега
+# Actions tab → release workflow → Run workflow
+# Артефакты доступны 90 дней в Actions UI
+```
+
+> Первый запуск будет долгим: кэш Playwright Chromium (~280 MB) пустой,
+> он скачивается при каждом новом ключе кэша.
+
 ## CI / Quality gates
 
 ```bash
