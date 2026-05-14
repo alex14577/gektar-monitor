@@ -45,6 +45,10 @@ a = Analysis(
         # fis_monitor.composition is loaded via importlib.import_module() in
         # app.main() — static analysis cannot see it.
         "fis_monitor.composition",
+        # python-multipart — starlette imports it lazily via try/except when
+        # a request body is form-data.  Without explicit pin form-parsing
+        # raises AssertionError "The `python-multipart` library must be installed".
+        "multipart",
         # uvicorn optional sub-modules discovered at runtime.
         "uvicorn.logging",
         "uvicorn.loops",
