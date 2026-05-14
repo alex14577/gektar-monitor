@@ -33,7 +33,7 @@
       </div>
       <div style="display:flex; gap:8px;">
         <button class="btn btn--sm" hx-post="/auth/refresh" hx-swap="none">Продлить сейчас</button>
-        <a class="btn btn--ghost btn--sm" href="/auth/login">Войти заново</a>
+        <button class="btn btn--ghost btn--sm" type="button" data-action="login-start">Войти заново</button>
       </div>
     </div>
   {% endif %}

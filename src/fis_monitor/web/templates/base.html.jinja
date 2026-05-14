@@ -107,9 +107,9 @@
     <div class="modal">
       <h2 id="ses-title">Сессия истекла</h2>
       <p>Войдите через Госуслуги, чтобы продолжить мониторинг.</p>
-      <a class="btn btn--primary btn--lg btn--full" href="/auth/login">
+      <button class="btn btn--primary btn--lg btn--full" type="button" data-action="login-start">
         Войти через Госуслуги
-      </a>
+      </button>
       <p style="margin: 12px 0 0; font-size: 0.8125rem; color: var(--muted);">
         Логин в отдельном окне браузера. Приложение никогда не видит ваш пароль.
       </p>
@@ -123,5 +123,6 @@
   {% endif %}
 
   <script defer src="{{ url_for('static', path='/app.js') }}"></script>
+  <script defer src="{{ url_for('static', path='/auth.js') }}"></script>
 </body>
 </html>
