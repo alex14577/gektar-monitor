@@ -384,10 +384,15 @@ class SessionStatus(Enum):
 
 **MVP-реализации**: `PlaywrightLoginSession` (использует `sync_playwright()` в выделенном `ThreadPoolExecutor`, persistent context = `profile/`), `HttpSessionProbe` (HEAD на `/cabinet/profile`, ловит 302).
 
-> **Инвариант `LoginSession`** (зафиксирован в docstring Protocol-а и в integration-тесте):
-> реализация ОБЯЗАНА регистрировать `context.route()` с host-whitelist
-> (`xn--80aaggvgieoeoa2bo7l.xn--p1ai`, `esia.gosuslugi.ru`) и блокировать все
-> остальные запросы (`route.abort()`). См. [[decisions-log]] → Security & operations.
+> **Инвариант навигации `PlaywrightLoginSession`**: после `launch_persistent_context()` и до `wait_for_url(_LOGIN_SUCCESS_URL_GLOB)` реализация ОБЯЗАНА вызвать `page.goto(_LOGIN_START_URL, wait_until="domcontentloaded")` на target-URL гектара (`/cabinet/`). Без этого вкладка останется на `about:blank` и `wait_for_url` истечёт по `deadline`. Любая ошибка `goto()` маппится через `_map_exception` в `LoginOutcome.error` — failure-fast, без молчаливого таймаута. Стартовый URL = `https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/` (гектар, не ЕСИА напрямую): redirect-chain пройдёт через ЕСИА и вернётся, проставив **обе** группы cookies — гектар-side (для монитора) и ЕСИА-side (для сессии).
+
+> **Инвариант host-whitelist `LoginSession`** (зафиксирован в docstring Protocol-а и в integration-тесте):
+> реализация ОБЯЗАНА регистрировать `context.route()` с host-whitelist (target hosts + полный OAuth-chain Госуслуг) и блокировать все остальные запросы (`route.abort()`). Whitelist entries поддерживают два режима:
+> - **exact-match**: `xn--80aaggvgieoeoa2bo7l.xn--p1ai`, `gosuslugi.ru` — точное совпадение hostname.
+> - **suffix-match** (entry начинается с `.`): `.gosuslugi.ru` — матчит любой subdomain (`esia.`, `id.`, `lk.`, `pos.`, `static.` …).
+> Bare apex `gosuslugi.ru` НЕ покрывает subdomains — это сделано намеренно, чтобы конфигурационная опечатка не расширяла политику.
+> Атака с hostname `evil-gosuslugi.ru.attacker.com` блокируется (urlparse.hostname → полный хост, `endswith(".gosuslugi.ru")` → False).
+> См. [[decisions-log]] → Security & operations.
 > Тест: `tests/integration/test_login_host_whitelist.py` — открывает страницу
 > с `<img src="https://evil.example/...">`, проверяет что запрос abort-нут.
 

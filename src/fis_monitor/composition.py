@@ -148,11 +148,30 @@ class _NotImplementedSessionMonitor:
 
 
 # ---------------------------------------------------------------------------
-# Allowed hosts for PlaywrightLoginSession (надальнийвосток.рф, Punycode form)
+# Allowed hosts for PlaywrightLoginSession
 # ---------------------------------------------------------------------------
+# The login flow is: гектар /cabinet/ -> OAuth redirect -> ЕСИА login form ->
+# back to гектар. Every host in this chain must be whitelisted; everything
+# else (3rd-party analytics, ad networks, fonts CDNs) is aborted by the
+# route handler — preventing cookie/UA exfil during a headed session.
+#
+# Entries starting with "." use suffix-match (see PlaywrightLoginSession.
+# _make_route_handler) — chosen for the gosuslugi.ru subdomain fan-out
+# (esia, id, lk, pos, static, …) which is too volatile to enumerate.
+# We do NOT use a bare "*" or empty whitelist — that would be a security
+# regression (any host could be contacted from a headed user session).
 _TORGI_ALLOWED_HOSTS: tuple[str, ...] = (
+    # Target site — гектар (надальнийвосток.рф) ─────────────────────────────
     "xn--80aaggvgieoeoa2bo7l.xn--p1ai",  # Punycode for надальнийвосток.рф
     "надальнийвосток.рф",  # unicode alias
+
+    # Госуслуги OAuth / ЕСИА login chain ────────────────────────────────────
+    # Suffix-match covers esia., id., lk., pos., static., my., … subdomains.
+    # The OAuth code is hosted by Минцифры; the exact subdomain set changes
+    # across releases (id.gosuslugi.ru is the newer flow, esia.gosuslugi.ru
+    # the legacy one — both are live in 2026).
+    ".gosuslugi.ru",
+    "gosuslugi.ru",  # bare apex (some redirects land here briefly)
 )
 
 

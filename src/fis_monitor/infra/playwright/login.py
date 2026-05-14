@@ -47,6 +47,19 @@ _log = logging.getLogger(__name__)
 # Playwright interprets this as a glob; we wait until the page URL matches.
 _LOGIN_SUCCESS_URL_GLOB = "**/cabinet/**"
 
+# Initial navigation target — the гектар cabinet page.
+# Hitting /cabinet/ on an unauthenticated session triggers a full OAuth
+# redirect chain to ЕСИА (esia.gosuslugi.ru). After successful auth the
+# user is bounced back here, which both sets the Госуслуги session cookies
+# AND establishes the гектар-side session cookies the monitor needs for
+# scraping — going straight to esia.gosuslugi.ru would skip the latter.
+_LOGIN_START_URL = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/"
+
+# Initial navigation timeout. Kept generous to absorb the multi-hop OAuth
+# chain on slow networks; success/cancel still race the user-controlled
+# wait_for_url(_LOGIN_SUCCESS_URL_GLOB) bounded by ``deadline``.
+_INITIAL_GOTO_TIMEOUT_MS = 30_000
+
 
 class PlaywrightLoginSession:
     """Headed-login via Playwright — ``LoginSession`` Protocol implementation.
@@ -192,6 +205,34 @@ class PlaywrightLoginSession:
         pages = context.pages
         page: Page = pages[0] if pages else context.new_page()
 
+        # Navigate to the login start URL. Without this the page stays on
+        # about:blank and wait_for_url() below never resolves until timeout.
+        # We use wait_until="domcontentloaded" rather than "load" so we don't
+        # block on slow third-party assets — the OAuth redirect chain to ЕСИА
+        # fires from <head> JS / Location headers either way.
+        try:
+            page.goto(
+                _LOGIN_START_URL,
+                wait_until="domcontentloaded",
+                timeout=_INITIAL_GOTO_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            outcome, unmapped = self._map_exception(exc)
+            if unmapped:
+                _log.error(
+                    "PlaywrightLoginSession._wait_for_login: goto failed type=%s url=%s",
+                    type(exc).__name__,
+                    _LOGIN_START_URL,
+                    exc_info=exc,
+                )
+            else:
+                _log.debug(
+                    "PlaywrightLoginSession._wait_for_login: goto failed type=%s hint=%s",
+                    type(exc).__name__,
+                    outcome.error,
+                )
+            return outcome
+
         # Adjust remaining timeout accounting for setup time.
         elapsed_ms = int((self._clock.monotonic() - start) * 1000)
         timeout_ms = max(remaining_ms - elapsed_ms, 0)
@@ -222,8 +263,20 @@ class PlaywrightLoginSession:
         return LoginOutcome(success=True, cookies_updated=True, error=None)
 
     def _make_route_handler(self) -> Callable[[Route], None]:
-        """Return a route handler that enforces the host-whitelist invariant."""
+        """Return a route handler that enforces the host-whitelist invariant.
+
+        Whitelist matching rules:
+        - Exact match: ``allowed_hosts`` entry equals the request hostname.
+        - Suffix match: an entry beginning with ``"."`` (e.g. ``".gosuslugi.ru"``)
+          matches any hostname ending with that suffix
+          (``"esia.gosuslugi.ru"``, ``"id.gosuslugi.ru"``, …).
+          This is an *explicit* convention — a bare ``"gosuslugi.ru"`` entry
+          will NOT match subdomains, so config typos cannot accidentally
+          widen the policy.
+        """
         allowed_hosts = self._allowed_hosts
+        exact_hosts = frozenset(h for h in allowed_hosts if not h.startswith("."))
+        suffix_hosts = tuple(h for h in allowed_hosts if h.startswith("."))
 
         def _handler(route: Route) -> None:
             url = route.request.url
@@ -233,7 +286,10 @@ class PlaywrightLoginSession:
             except Exception:
                 route.abort()
                 return
-            if host in allowed_hosts:
+            allowed = host in exact_hosts or any(
+                host.endswith(suffix) for suffix in suffix_hosts
+            )
+            if allowed:
                 route.continue_()
             else:
                 _log.debug("PlaywrightLoginSession: aborting non-whitelisted host %s", host)

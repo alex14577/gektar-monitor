@@ -14,6 +14,9 @@ Test matrix:
 9. ``test_map_exception_missing_binary``  — _map_exception maps missing-binary message to correct hint.
 10. ``test_map_exception_missing_deps``   — _map_exception maps missing-deps message to correct hint.
 11. ``test_map_exception_unmapped_logs_error`` — unmapped exception triggers ERROR log.
+12. ``test_initial_goto_called``           — page.goto() is invoked with the login start URL.
+13. ``test_initial_goto_failure_mapped``   — goto() exceptions are mapped to LoginOutcome.error.
+14. ``test_host_whitelist_suffix_match``   — entries starting with "." match subdomains.
 """
 
 from __future__ import annotations
@@ -413,3 +416,115 @@ def test_map_exception_unmapped_logs_error(tmp_path: Path, caplog) -> None:  # t
         record.levelno == logging.ERROR
         for record in caplog.records
     ), "Expected at least one ERROR log record for unmapped exception"
+
+
+# ---------------------------------------------------------------------------
+# Test 12: page.goto() invoked with the login start URL
+# ---------------------------------------------------------------------------
+
+
+def test_initial_goto_called(tmp_path: Path) -> None:
+    """page.goto() must be called with the гектар /cabinet/ URL before wait_for_url."""
+    from fis_monitor.infra.playwright.login import _LOGIN_START_URL
+
+    page = _make_page_mock()
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+
+    session = _make_session(playwright_factory=factory, profile_dir=tmp_path)
+    outcome = session.open_headed_login(deadline=60.0)
+
+    assert outcome.success is True
+    page.goto.assert_called_once()
+    args, kwargs = page.goto.call_args
+    # URL is the first positional arg.
+    assert args[0] == _LOGIN_START_URL
+    # We want wait_until="domcontentloaded" — not "load" (slow third-party
+    # blocked-by-route assets) and not "networkidle" (never settles).
+    assert kwargs.get("wait_until") == "domcontentloaded"
+    assert isinstance(kwargs.get("timeout"), int)
+    assert kwargs["timeout"] > 0
+    # goto must happen BEFORE wait_for_url — Playwright's MagicMock preserves
+    # call ordering on the parent page mock.
+    method_calls = [c[0] for c in page.method_calls]
+    assert method_calls.index("goto") < method_calls.index("wait_for_url")
+
+
+# ---------------------------------------------------------------------------
+# Test 13: goto() failure is mapped to LoginOutcome.error (failure-fast)
+# ---------------------------------------------------------------------------
+
+
+def test_initial_goto_failure_mapped(tmp_path: Path) -> None:
+    """If page.goto() raises (DNS, network, etc.), return a structured LoginOutcome."""
+    page = _make_page_mock()
+    page.goto.side_effect = RuntimeError(
+        "net::ERR_NAME_NOT_RESOLVED at https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/"
+    )
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+
+    session = _make_session(playwright_factory=factory, profile_dir=tmp_path)
+    outcome = session.open_headed_login(deadline=60.0)
+
+    assert outcome.success is False
+    # Generic RuntimeError without "playwright"/"timeout" markers falls into
+    # the unmapped bucket → playwright_other. wait_for_url must NOT be reached.
+    assert outcome.error == "playwright_other"
+    page.wait_for_url.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 14: host-whitelist suffix-match — ".gosuslugi.ru" matches subdomains
+# ---------------------------------------------------------------------------
+
+
+def test_host_whitelist_suffix_match(tmp_path: Path) -> None:
+    """Entries beginning with '.' must match any matching-suffix subdomain;
+    bare apex must NOT match subdomains (no accidental policy widening)."""
+    page = _make_page_mock()
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+
+    session = _make_session(
+        playwright_factory=factory,
+        allowed_hosts=[
+            "xn--80aaggvgieoeoa2bo7l.xn--p1ai",
+            ".gosuslugi.ru",  # suffix-match
+            "example.org",  # exact-only (NOT a suffix entry)
+        ],
+        profile_dir=tmp_path,
+    )
+    session.open_headed_login(deadline=60.0)
+    _, handler = context.route.call_args[0]
+
+    def _probe(url: str) -> str:
+        r = MagicMock()
+        r.request = MagicMock()
+        r.request.url = url
+        handler(r)
+        if r.continue_.called:
+            return "continue"
+        if r.abort.called:
+            return "abort"
+        return "noop"
+
+    # Suffix-match: subdomains of gosuslugi.ru pass.
+    assert _probe("https://esia.gosuslugi.ru/login/") == "continue"
+    assert _probe("https://id.gosuslugi.ru/oauth2") == "continue"
+    assert _probe("https://static.gosuslugi.ru/styles.css") == "continue"
+
+    # Exact-match: target apex passes.
+    assert _probe("https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/") == "continue"
+
+    # Exact-only entry does NOT match subdomains (no accidental widening).
+    assert _probe("https://sub.example.org/x") == "abort"
+
+    # Non-whitelisted hosts are aborted.
+    assert _probe("https://tracker.evil.example.com/pixel.gif") == "abort"
+
+    # Suffix attack: host that merely contains "gosuslugi.ru" inside (not as
+    # suffix of hostname) MUST be aborted. urlparse.hostname returns the host
+    # only, so "evil-gosuslugi.ru.attacker.com" would be hostname
+    # "evil-gosuslugi.ru.attacker.com" — does NOT end with ".gosuslugi.ru".
+    assert _probe("https://evil-gosuslugi.ru.attacker.com/x") == "abort"

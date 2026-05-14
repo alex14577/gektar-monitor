@@ -17,6 +17,10 @@ dependencies = [
     "sse-starlette>=2.1",
     "selectolax==0.4.8",
     "requests>=2.32",
+    # urllib3 2.x меняет ClientHello (новые TLS-extensions / ALPN-список),
+    # который сервер гектара (legacy web-сервер) реджектит с
+    # TLSV1_ALERT_DECODE_ERROR. urllib3 1.26.x совместима. См. bd 7hp/e1w.
+    "urllib3<2",
     "playwright==1.58.0",
     "psutil>=6.0",
     "watchdog>=4.0",
