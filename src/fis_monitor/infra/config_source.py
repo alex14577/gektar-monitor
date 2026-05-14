@@ -27,6 +27,8 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
+import secrets
 import threading
 from collections.abc import Callable
 from datetime import datetime
@@ -226,6 +228,39 @@ class WatchdogConfigSource:
         with self._lock:
             self._subscribers.append(sub)
         return sub
+
+    def save(self, settings: Settings) -> None:
+        """Atomically replace the on-disk config file with ``settings``.
+
+        Algorithm (per ADR-023):
+        1. Acquire ``_lock`` to prevent interleaving with the reload-handler.
+        2. Serialise ``settings`` to JSON bytes.
+        3. Write to a temp-file in the same directory (``<config>.tmp.<random8>``).
+        4. ``os.replace(tmp, self._path)`` — atomic POSIX rename.
+        5. Update ``_current`` and content-hash optimistically so the inotify
+           event emitted by the rename does not cause a redundant subscriber
+           notification (hash-dedup in ``_do_reload`` will skip the reload
+           because the hash is already recorded).
+        6. On any error: clean up temp file; re-raise.
+
+        Thread-safety: the entire operation runs under ``_lock``.
+        """
+        raw: bytes = settings.model_dump_json(indent=2).encode()
+        digest = hashlib.sha256(raw[:_HASH_SAMPLE_SIZE]).digest()
+
+        tmp_path = self._path.parent / f"{self._path.name}.tmp.{secrets.token_hex(4)}"
+        try:
+            with self._lock:
+                tmp_path.write_bytes(raw)
+                os.replace(tmp_path, self._path)
+                # Optimistic update: prevents the self-triggered watchdog event
+                # from double-firing subscribers (hash-dedup skips identical hash).
+                self._current = settings
+                self._last_content_hash = digest
+        except Exception:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp_path)
+            raise
 
     # ------------------------------------------------------------------
     # Shutdown

@@ -31,6 +31,7 @@ import json
 import logging
 import sys
 import traceback
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, TextIO
 
@@ -195,6 +196,7 @@ def setup_logging(
     stream: TextIO = sys.stdout,
     level: int = logging.INFO,
     json_format: bool = True,
+    filters: Sequence[logging.Filter] | None = None,
 ) -> None:
     """Install (or replace) a handler on the ``fis_monitor`` logger.
 
@@ -209,6 +211,10 @@ def setup_logging(
                      ``sys.stderr`` for bootstrap, ``io.StringIO`` in tests).
         level:       Logging level (``logging.INFO`` default).
         json_format: ``True`` → ``JsonFormatter``; ``False`` → plain text.
+        filters:     Optional sequence of ``logging.Filter`` instances to attach
+                     to the handler.  Each filter is added via
+                     ``handler.addFilter(f)``.  Filters are applied in order.
+                     Pass ``[StackPIIFilter()]`` for PII scrubbing.
     """
     root_logger = logging.getLogger(_FIS_MONITOR_LOGGER)
 
@@ -228,6 +234,10 @@ def setup_logging(
 
     # Mark handler as ours so future calls can identify and replace it.
     setattr(handler, _SENTINEL, True)
+
+    # Attach caller-supplied filters (e.g. StackPIIFilter for PII scrubbing).
+    for f in filters or []:
+        handler.addFilter(f)
 
     root_logger.setLevel(level)
     # propagate=True: records can still reach root (e.g. pytest caplog fixture).

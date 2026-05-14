@@ -1,28 +1,24 @@
 """FastAPI APIRouter for settings endpoints.
 
 Endpoints:
-  GET  /settings           — return current Settings snapshot.
-  POST /settings/smtp      — update SMTP credentials (DNS-outside-tx via SettingsService).
-  POST /settings/smtp/test — send a test email to a given recipient.
+  GET  /settings              — return current Settings snapshot.
+  POST /settings/smtp         — update SMTP credentials (DNS-outside-tx via SettingsService).
+  POST /settings/smtp/test    — send a test email to a given recipient.
+  POST /settings/regions      — replace ``Settings.regions`` list; triggers hot-reload.
+  POST /settings/recipients   — replace ``Settings.notifications.email.recipients``.
 
 DI: all dependencies are injected via Depends(); routes are decoupled from
 Container and testable via app.dependency_overrides.
-
-Out of scope (no service exists yet):
-  - POST /settings/regions   — requires ConfigSource.save() Protocol (not yet defined).
-  - POST /settings/recipients — same: no mutation seam on ConfigSource.
-  These would be a follow-up bd issue once ConfigSource gains a save() method.
-  Do NOT invent new Protocol methods here.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 from fis_monitor.domain.errors import SmtpHostPolicyError
 from fis_monitor.domain.models import LotPublicDTO, SmtpCredentials
@@ -58,6 +54,29 @@ class SmtpTestBody(BaseModel):
     """JSON body for POST /settings/smtp/test."""
 
     recipient: str
+
+
+class RegionsBody(BaseModel):
+    """JSON body for POST /settings/regions.
+
+    ``regions`` must be a non-empty list of valid Russian cadastral region codes
+    (1-80).  Constraints mirror ``Settings.regions`` field semantics.
+    """
+
+    regions: Annotated[
+        list[Annotated[int, Field(ge=1, le=80)]],
+        Field(min_length=1),
+    ]
+
+
+class RecipientsBody(BaseModel):
+    """JSON body for POST /settings/recipients.
+
+    ``recipients`` is a list of RFC-5321 email addresses.  An empty list is
+    accepted (disables email notifications).
+    """
+
+    recipients: list[EmailStr] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -175,3 +194,48 @@ def post_smtp_test(
     test_lot = _test_lot_fixture()
     result = svc.test_send(test_lot, body.recipient)
     return JSONResponse(content={"ok": result.ok, "detail": result.detail})
+
+
+@router.post("/regions")
+def post_regions(
+    body: RegionsBody,
+    config_source: Any = Depends(get_config_source),
+) -> JSONResponse:
+    """Replace the monitored regions list.
+
+    Pattern: ``current() → model_copy(update=...) → save()``.
+    The atomic file-replace triggers a watchdog reload on the same subscriber
+    bus as manual config edits (ADR-023).
+
+    Returns:
+        200 with ``{"ok": true}`` on success.
+        422 on validation failure (empty list, region out of 1-80 range).
+    """
+    current = config_source.current()
+    new_settings = current.model_copy(update={"regions": list(body.regions)})
+    config_source.save(new_settings)
+    return JSONResponse(content={"ok": True})
+
+
+@router.post("/recipients")
+def post_recipients(
+    body: RecipientsBody,
+    config_source: Any = Depends(get_config_source),
+) -> JSONResponse:
+    """Replace the email recipients list.
+
+    Pattern: ``current() → model_copy(update=...) → save()``.
+    Mutates ``Settings.notifications.email.recipients`` via nested ``model_copy``.
+
+    Returns:
+        200 with ``{"ok": true}`` on success.
+        422 on validation failure (invalid email address).
+    """
+    current = config_source.current()
+    new_email = current.notifications.email.model_copy(
+        update={"recipients": [str(r) for r in body.recipients]}
+    )
+    new_notifications = current.notifications.model_copy(update={"email": new_email})
+    new_settings = current.model_copy(update={"notifications": new_notifications})
+    config_source.save(new_settings)
+    return JSONResponse(content={"ok": True})

@@ -205,9 +205,94 @@ class MonitorCycleService:
         self._list_url_template = list_url_template
         self._enrichment_workers = enrichment_workers
 
+    # Default poll interval used when ``interval_minutes`` is 0 (continuous mode).
+    _DEFAULT_POLL_INTERVAL_SEC: float = 60.0
+    # Backoff sleep (seconds) after an unexpected exception from run_cycle.
+    _UNEXPECTED_BACKOFF_SEC: float = 5.0
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def run_forever(self, stop_event: threading.Event) -> None:
+        """Scheduler loop: iterate configured regions, call run_cycle, sleep, repeat.
+
+        Exits cleanly when ``stop_event`` is set (checked between regions and
+        via ``stop_event.wait(poll_interval)`` between full passes).
+
+        Exception handling:
+          - ``UpstreamError`` / ``ParseBugError`` / ``ParserVersionMismatch`` from
+            ``run_cycle`` are domain errors (data quality / upstream issues) — logged
+            at WARNING level, no backoff.  Per run_cycle contract, domain errors may
+            re-raise when they escape _run_cycle_inner on uncovered code paths —
+            handled here so the loop survives.
+          - Any other ``Exception`` (unexpected bug): logged at ERROR level,
+            then a short backoff sleep before the next region.  The loop
+            continues — one bad region must not kill the scheduler.
+        """
+        logger.info("monitor_cycle: scheduler started")
+
+        while not stop_event.is_set():
+            settings = self._config_source.current()
+            regions = settings.regions
+
+            # Poll interval: convert interval_minutes → seconds.
+            # 0 means "continuous" — use the default backoff.
+            poll_interval = (
+                settings.interval_minutes * 60
+                if settings.interval_minutes > 0
+                else self._DEFAULT_POLL_INTERVAL_SEC
+            )
+
+            for region in regions:
+                if stop_event.is_set():
+                    logger.info(
+                        "monitor_cycle: stop requested before region=%s — exiting",
+                        region,
+                    )
+                    break
+
+                try:
+                    self.run_cycle(region)
+                except UpstreamError:
+                    # Per run_cycle contract: domain errors may re-raise when they
+                    # escape _run_cycle_inner — handled here so the loop survives.
+                    logger.warning(
+                        "monitor_cycle: UpstreamError escaped run_cycle for region=%s "
+                        "(cycle row already closed); continuing loop",
+                        region,
+                        exc_info=True,
+                    )
+                except (ParseBugError, ParserVersionMismatch):
+                    # Per run_cycle contract: parse-domain errors may re-raise when
+                    # they escape _run_cycle_inner — data-quality issue, not a bug
+                    # in the loop itself.  Log at WARNING (no backoff) and continue.
+                    logger.warning(
+                        "monitor_cycle: parse domain error escaped run_cycle for region=%s "
+                        "(cycle row already closed); continuing loop",
+                        region,
+                        exc_info=True,
+                    )
+                except Exception:
+                    logger.error(
+                        "monitor_cycle: unexpected exception in run_cycle for region=%s; "
+                        "sleeping %.1fs before next region",
+                        region,
+                        self._UNEXPECTED_BACKOFF_SEC,
+                        exc_info=True,
+                    )
+                    stop_event.wait(self._UNEXPECTED_BACKOFF_SEC)
+
+            if stop_event.is_set():
+                break
+
+            logger.debug(
+                "monitor_cycle: full pass done; sleeping %.0fs before next pass",
+                poll_interval,
+            )
+            stop_event.wait(poll_interval)
+
+        logger.info("monitor_cycle: scheduler stopped")
 
     def run_cycle(self, region: int) -> CycleResult:
         """Execute one monitor cycle for ``region``.

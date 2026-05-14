@@ -33,12 +33,13 @@ from fis_monitor.web.routes.settings import router
 
 
 class FakeConfigSource:
-    """Fake ConfigSource — implements ALL public methods."""
+    """Fake ConfigSource — implements ALL public methods (including save() per ADR-023)."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or Settings()
         self.current_calls: int = 0
         self.subscribe_calls: int = 0
+        self.save_calls: list[Settings] = []
 
     def current(self) -> Settings:
         self.current_calls += 1
@@ -47,6 +48,10 @@ class FakeConfigSource:
     def subscribe(self, cb: Any) -> object:
         self.subscribe_calls += 1
         return object()  # stub subscription handle
+
+    def save(self, settings: Settings) -> None:
+        self._settings = settings
+        self.save_calls.append(settings)
 
 
 class FakeSettingsService:
@@ -121,8 +126,12 @@ def test_all_fake_methods_are_called() -> None:
     s = fcs.current()
     assert isinstance(s, Settings)
     fcs.subscribe(lambda x: None)
+    new_s = Settings(interval_minutes=3)
+    fcs.save(new_s)
     assert fcs.current_calls == 1
     assert fcs.subscribe_calls == 1
+    assert len(fcs.save_calls) == 1
+    assert fcs.save_calls[0].interval_minutes == 3
 
     # FakeSettingsService
     fss = FakeSettingsService()

@@ -232,6 +232,19 @@ class ConfigSource(Protocol):
         """
         ...
 
+    def save(self, settings: Settings) -> None:
+        """Atomically replace the on-disk config; subscribers are notified via
+        the normal reload-path (no in-process shortcut).
+
+        Writes ``settings`` as JSON to a temp-file in the same directory as the
+        target config file, then performs an atomic ``os.replace(tmp, target)``
+        (POSIX rename).  The watchdog catches its own ``FileMovedEvent.dest_path``
+        and re-loads — the existing reload-path publishes to subscribers.
+        SHA-256 content-hash dedup handles self-write correctly: a new hash
+        triggers a reload; an identical hash is a silent no-op.
+        """
+        ...
+
 
 class EventBus(Protocol):
     """sync→async bridge for SSE fan-out.

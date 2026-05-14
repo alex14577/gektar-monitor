@@ -185,9 +185,9 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - [x] `plg.1` (P2) — structured JSON logger + DI factory · Wave 10b-b · sonnet writer + sonnet reviewer APPROVE (7 minors → 2 fixed inline, 5 deferred as commit-note)
 
 **10c — параллель (после bye.9):**
-- [ ] `vgj` (P0) — `MonitorCycleService.run_forever` scheduler в lifespan
-- [ ] `2s3` (P1) — `ConfigSource.save()` + POST `/settings/regions` + POST `/settings/recipients`
-- [ ] `plg.2` (P1) — redactor pipeline (RecipientFilter + StackPIIFilter)
+- [x] `vgj` (P0) — `MonitorCycleService.run_forever` scheduler в lifespan · sonnet writer + sonnet reviewer APPROVE+1major → fix-iter 1 APPROVE
+- [x] `2s3` (P1) — `ConfigSource.save()` + POST `/settings/regions` + POST `/settings/recipients` (ADR-023) · sonnet writer + sonnet reviewer APPROVE 0/0
+- [x] `plg.2` (P1) — `StackPIIFilter` (RecipientFilter не реализован, decision 2026-05-14) · sonnet writer + sonnet reviewer APPROVE+2majors → fix-iter 1 APPROVE
 
 **10d — параллель (после vgj + plg.2):**
 - [ ] `03y` (P1) — `FilterMatcher` по `rf_subjects` в `MonitorCycleService`
@@ -556,6 +556,28 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 **Итог Wave 10b-b:** 1/1 closed. Разблокировано: `plg.2` (redactor pipeline) — но идёт в Wave 10d по плану.
 
 **Следующая сессия:** Wave 10c — `vgj` (P0 scheduler) + `2s3` (P1 settings POST routes) параллельно. Brainstorm уже выполнен (SA × 4 + SRE × 1 + SecEng × 2 в session part 6).
+
+### Session (2026-05-14, part 8) — Wave 10c (`vgj` + `2s3` + `plg.2`)
+
+**Цель:** разблокировать сервис до запускаемого состояния: scheduler в lifespan (vgj), POST routes для регионов/recipients (2s3), StackPII redactor pipeline (plg.2). 3 параллельных writer-агента (sonnet) — pre-flight grep: нулевое пересечение файлов кроме `app.py` (vgj добавляет `supervisor.start("monitor-cycle")`; plg.2 добавляет `filters=[StackPIIFilter()]` в оба setup_logging вызова — разные строки, нет конфликта).
+
+**Сделано:**
+- `vgj` — `MonitorCycleService.run_forever(stop_event)` (mirrors `FullScanService.run_forever` pattern: per-region `run_cycle`, mid-pass `stop_event.is_set()` check, `stop_event.wait(poll_interval)` между проходами). `_DEFAULT_POLL_INTERVAL_SEC=60`, `_UNEXPECTED_BACKOFF_SEC` для bare `Exception` ветки. Lifespan wiring в `app.py`: `supervisor.start("monitor-cycle", container.services.monitor_cycle.run_forever)`. `FakeMonitorCycle` добавлен в lifespan тесты. **Reviewer 1 major** (ParseBugError/ParserVersionMismatch попадают в bare `except Exception` → ERROR-spam на parse-регрессии) → **fix-iter 1**: добавлен `except (ParseBugError, ParserVersionMismatch)` parallel UpstreamError-ветке, WARNING-level, no backoff; docstring переписан с «belt-and-suspenders» на «run_cycle contract: domain errors may re-raise». +2 unit-теста.
+- `2s3` — **ADR-023** написан orchestrator'ом ДО спавна writer: `ConfigSource.save()` расширяет существующий Protocol (без отдельного `SettingsWriter`). Writer импл'ил: `WatchdogConfigSource.save()` с `os.replace(tmp, target)` (atomic POSIX rename), entire op под `self._lock`, оптимистический update `_current` + `_last_content_hash` для silence-инга self-triggered watchdog event. Routes `POST /settings/regions` (RegionsBody min_length=1, ge=1 le=80) + `POST /settings/recipients` (RecipientsBody list[EmailStr]) с `current.model_copy(update=...)` pattern. **Reviewer APPROVE 0/0** (6 minors — оставлены как commit-note).
+- `plg.2` — `StackPIIFilter(logging.Filter)` в `utils/log_filters.py`: scrub URL-query (`http(s)://...?...` → `?[scrubbed]`) + token-like 24+ chars base64/hex (`[token-scrubbed]`). DI seam через новый `filters=` kw-only параметр в `setup_logging`. Применён в обоих call-sites `app.py` (bootstrap + lifespan reconfigure). `RecipientFilter` НЕ реализован (decision 2026-05-14, trusted environment, см. memory `plg-policy-emails-plain-2026-05-14-email`). **Reviewer 2 majors**: (M1) meta-logger `"fis_monitor.log_filters._meta"` is child of `fis_monitor` → propagate=True → recursion risk при regex-failure (docstring врал что не идёт через handler); (M2) `URL_QUERY_RE` поглощала закрывающие `)]>"'`. **Fix-iter 1**: `_meta_log.propagate = False` явно; regex обновлён `[^\s)\]>\"'\[]+` (исключение `[` нужно для idempotency: `?[scrubbed]` не должен частично rematch'иться). +5 unit-тестов на закрывающие punctuation cases.
+
+**Vault:**
+- ADR: **ADR-023** (`docs/decisions/ADR-023-configsource-save-extension.md`) — orchestrator написал ДО writer'а, добавлен в `decisions-log.md`.
+- Glossary: 5 новых записей (`run_forever` — no new class, без glossary; `WatchdogConfigSource.save()` semantic extension; `RegionsBody`, `RecipientsBody`; `StackPIIFilter` + обновление `setup_logging` для `filters=`).
+- Architecture/data-model: no-op (изменения логично укладываются в существующие контракты — ConfigSource expanded по ADR-023, scheduler — application-layer без новых протоколов).
+
+**Suite:** 972 passed / 3 skipped. Ruff: clean на 10c-touched files (1 pre-existing error в `domain/errors.py:42` — UP037, не наш scope).
+
+**Параллельность:** 3 writer-агента параллельно — отработали чисто, ноль конфликтов в `app.py` (разные строки). Reviewer-цикл тоже параллельный (3 reviewer-агента). Hard cap canon §7 не достигнут (только iter 1 fix). Wave 10c самая большая параллельная волна в проекте.
+
+**Итог Wave 10c:** 3/3 closed. Разблокировано: `03y` (filter-matcher для `rf_subjects` в MonitorCycleService), `plg.3` (audit/app/requests channels), `plg.4` (SecretStr repr + import-linter security contract).
+
+**Следующая сессия:** Wave 10d — `03y` + `plg.3` + `plg.4` параллельно, затем Wave 10e — `vgm.5` (E2E smoke) + `4fw` (config_subscription.unsubscribe в lifespan phase 2). **MVP достижим к концу 10e.**
 
 ### Шаблон для будущих сессий
 

@@ -63,6 +63,13 @@ class FakeFullScan:
         stop_event.wait()
 
 
+class FakeMonitorCycle:
+    """Minimal fake for MonitorCycleService.run_forever."""
+
+    def run_forever(self, stop_event: threading.Event) -> None:
+        stop_event.wait()
+
+
 class FakeLoginService:
     """Fake LoginService — records bind_executor and cancel_active_job calls."""
 
@@ -86,6 +93,7 @@ class FakeInfra:
 class FakeServices:
     notifier_dispatcher: FakeDispatcher
     full_scan: FakeFullScan
+    monitor_cycle: FakeMonitorCycle
     login: FakeLoginService
 
 
@@ -126,9 +134,15 @@ def _make_fake_container() -> (
     conn_provider = FakeConnProvider()
     dispatcher = FakeDispatcher()
     full_scan = FakeFullScan()
+    monitor_cycle = FakeMonitorCycle()
     login = FakeLoginService()
     infra = FakeInfra(conn_provider=conn_provider)
-    services = FakeServices(notifier_dispatcher=dispatcher, full_scan=full_scan, login=login)
+    services = FakeServices(
+        notifier_dispatcher=dispatcher,
+        full_scan=full_scan,
+        monitor_cycle=monitor_cycle,
+        login=login,
+    )
     container = FakeContainer(infra=infra, services=services)
     return container, login, dispatcher, full_scan, conn_provider
 

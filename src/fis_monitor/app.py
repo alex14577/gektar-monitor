@@ -57,9 +57,6 @@ without patching internals.  Production callers use the defaults.
 
 Out-of-scope follow-ups (tracked as bd-issues)
 -----------------------------------------------
-- ``MonitorCycleService.run_forever`` does not exist (only ``run_cycle(region)``
-  is defined).  A scheduler that calls ``run_cycle`` per configured region with
-  ``stop_event.wait(poll_interval)`` is needed.  NOT supervised in this task.
 - ``SessionMonitor`` is stubbed (``_NotImplementedSessionMonitor``); supervised
   loop deferred to ``a4t.9``.  NOT started here.
 - ``EnrichmentService.bind_executor`` does not exist; it uses a per-call
@@ -89,6 +86,7 @@ from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.thread_supervisor import ThreadSupervisor
 from fis_monitor.utils.log import setup_logging
+from fis_monitor.utils.log_filters import StackPIIFilter
 from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
 from fis_monitor.web.routes import auth, diagnostics, events, lots, notifications, onboarding
@@ -183,6 +181,7 @@ async def _lifespan_impl(
             stream=_sys2.stdout,
             level=logging.INFO,
             json_format=_json_fmt,
+            filters=[StackPIIFilter()],
         )
 
         container = container_factory(settings, data_dir)
@@ -205,10 +204,11 @@ async def _lifespan_impl(
         logger.info("lifespan: executor pools created (pw=1, sse=64, enrich=10)")
 
         # Supervised background threads.
-        # NOTE: monitor_cycle (no run_forever) and session_monitor (stubbed) are
-        # intentionally excluded — see module docstring for follow-up tracking.
+        # NOTE: session_monitor (stubbed) is intentionally excluded — see module
+        # docstring for follow-up tracking (a4t.9).
         supervisor = ThreadSupervisor()
         supervisor.start("full-scan", container.services.full_scan.run_forever)
+        supervisor.start("monitor-cycle", container.services.monitor_cycle.run_forever)
         # Dispatcher's consumer_loop() takes NO stop_event arg — it uses its own
         # self.stop_event.  We wrap it in a lambda that accepts the supervisor's
         # stop_event (which is ignored by the lambda) and call consumer_loop directly.
@@ -218,7 +218,7 @@ async def _lifespan_impl(
             lambda _stop_event: container.services.notifier_dispatcher.consumer_loop(),
         )
         app.state.supervisor = supervisor
-        logger.info("lifespan: supervisor started (full-scan, notifier)")
+        logger.info("lifespan: supervisor started (full-scan, monitor-cycle, notifier)")
 
         yield
 
@@ -447,6 +447,7 @@ def main() -> None:
         stream=_sys.stderr,
         level=logging.WARNING,
         json_format=_json,
+        filters=[StackPIIFilter()],
     )
 
     # importlib.import_module avoids a static import statement that would

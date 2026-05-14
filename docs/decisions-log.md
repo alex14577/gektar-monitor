@@ -34,6 +34,7 @@
 - [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]] — SMTP host/port SSOT = state.db
 - [[decisions/ADR-021-manual-starttls-connect-by-ip|ADR-021]] — Manual STARTTLS — обход smtplib server_hostname bug
 - [[decisions/ADR-022-allowed-tracked-fields-ssot-smtp-policy-error|ADR-022]] — ALLOWED_TRACKED_FIELDS SSOT + SmtpHostPolicyError наследует UpstreamError
+- [[decisions/ADR-023-configsource-save-extension|ADR-023]] — `ConfigSource.save()` расширяет существующий Protocol (без отдельного SettingsWriter)
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES
