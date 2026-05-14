@@ -23,6 +23,9 @@ Phase 2  (forceful executor shutdown):
     ``config_subscription.unsubscribe()``,
     ``conn_provider.close_all()`` (ONLY after phase 2 — ADR-014 invariant).
 
+Phase 2b (config watchdog observer teardown, bye.9):
+    ``config_source.stop()`` — stops the watchdog observer thread.
+
 Phase 3  (lock release — always executes):
     ``locker.release(lock_handle)`` — must execute even if all previous phases
     raised, otherwise the next process start finds "Already running".
@@ -276,6 +279,13 @@ async def _lifespan_impl(
                     container.infra.conn_provider.close_all()
                 except Exception:
                     logger.exception("lifespan: conn_provider.close_all() failed")
+
+            # Phase 2b: stop config watchdog observer (bye.9).
+            if container is not None:
+                try:
+                    container.infra.config_source.stop()
+                except Exception:
+                    logger.exception("lifespan: config_source.stop() failed")
 
         finally:
             # Phase 3 / lock release — the outermost finally block.

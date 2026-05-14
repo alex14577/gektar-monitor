@@ -180,9 +180,9 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - [x] `7vy` — `main()` + mount routes/middleware/static/templates · sonnet (writer) + sonnet (reviewer APPROVE) · `app.py`, `tests/unit/test_app_wiring.py`
 
 **10b — параллель (после 7vy):**
-- [ ] `bye.9` (P0) — реальный `WatchdogConfigSource` вместо `_NotImplementedConfigSource` (Layer 0)
-- [ ] `b54` (P2) — SSE dedup (убрать двойную публикацию `SseLotNew`)
-- [ ] `plg.1` (P2) — structured JSON logger + DI factory
+- [x] `bye.9` (P0) — `SystemClock` + `WatchdogConfigSource` (Layer 0). Wave 10b-a — sequential first (конфликт по `app.py` с plg.1).
+- [ ] `b54` (P2) — SSE dedup (убрать двойную публикацию `SseLotNew`) → перенесено в 10c (конфликт с bye.9 по composition.py)
+- [ ] `plg.1` (P2) — structured JSON logger + DI factory → Wave 10b-b (sequential после bye.9)
 
 **10c — параллель (после bye.9):**
 - [ ] `vgj` (P0) — `MonitorCycleService.run_forever` scheduler в lifespan
@@ -516,6 +516,31 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 **Итог Wave 10a:** 1/1 closed. Разблокировано: вся Wave 10b.
 
 **Следующая сессия:** Wave 10b параллельно — `bye.9` (P0, критический путь) + `b54` (P2, изолирован) + `plg.1` (logging core). 3 writer-агента, нулевое пересечение файлов.
+
+### Session (2026-05-14, part 6) — Wave 10b-a (`bye.9`)
+
+**Цель:** заменить `_NotImplementedClock` + `_NotImplementedConfigSource` stub'ы реальными имплементациями. Это unblock'ает реальный мониторинг (без живого `current()` сервисы крашатся `NotImplementedError`).
+
+**Brainstorm:** SA + Backend Architect + Security Engineer (3 архитектора, sonnet, research-only). Backend Architect использован впервые после двойного skill-hijack incident'а в session #6; для brainstorm-only с явным запретом edit/skill — отработал чисто, `.claude/settings.json` md5 не изменился (записано в memory `backend-architect-skill-hijack-update`).
+
+**Key brainstorm findings** (новое поверх SA-отчёта):
+- BA-5: `os.replace` → `FileMovedEvent.dest_path` (не `src_path`) — критично для atomic save из 2s3.
+- BA-2: SHA-256 content-hash dedup защищает от warning-спама на повторных битых JSON.
+- BA-4/8: observability props (`reload_count`, `reload_error_count`, `last_reload_at`, `last_error_at`).
+- SecEng-1: audit ADR-020 call-sites (никто не должен читать `settings.email.smtp_host` как SMTP-хост — SSOT=state.db). Verified zero violations.
+- SecEng-4: 1MB size cap + `stat()` ДО `read()`.
+- SecEng-7: `logger.warning("%d errors", len(exc.errors()))` — НЕ передавать `exc` целиком (PII в exception messages).
+
+**Сделано:**
+- `bye.9` (`2cdf075`?) — `SystemClock` (~22 LOC, `infra/clock.py`) + `WatchdogConfigSource` (~260 LOC, `infra/config_source.py`) + Layer 0 wiring в composition.py + lifespan **Phase 2b** в app.py (`stop()` для Observer). 18 unit-тестов + 1 slow integration. Writer: sonnet (general-purpose). Reviewer: sonnet (Code Reviewer) — verdict APPROVE с 3 majors (M1: `import pydantic` в except → переместить top; M2: phase label collision → Phase 2b naming; M3: register `pytest.mark.slow` в pyproject). Fix-iter 1: writer-fix sonnet — все 3 majors закрыты, 905/3 green, ruff clean, 0 unknown-mark warnings. Self-verify ОК. Vault: glossary +2 (`SystemClock`, `WatchdogConfigSource`).
+
+**Scope-shift:** Wave 10b изначально планировалась как 3 параллельных таски (bye.9 + b54 + plg.1). При pre-flight grep выявлен конфликт по `app.py` между bye.9 (Phase 2b stop) и plg.1 (setup_logging + bootstrap-handler). По пользовательскому решению — sequential: 10b-a (bye.9) → 10b-b (plg.1). `b54` перенесён в 10c (конфликт по composition.py с bye.9).
+
+**Brainstorm Wave 10c (запущен параллельно с bye.9 writer):** SA × 4 (vgj, 2s3, b54, plg.2), SRE × 1 (vgj), SecEng × 2 (2s3, plg.2). 7 агентов параллельно, все отработали. Готов материал для следующих writer'ов.
+
+**Итог Wave 10b-a:** 1/1 closed. Разблокировано: 10b-b (plg.1), 10c (vgj/2s3/03y).
+
+**Следующая сессия:** Wave 10b-b — `plg.1` (sonnet writer), затем Wave 10c параллельная волна.
 
 ### Шаблон для будущих сессий
 

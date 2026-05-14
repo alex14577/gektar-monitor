@@ -34,13 +34,14 @@ See: docs/architecture/04-composition-root.md §4.2
 from __future__ import annotations
 
 import threading
-from datetime import datetime
 from pathlib import Path
 
 import requests
 
 from fis_monitor.container import Container, Infra, Services
 from fis_monitor.domain.models import Settings
+from fis_monitor.infra.clock import SystemClock
+from fis_monitor.infra.config_source import WatchdogConfigSource
 from fis_monitor.infra.http.client import RequestsHttpClient
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
@@ -90,37 +91,6 @@ def _load_schema_sql() -> str:
 #   - Has a single docstring stating the deferred bd-issue
 #   - Raises NotImplementedError("<class> impl deferred to <task>") on all methods
 # ---------------------------------------------------------------------------
-
-class _NotImplementedClock:
-    """Stub for Clock until bye.9 lands (SystemClock).
-
-    Any call to now() or monotonic() will raise NotImplementedError.
-    Build is structural — no method is called during container assembly.
-    """
-
-    def now(self) -> datetime:
-        raise NotImplementedError("_NotImplementedClock.now() deferred to bye.9")
-
-    def monotonic(self) -> float:
-        raise NotImplementedError("_NotImplementedClock.monotonic() deferred to bye.9")
-
-
-class _NotImplementedConfigSource:
-    """Stub for ConfigSource until bye.9 lands (WatchdogConfigSource).
-
-    Any call to current() or subscribe() will raise NotImplementedError.
-    """
-
-    def current(self) -> object:
-        raise NotImplementedError(
-            "_NotImplementedConfigSource.current() deferred to bye.9"
-        )
-
-    def subscribe(self, cb: object) -> object:
-        raise NotImplementedError(
-            "_NotImplementedConfigSource.subscribe() deferred to bye.9"
-        )
-
 
 class _NotImplementedUserStateRepository:
     """Stub for UserStateRepository until bye.7 lands (SqliteUserStateRepository)."""
@@ -222,11 +192,11 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     Build is structural, not runtime — assembled but not exercised.
     """
     # ── Layer 0: systemwide utilities ──────────────────────────────────────
-    clock = _NotImplementedClock()
+    clock = SystemClock()
     event_bus = ThreadEventBus()
     conn_provider = ConnectionProvider(db_path=data_dir / "state.db")
     locker = FileLocker(path=data_dir / "app.lock")
-    config_source = _NotImplementedConfigSource()
+    config_source = WatchdogConfigSource(path=data_dir / "config.json", clock=clock)
     cycle_progress_signal = threading.Event()
 
     # Initialise the schema (fresh DB → apply DDL; existing → verify version).

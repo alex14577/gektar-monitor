@@ -52,6 +52,9 @@ fis_monitor = [
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["src"]
+markers = [
+    "slow: marks tests as slow integration tests (deselect with -m 'not slow')",
+]
 
 [tool.ruff]
 line-length = 100

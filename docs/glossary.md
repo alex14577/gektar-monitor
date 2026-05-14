@@ -243,6 +243,12 @@
 
 - **`main()`** (`app.py`) — console-script entry point из `pyproject.toml` (`fis-monitor = "fis_monitor.app:main"`). argparse: `--data-dir` (default `./var`), `--host` (default `127.0.0.1`), `--port` (default `8000`). `importlib.import_module("fis_monitor.composition")` (runtime, не top-level) сохраняет import-linter контракт (`app` ⟂ `composition`). `args.port` передаётся И в `create_app(port=...)` (для `loopback_csrf_config`), И в `uvicorn.run(port=...)` — port alignment guaranteed.
 
+## Layer 0 (Wave 10b — Clock + ConfigSource)
+
+- **`SystemClock`** (`infra/clock.py`) — production-имплементация `Clock` Protocol. Stateless singleton-friendly, без ctor-аргументов. `now()` → `datetime.now(UTC)` (modern style; **НЕ** deprecated `datetime.utcnow()`), `monotonic()` → `time.monotonic()`. Инжектится во все сервисы, требующие детерминированного времени; тесты подменяют `FakeClock`. Заменил `_NotImplementedClock` stub из Wave 5.
+
+- **`WatchdogConfigSource`** (`infra/config_source.py`) — production-имплементация `ConfigSource` Protocol. Следит за **родительской директорией** `config.json` через `watchdog.Observer` (handles atomic saves via `FileMovedEvent.dest_path` — **не** `src_path`; BA-5 catch). Применяет: debounce 300ms (`threading.Timer` cancel+reschedule), SHA-256 content-hash dedup на первых 4KB (защита от warning-spam при повторных идентичных битых JSON), 1MB size cap через `stat()` ДО `read()`, PII-safe error logging (`%d errors` для `ValidationError`, `lineno` для `JSONDecodeError`, `__class__.__name__` для `OSError` — без `exc` целиком). Ref-swap `_current` — GIL-atomic (CPython 3.12); запись под `_lock` в watchdog-thread, чтение `current()` lock-free. `Settings.__eq__` skip callbacks при идентичном snapshot'е (idempotency guard). Per-subscriber `try/except` (изоляция). Observability props: `reload_count`, `reload_error_count`, `last_reload_at`, `last_error_at`. `stop()` — `Observer.stop()` + `join(5.0)` + cancel pending timer; идемпотентен; зовётся в lifespan **Phase 2b**. Использует existing `ThreadConfigSubscription` из `infra/sse/subscriptions.py`. См. [[architecture/07-concurrency]] §7.6, [[decisions/ADR-020-smtp-credentials-state-db|ADR-020]] (SMTP host SSOT=state.db, **не** этот config stream — audit done, zero violations).
+
 ## См. также
 
 - [[decisions-log]]
