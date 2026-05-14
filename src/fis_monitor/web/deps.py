@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, Request
+from fastapi.templating import Jinja2Templates
 
 if TYPE_CHECKING:
     from fis_monitor.container import Container
@@ -121,6 +122,15 @@ def get_config_source(c: Container = Depends(get_container)) -> ConfigSource:
     without depending on the Container directly.
     """
     return c.infra.config_source
+
+
+def get_templates(request: Request) -> Jinja2Templates:
+    """Return Jinja2Templates from app.state.
+
+    Set in the lifespan hook (``app.state.templates = Jinja2Templates(...)``).
+    Route tests override this via ``app.dependency_overrides[get_templates]``.
+    """
+    return request.app.state.templates
 
 
 def get_csrf_origin_whitelist(request: Request) -> frozenset[str]:
