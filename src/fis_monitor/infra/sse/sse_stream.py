@@ -18,7 +18,7 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args, get_type_hints
 
 from fis_monitor.domain.interfaces import EventBus
 from fis_monitor.domain.models import SseEvent
@@ -27,6 +27,36 @@ if TYPE_CHECKING:
     from fis_monitor.domain.interfaces import EventSubscription
 
 logger = logging.getLogger(__name__)
+
+
+def _derive_known_sse_events() -> frozenset[str]:
+    """Derive the set of valid SSE event discriminators from the ``SseEvent`` union.
+
+    ``SseEvent`` is a PEP-695 ``TypeAliasType`` (``type SseEvent = A | B | ...``).
+    ``get_args()`` on a ``TypeAliasType`` returns an empty tuple; the actual union
+    is stored in ``__value__``.  We unpack that to enumerate each concrete member,
+    then read the ``Literal[...]`` default on their ``event`` field.
+
+    This is the SSOT — adding a new member to ``SseEvent`` automatically includes
+    its discriminator here with no manual maintenance.
+    """
+    # PEP-695 TypeAliasType stores the RHS expression in __value__.
+    union = getattr(SseEvent, "__value__", SseEvent)
+    known: set[str] = set()
+    for member in get_args(union):
+        hints = get_type_hints(member, include_extras=False)
+        event_hint = hints.get("event")
+        if event_hint is None:
+            continue
+        for arg in get_args(event_hint):
+            if isinstance(arg, str):
+                known.add(arg)
+    return frozenset(known)
+
+
+#: Closed set of valid SSE event-type discriminators, derived from the ``SseEvent``
+#: union at import time.  Unknown discriminators trigger schema-drift logging + drop.
+_KNOWN_SSE_EVENTS: frozenset[str] = _derive_known_sse_events()
 
 _DEFAULT_PING_INTERVAL = 15.0  # seconds between keep-alive pings
 
@@ -92,7 +122,10 @@ class SseStreamer:
                     yield _encode_ping()
                 else:
                     for event in events:
-                        yield encode_sse_event(event)
+                        encoded = encode_sse_event(event)
+                        if not encoded:
+                            continue  # dropped by schema-drift guard
+                        yield encoded
         finally:
             with contextlib.suppress(Exception):
                 subscription.unsubscribe()
@@ -144,12 +177,26 @@ def encode_sse_event(event: SseEvent) -> bytes:
     a U+000A LINE FEED (LF) character, then dispatch the event, then
     initialize the data buffer to the empty string.").
 
-    The ``event`` ClassVar (discriminator) from the model is used as the
+    The ``event`` field (Literal discriminator) from the model is used as the
     SSE event type. Each concrete ``SseEvent`` subclass has an ``event``
-    field (Literal) that doubles as the SSE event name.
+    field that doubles as the SSE event name.
+
+    Schema-drift guard: if ``event.event`` is not in ``_KNOWN_SSE_EVENTS``
+    (e.g. a future event type not yet handled by this infra version) the
+    event is dropped (returns ``b""``) and logged at ERROR level.  The caller
+    MUST skip empty return values.  Fail-closed — unknown types never reach
+    the wire.
     """
     # event_type: the Literal discriminator field value, e.g. "lot.new"
     event_type: str = event.event  # type: ignore[attr-defined]
+
+    if event_type not in _KNOWN_SSE_EVENTS:
+        logger.error(
+            "sse.schema_drift",
+            extra={"event_type": event_type, "event_class": type(event).__name__},
+        )
+        return b""  # drop signal — caller skips empty bytes
+
     json_data: str = event.model_dump_json()  # type: ignore[union-attr]
 
     # Split on newlines for RFC compliance.

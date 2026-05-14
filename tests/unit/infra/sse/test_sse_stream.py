@@ -342,8 +342,9 @@ def test_encode_sse_event_lot_new_format():
 def test_encode_sse_event_multiline_data():
     """If JSON contains newlines, each line must be prefixed with 'data:'."""
     # Construct a fake event object (duck-typed) for the helper.
+    # Use a known discriminator so schema-drift guard does not drop it.
     class FakeEvent:
-        event = "test.event"
+        event = "lot.new"
 
         def model_dump_json(self) -> str:
             return '{"a": 1}\n{"b": 2}'

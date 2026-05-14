@@ -228,6 +228,19 @@ class LotQueryService:
     # Public API
     # ------------------------------------------------------------------
 
+    def get_by_id(self, lot_id: int) -> LotUserDTO | None:
+        """Return a single lot by ID merged with user state, or None if not found.
+
+        Delegates to lot_repo.get() (Protocol method).  Presentation hints are
+        computed the same way as in search() so the shape is consistent.
+        """
+        lot = self._lot_repo.get(lot_id)
+        if lot is None:
+            return None
+        user_states = self._user_state_repo.get_many([lot_id])
+        now_ts = self._clock.now().timestamp()
+        return _lot_to_user_dto(lot, user_states.get(lot_id), now_ts=now_ts)
+
     def search(
         self,
         filters: LotFilters,

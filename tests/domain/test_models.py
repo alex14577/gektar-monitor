@@ -165,6 +165,7 @@ def test_sse_cycle_error_no_message_field():
     """`message` is free-form text → goes to app.jsonl, NOT to SSE (PII risk)."""
     assert "message" not in SseCycleError.model_fields
     assert set(SseCycleError.model_fields.keys()) == {
+        "event",
         "timestamp",
         "cycle_id",
         "error_category",
@@ -178,6 +179,7 @@ def test_sse_smtp_failed_canon_fields():
     """recipient_hash / message_id live in `notifications` table, NOT in SSE."""
     fields = SseSmtpFailed.model_fields
     assert set(fields.keys()) == {
+        "event",
         "timestamp",
         "channel_id",
         "attempt_no",

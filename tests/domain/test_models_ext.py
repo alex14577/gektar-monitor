@@ -390,7 +390,7 @@ def test_session_status_values():
 def test_sse_session_expired_priority_critical():
     assert SseSessionExpired.priority == "critical"
     now = datetime(2026, 5, 13, tzinfo=UTC)
-    evt = SseSessionExpired(timestamp=now, event="expired")
+    evt = SseSessionExpired(timestamp=now, event="session.expired")
     with pytest.raises(ValidationError):
         evt.event = "other"  # type: ignore[misc]
 
@@ -405,10 +405,10 @@ def test_sse_session_expired_extra_forbid_blocks_pii():
     """`message`, `stacktrace`, `redirect_url` etc. — must be rejected."""
     now = datetime(2026, 5, 13, tzinfo=UTC)
     with pytest.raises(ValidationError):
-        SseSessionExpired(timestamp=now, event="expired", message="leak")  # type: ignore[call-arg]
+        SseSessionExpired(timestamp=now, event="session.expired", message="leak")  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         # `redirect_url` removed from whitelist + extra=forbid blocks at type level
-        SseSessionExpired(timestamp=now, event="expired", redirect_url="/login?t=x")  # type: ignore[call-arg]
+        SseSessionExpired(timestamp=now, event="session.expired", redirect_url="/login?t=x")  # type: ignore[call-arg]
 
 
 def test_sse_session_expired_has_timestamp_field():
@@ -416,9 +416,9 @@ def test_sse_session_expired_has_timestamp_field():
     SseSmtpFailed), so EventBus persist + whitelist can pin event ordering."""
     assert set(SseSessionExpired.model_fields) == {"timestamp", "event"}
     now = datetime(2026, 5, 13, tzinfo=UTC)
-    evt = SseSessionExpired(timestamp=now, event="expired")
+    evt = SseSessionExpired(timestamp=now, event="session.expired")
     assert evt.timestamp == now
-    assert evt.event == "expired"
+    assert evt.event == "session.expired"
 
 
 def test_sse_lot_new_priority_normal_and_carries_public_dto(make_lot):

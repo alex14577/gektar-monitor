@@ -19,6 +19,8 @@ from fastapi import Depends, Request
 
 if TYPE_CHECKING:
     from fis_monitor.container import Container
+    from fis_monitor.domain.interfaces import NotificationsRepository
+    from fis_monitor.infra.sse.sse_stream import SseStreamer
     from fis_monitor.services.diagnostics import DiagnosticsService
     from fis_monitor.services.enrichment import EnrichmentService
     from fis_monitor.services.full_scan import FullScanService
@@ -94,3 +96,30 @@ def get_diagnostics(
 
 def get_lot_query(c: Container = Depends(get_container)) -> LotQueryService:
     return c.services.lot_query
+
+
+def get_notifications_repo(
+    c: Container = Depends(get_container),
+) -> NotificationsRepository:
+    return c.infra.notif_repo
+
+
+def get_sse_streamer(request: Request) -> SseStreamer:
+    """Return SseStreamer from the composition root.
+
+    Stored at ``app.state.container.infra.sse_streamer`` by ``build_container``.
+    Route tests override this via ``app.dependency_overrides``.
+    """
+    return request.app.state.container.infra.sse_streamer
+
+
+def get_csrf_origin_whitelist(request: Request) -> frozenset[str]:
+    """Return the loopback Origin whitelist stored in app.state.
+
+    Set in the lifespan hook alongside the CSRF middleware construction:
+    ``app.state.csrf_origin_whitelist = origin_whitelist``.
+
+    The whitelist values are already normalised to lowercase by
+    ``loopback_csrf_config`` → no case-folding needed here.
+    """
+    return request.app.state.csrf_origin_whitelist

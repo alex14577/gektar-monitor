@@ -161,10 +161,10 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 8 — Web routes fan-out
 
-- [ ] `oxy.3` — Routes lots + notifications + diagnostics · haiku
-- [ ] `oxy.4` — Routes auth · haiku · ждёт `bye.6`
+- [x] `oxy.3` — Routes lots + notifications + diagnostics · sonnet (повышено с haiku)
+- [x] `oxy.4` — Routes auth + **LoginService** (scope-extend) · sonnet · ждёт `bye.6`
 - [ ] `oxy.5` — Routes settings + onboarding · haiku · ждёт `a4t.5`, `a4t.6`
-- [ ] `oxy.6` — SSE endpoints · haiku · ждёт `tic.3`
+- [x] `oxy.6` — SSE endpoints + production drift-defence (M1 fix) · sonnet · ждёт `tic.3`
 - [ ] `oxy.7` — Templates/static · haiku
 
 ### Wave 9 — Onboarding-gate + shutdown
@@ -382,6 +382,40 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - **Pre-existing ruff errors** в tests/domain/conftest.py (3 RUF001 ambiguous Cyrillic К/K) — не wave-7 surface, оставлены как есть.
 
 **Следующая сессия:** Wave 8 — Web routes fan-out. 5 тасок (oxy.3/4/5/6/7), все haiku кроме oxy.4 (ждёт `bye.6`). Высокая параллельность — разные route-модули, минимальные пересечения через `web/router.py`. После Wave 8 — Wave 9 (oxy.2 onboarding-gate + 8ov.3 three-phase shutdown HIGH risk), потом Wave 10 (vgm.5 E2E smoke). **3 волны до MVP**.
+
+---
+
+### Session (2026-05-14, part 2) — Wave 8 partial (3/5 closed)
+
+**Цель:** Wave 8 web routes fan-out (5 тасок). Завершили 3 из 5: `oxy.3`, `oxy.4`, `oxy.6`.
+
+**Сделано:**
+
+- `oxy.3` (lots/notif/diag routes) — writer iter#1 (sonnet, 6 мин): 5 файлов, 20 тестов. Review iter#1: NEEDS WORK [1B+2M]: ruff B006 mutable default `regions=[]`, temp-file leak при exception до `FileResponse`, отсутствует тест malformed-cursor → 422. Writer iter#2: fix B1 (`None` + `tuple(regions or [])`), M1 (try/except + `_cleanup` re-raise), M2 (`FakeLotQueryService(raise_on_invalid_cursor=True)` + новый test). Review iter#2: APPROVE.
+- `oxy.4` (auth routes + **LoginService** scope-extend + RateLimiter) — writer iter#1 (sonnet, 7 мин): создан реальный `LoginService` (вместо `_NotImplementedLoginService` stub), thread-safe single-flight через `threading.Lock` + ThreadPoolExecutor, sliding-window `RateLimiter`. 30 тестов. Review iter#1: NEEDS WORK [0B+3M]: bind_executor не вызывается в композиции (lifespan gap → 500), double exception swallow dead code, X-Forwarded-For не учитывается. Writer iter#2: создан follow-up bd-issue **j19** (lifespan phase 1.5 bind_executor), 503-fallback в /auth/start, `_run_login` упрощён до one-liner (single error-mapping point в `_on_done`), docstring про loopback-only X-FF, удалён orphan `_NotImplementedLoginService`. Review iter#2: APPROVE.
+- `oxy.6` (SSE endpoint /events) — writer iter#1 (sonnet, 6 мин): Origin check 421, `_DriftTrackingStreamer` fake для drift тестов. 16 тестов. Review iter#1: NEEDS WORK [1B+2M]: **`SseCycleError`/`SseSmtpFailed` без поля `event`** — production AttributeError при cycle/SMTP fail, **production drift-defence отсутствует** (живёт только в test fake — acceptance #3-4 не выполнены!), `SseSessionExpired.event="expired"` vs schema `"session.expired"` mismatch. Writer iter#2: добавлены `event` discriminators в 3 модели, реализован `_KNOWN_SSE_EVENTS` через `TypeAliasType.__value__` + `get_args` (SSOT — деривируется из union на import), `encode_sse_event` fail-closed drop + `sse.schema_drift` log, новые тесты с **real** `SseStreamer`. Адаптированы 5 test-файлов под discriminator-changes. Review iter#2: APPROVE. **827 passed, 0 failures.**
+
+**Verify оркестратора (playbook §7):**
+- `python -m pytest tests/ -q` → 827 passed, 3 skipped, 0 failed.
+- `ruff check` (без pre-existing UP037/RUF001) → чисто на всех wave-8 файлах. Оркестратор пофиксил 1 SIM105 в test_login_service.py (writer оставил try/except/pass).
+
+**Bd-issues:** закрыты `oxy.3`, `oxy.4`, `oxy.6`. Создан `j19` (P1, follow-up для 8ov.3).
+
+**Vault обновления (orchestrator):**
+- `docs/glossary.md` — +8 записей в новых секциях «Сервисы Wave 8» и «Веб-стек Wave 8»: LoginService, LoginJobHandle, LoginStatus, LoginBusyError, RateLimiter, Route routers, `_KNOWN_SSE_EVENTS`, SSE event discriminator invariant.
+- ADR не требуются (R3-M5 / ADR-019 / ADR-014 уже покрывают; oxy.6 закрыл TODO в R3-M5 — теперь production drift-defence реальная, не concept).
+
+**Workflow-замечания:**
+- **Reviewer iter#1 поймал 2 production-critical бага в oxy.6**, которые writer iter#1 + 16 зелёных тестов пропустили: SSE-stream crash на cycle.error + discriminator mismatch session.expired. Тест-fake дублировал прод-логику вместо тестирования. Lesson: writer-промпт для security-критичных features должен **запретить** дублирование production-логики в test-helpers — testing the test, not the prod.
+- **3 параллельных writer-агента + 3 параллельных reviewer-агента** + 3 fix-агента сработали без cross-file конфликтов. File-disjoint grep-check ДО старта окупился.
+- **SIM105 leak orchestrator-fix** — оркестратор поправил сам вместо запуска iter#3 writer'а: 30-сек правка vs 5-мин writer + tokens. Корректный compromise по hard cap.
+- **Pre-existing ruff issues** (RUF001 в conftest.py, UP037 в errors.py из Wave 4) — оставлены как есть, не wave-8 surface.
+
+**Незакрытые в Wave 8:**
+- `oxy.5` (settings + onboarding routes) — НЕ запускали. Зависит от `a4t.5` ✓ + `a4t.6` ✓.
+- `oxy.7` (templates/static) — НЕ запускали. Зависит от `oxy.1` ✓.
+
+**Следующая сессия:** Wave 8 part 3 — добить `oxy.5` + `oxy.7` (параллельно, файлы disjoint). После — Wave 9 (`oxy.2` onboarding-gate + `8ov.3` HIGH-risk three-phase shutdown lifespan + `j19` lifespan bind_executor). Wave 10 = `vgm.5` E2E smoke (по решению с review-цикла — НЕ заменяем на fake-site). Wave 11 (новая) = fake-site + `TargetConfig`/`FisUrlBuilder` + smtp_host cleanup (post-MVP tooling, разбита на 11a config-seam + 11b admin-UI; ADR-023; security mitigations per Security review).
 
 ---
 

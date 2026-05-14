@@ -23,7 +23,7 @@ Stubbed fields and their tracking tasks:
   - user_state_repo  → bye.7 (SqliteUserStateRepository)
   - autostart        → a4t.9 (platform-specific AutostartManager)
   - session_probe    → a4t.8 (HttpSessionProbe)
-  - login            → a4t.7 (LoginService)
+  - login            → real LoginService (executor bound in lifespan per j19)
   - session_monitor  → a4t.7 (SessionMonitor)
   - diagnostics      → a4t.8 (DiagnosticsService)
   - lot_query        → a4t.7 (LotQueryService)
@@ -65,6 +65,7 @@ from fis_monitor.infra.sse.browser_sse_notifier import BrowserSseNotifier
 from fis_monitor.infra.sse.bus import ThreadEventBus
 from fis_monitor.services.enrichment import EnrichmentService
 from fis_monitor.services.full_scan import FullScanService
+from fis_monitor.services.login import LoginService
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
 from fis_monitor.services.onboarding import OnboardingService
@@ -160,25 +161,6 @@ class _NotImplementedSessionProbe:
     def check(self) -> object:
         raise NotImplementedError(
             "_NotImplementedSessionProbe.check() deferred to a4t.8"
-        )
-
-
-class _NotImplementedLoginService:
-    """Stub for LoginService until a4t.7 lands."""
-
-    def start_login(self) -> object:
-        raise NotImplementedError(
-            "_NotImplementedLoginService.start_login() deferred to a4t.7"
-        )
-
-    def cancel_active_job(self) -> None:
-        raise NotImplementedError(
-            "_NotImplementedLoginService.cancel_active_job() deferred to a4t.7"
-        )
-
-    def bind_executor(self, executor: object) -> None:
-        raise NotImplementedError(
-            "_NotImplementedLoginService.bind_executor() deferred to a4t.7"
         )
 
 
@@ -369,7 +351,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         config_source=config_source,
     )
 
-    login = _NotImplementedLoginService()
+    login = LoginService(login_session=login_session, clock=clock)
 
     settings_service = SettingsService(
         smtp_creds_repo=smtp_creds_repo,

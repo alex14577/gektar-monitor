@@ -248,6 +248,7 @@ class SseCycleError(BaseModel):
 
     priority: ClassVar[Literal["critical"]] = "critical"
 
+    event: Literal["cycle.error"] = "cycle.error"
     timestamp: datetime
     cycle_id: StrictInt
     error_category: ErrorCategory
@@ -269,6 +270,7 @@ class SseSmtpFailed(BaseModel):
 
     priority: ClassVar[Literal["critical"]] = "critical"
 
+    event: Literal["smtp.failed"] = "smtp.failed"
     timestamp: datetime
     channel_id: str
     attempt_no: StrictInt
@@ -790,7 +792,7 @@ class SseSessionExpired(BaseModel):
     priority: ClassVar[Literal["critical"]] = "critical"
 
     timestamp: datetime
-    event: Literal["expired"] = "expired"
+    event: Literal["session.expired"] = "session.expired"
 
 
 class SseLotNew(BaseModel):

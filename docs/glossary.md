@@ -205,6 +205,26 @@
 
 - **loopback_csrf_config** (`web/middleware.py`) — SSOT-фабрика `(port: int) -> (host_allowlist: frozenset[str], origin_whitelist: frozenset[str])`. Возвращает frozensets для `127.0.0.1:<port>` + `localhost:<port>`. Потребляется всеми точками сборки middleware — устраняет дублирование host-литералов. Реализовано в oxy.1.
 
+## Сервисы (Wave 8)
+
+- **LoginService** (`services/login.py`) — Layer 4 orchestrator над `LoginSession` Protocol (bye.6). Инварианты: (1) **single-flight** через `threading.Lock` (non-blocking acquire в `start_login` → `LoginBusyError` на повторе); (2) **submit-to-executor** — blocking `open_headed_login()` уходит в инжектированный `ThreadPoolExecutor` (через `bind_executor()`, вызывается в lifespan phase 1.5 per [[decisions/ADR-014-two-phase-shutdown|ADR-014]] — см. follow-up bd `j19`); (3) **single error-mapping point**: `_run_login` пробрасывает exception в Future; `_on_done` callback ловит и маппит на `LoginOutcome(error="playwright_other")` + release lock + clear `_active_future`. `cancel_active_job()` идемпотентна — делегирует на `login_session.cancel()`. `status() -> LoginStatus` thread-safe snapshot. Реализовано в oxy.4.
+
+- **LoginJobHandle** (`services/login.py`) — `@dataclass(frozen=True)`-обёртка над `Future[LoginOutcome]`. Возвращается `start_login()` — позволяет caller'у inspect'ить результат без блокировки request-thread. Web route /auth/status не дожидается future (читает `status()` snapshot).
+
+- **LoginStatus** (`services/login.py`) — `@dataclass(frozen=True)` snapshot: `running: bool`, `last_outcome: LoginOutcome | None`. Read-only — собирается через `LoginService.status()` под `threading.Lock`. Сериализуется в `/auth/status` JSON.
+
+- **LoginBusyError** (`domain/errors.py`) — `DomainError` подкласс. Поднимается `LoginService.start_login()` когда login job уже running. Web route /auth/start маппит в **409 Conflict** — caller не должен retry, должен дождаться завершения текущего job через /auth/status.
+
+- **RateLimiter** (`web/rate_limit.py`) — in-memory sliding-window token bucket, ключ — client IP. Метод `acquire(key, *, now: float) -> bool`. Алгоритм: per-key хранится `list[float]` monotonic-timestamps; на `acquire` evict'ит entries старше `now - window_seconds`, затем `len >= max_requests` → False (denied НЕ записывается, защита от sliding-window-push by attacker), иначе append + True. Thread-safe через `threading.Lock`. Применяется на POST /auth/start (1 req / 60s per IP). Реализовано в oxy.4. **Caveat:** `request.client.host` за reverse-proxy схлопывает всех клиентов в один bucket — loopback-only deployment per [[decisions/ADR-011-dns-rebinding-host-allowlist|ADR-011]]; X-Forwarded-For требует trust-gating.
+
+## Веб-стек (Wave 8)
+
+- **Route routers** (`web/routes/*.py`) — APIRouter инстансы per use case: `lots` (oxy.3), `notifications` (oxy.3), `diagnostics` (oxy.3), `auth` (oxy.4), `events` (oxy.6). Pattern: каждый router зависит **только** от Protocol/use-case через `Depends()` из `web/deps.py` — никогда не импортирует `Container` напрямую. Тестируется через `app.dependency_overrides[get_X] = lambda: fake`. POST `/diagnostics/build` — atomic temp-file через `tempfile.mkstemp` + try/except cleanup до `FileResponse` + `BackgroundTask` cleanup после streaming. Fail-closed на schema-drift: 503 + generic `ui_message` (НЕ leak'ает stack/paths/column names).
+
+- **\_KNOWN\_SSE\_EVENTS** (`infra/sse/sse_stream.py`) — `frozenset[str]` валидных SSE event-discriminator'ов, **деривируется во время import** из `SseEvent` union через `TypeAliasType.__value__` + `typing.get_args` + `get_type_hints`. SSOT: добавление нового event-type в union автоматически расширяет константу — drift невозможен. Содержит `{"lot.new", "lot.status", "cycle.error", "smtp.failed", "session.expired"}`. Используется `encode_sse_event` как fail-closed guard: unknown discriminator → return `b""` + `logger.error("sse.schema_drift", extra={...})`; `SseStreamer.stream()` skip'ает empty bytes. Реализовано в oxy.6 (закрыл R3-M5 production drift defence — раньше жил только в test-fake).
+
+- **SSE event discriminator invariant** — каждый член `SseEvent` union (`SseLotNew`, `SseLotStatus`, `SseCycleError`, `SseSmtpFailed`, `SseSessionExpired`) имеет `event: Literal["..."] = "..."` поле, **совпадающее** с ключами `SsePayloadSchema._BY_EVENT`. Нарушение → drift-guard дропнет event (`session.expired` ↔ `"expired"` mismatch был найден в oxy.6 review и пофикшен). Browser-side `EventSource.addEventListener(<event-type>, ...)` ловит по этому полю.
+
 ## См. также
 
 - [[decisions-log]]
