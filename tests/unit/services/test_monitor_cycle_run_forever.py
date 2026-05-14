@@ -25,6 +25,7 @@ from fis_monitor.domain.models import (
     Settings,
     TrackedField,
 )
+from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 
 # ---------------------------------------------------------------------------
@@ -221,6 +222,7 @@ def _make_service(
         config_source=config_source,
         clock=FakeClock(),
         cycle_progress_signal=threading.Event(),
+        filter_matcher=AllFiltersMatcher([]),  # pass-through for run_forever tests
     )
     if run_cycle_raises is not None:
         svc.configure_raises(run_cycle_raises)

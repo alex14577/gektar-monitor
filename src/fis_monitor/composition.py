@@ -65,6 +65,7 @@ from fis_monitor.infra.sqlite.repositories.smtp_credentials import (
 from fis_monitor.infra.sse.browser_sse_notifier import BrowserSseNotifier
 from fis_monitor.infra.sse.bus import ThreadEventBus
 from fis_monitor.services.enrichment import EnrichmentService
+from fis_monitor.services.filter_matcher import AllFiltersMatcher, RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
 from fis_monitor.services.login import LoginService
 from fis_monitor.services.monitor_cycle import MonitorCycleService
@@ -292,6 +293,8 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         parser=detail_parser,
     )
 
+    filter_matcher = AllFiltersMatcher([RfSubjectFilterMatcher()])
+
     monitor_cycle = MonitorCycleService(
         http=http_client,
         list_parser=list_parser,
@@ -303,6 +306,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         config_source=config_source,
         clock=clock,
         cycle_progress_signal=cycle_progress_signal,
+        filter_matcher=filter_matcher,
     )
 
     full_scan = FullScanService(

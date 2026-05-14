@@ -26,6 +26,7 @@ from fis_monitor.domain.models import (
     SseLotNew,
     TrackedField,
 )
+from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 
 # ---------------------------------------------------------------------------
@@ -314,6 +315,7 @@ def _make_service(
         config_source=config_source,
         clock=clock,
         cycle_progress_signal=signal,
+        filter_matcher=AllFiltersMatcher([]),  # pass-through: no matchers = all lots pass
     )
     return (
         svc, http, list_parser, enrichment, lot_repo, cycles_repo, notifier_dispatcher,

@@ -190,9 +190,9 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - [x] `plg.2` (P1) — `StackPIIFilter` (RecipientFilter не реализован, decision 2026-05-14) · sonnet writer + sonnet reviewer APPROVE+2majors → fix-iter 1 APPROVE
 
 **10d — параллель (после vgj + plg.2):**
-- [ ] `03y` (P1) — `FilterMatcher` по `rf_subjects` в `MonitorCycleService`
-- [ ] `plg.3` (P2) — audit/app/requests channels + rotation
-- [ ] `plg.4` (P2) — SecretStr repr тест + import-linter security contract
+- [x] `03y` (P1) — `FilterMatcher` Protocol + `RfSubjectFilterMatcher` + `AllFiltersMatcher` · sonnet writer + sonnet reviewer APPROVE+1major → fix-iter 1 APPROVE
+- [x] `plg.3` (P2) — audit/app/requests channels + TimedRotatingFileHandler 30d · sonnet writer + sonnet reviewer NEEDS-WORK (1 blocker canon §10.9 + 4 majors) → fix-iter 1 APPROVE
+- [x] `plg.4` (P2) — SecretStr repr/str/model_dump_json tests + import-linter `domain_no_logging` contract · sonnet writer + sonnet reviewer APPROVE 0/0
 
 **10e:**
 - [ ] `vgm.5` — E2E smoke (lifespan up → cycle → SSE → shutdown). Теперь реально возможно — есть scheduler + ConfigSource.
@@ -578,6 +578,28 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 **Итог Wave 10c:** 3/3 closed. Разблокировано: `03y` (filter-matcher для `rf_subjects` в MonitorCycleService), `plg.3` (audit/app/requests channels), `plg.4` (SecretStr repr + import-linter security contract).
 
 **Следующая сессия:** Wave 10d — `03y` + `plg.3` + `plg.4` параллельно, затем Wave 10e — `vgm.5` (E2E smoke) + `4fw` (config_subscription.unsubscribe в lifespan phase 2). **MVP достижим к концу 10e.**
+
+### Session (2026-05-14, part 9) — Wave 10d (`03y` + `plg.3` + `plg.4`)
+
+**Цель:** filter-matcher (закрыть notification-spam при was_new для всех regions), 3-канальное файловое логирование (audit/app/requests + rotation 30d), SecretStr masking тесты + import-linter `domain_no_logging` contract. 3 параллельных writer-агента (sonnet) — pre-flight grep: нулевое пересечение файлов.
+
+**Сделано:**
+- `03y` — `FilterMatcher` Protocol в `domain/interfaces.py`; `RfSubjectFilterMatcher` (89-entry hardcoded `_RF_SUBJECT_NAMES: dict[int, str]` mapping + inverted `_NAME_TO_ID: ClassVar[dict[str, int]]` O(1) lookup) + `AllFiltersMatcher` (composition, AND-semantics, extension point) в `services/filter_matcher.py`. `MonitorCycleService.__init__` принимает `filter_matcher: FilterMatcher` kw-only; Step 5 фильтрует ДО emit для **обеих** ветвей (was_new + status-change). Pass-through default: пустой `filters.rf_subjects` → True; unknown region name → True (fail-open, документировано). Composition root: `AllFiltersMatcher([RfSubjectFilterMatcher()])`. **Reviewer 1 major**: «`config_source.current()` зовётся дважды per cycle (Step 5 + run_forever) — комментарий вводит в заблуждение». **Fix-iter 1**: переписан комментарий с явной фиксацией seam'а (filters берутся ASAP, scheduling — на след. итерации; `ConfigSource.current()` O(1) in-memory verified против `WatchdogConfigSource.current()`). + переименование `public_dto_for_filter` → `lot_dto_for_filter`.
+- `plg.3` — 3 отдельных logger'а: `fis_monitor.audit` (no StackPIIFilter, propagate=False, fail-closed sentinel `_AUDIT_DISABLED_ATTR` после WARNING), `fis_monitor` (existing, +file handler app.jsonl), `fis_monitor.requests` (propagate=False, JsonFormatter, whitelist-only через `log_request()` helper). `TimedRotatingFileHandler(when="midnight", backupCount=30, utc=True)` в `<data_dir>/logs/`. `setup_logging` новый kw-only `data_dir: Path | None = None`. Bootstrap `main()` → `data_dir=None` (stderr only до парсинга args); lifespan reconfigure → real `data_dir`. **Reviewer 1 BLOCKER + 4 majors**: (B1) login-route mask `?<redacted>` не реализован (canon §10.9 violation); (M2) fragment handling inconsistent (full URL vs bare path); (M3) нет транзишн-теста `data_dir=X → None`; (M4) `log_request` whitelist структурный, недокументирован риск `**kwargs`; (M5) conftest sentinel через bare string. **Fix-iter 1**: `_LOGIN_ROUTE_PREFIXES = frozenset({"/auth", "/login"})` + `_apply_query_policy()` helper (no-query → as-is; login-prefix → `path?<redacted>`; else → drop query); фрагменты строятся через chained `.partition("?")[0].partition("#")[0]`; transition test добавлен; docstring о no-`**kwargs`-by-design; conftest импортирует `_AUDIT_DISABLED_ATTR`. +11 новых тестов (всего 70 в `tests/unit/utils/`).
+- `plg.4` — pre-flight grep `^import logging` в `src/fis_monitor/domain/` пуст (domain уже clean). Тесты `SmtpCredentials.smtp_password` masking: `repr()`, `str()`, `model_dump()` (возвращает SecretStr object — liveness check), `model_dump_json()` (`"**********"` substring assertion). `.importlinter` третий контракт `[importlinter:contract:domain_no_logging]` (forbidden_modules = logging). Integration test `tests/integration/test_import_linter.py` (`@pytest.mark.slow`): `lint-imports --config .importlinter` exit 0 + ConfigParser-sanity для контракт-секции. **Reviewer APPROVE 0/0** (2 minors — оставлены как commit-note).
+
+**Vault:**
+- Glossary: 11 новых записей (FilterMatcher / RfSubjectFilterMatcher / AllFiltersMatcher; audit/app/requests loggers; `log_request` helper; fail-closed audit behaviour; file channel rotation policy; SecretStr masking contract; `domain_no_logging` contract).
+- ADR/architecture/data-model: no-op (изменения укладываются в существующие контракты + canon §10.9; новый Protocol — конструктивное расширение, не архитектурное решение).
+- Decisions-log: import-linter entry обновлён (2 → 3 contracts).
+
+**Suite:** 1032 passed / 3 skipped (от 972 в Wave 10c → +60 новых тестов в волне). Ruff: clean на 10d-touched files. Lint-imports: 3 contracts KEPT, 0 broken.
+
+**Параллельность:** 3 writer-агента + 3 reviewer-агента + 2 fix-агента (03y + plg.3) — все параллельно. Hard cap canon §7 не достигнут (только iter 1). Wave 10d второй раунд большой параллельной волны.
+
+**Итог Wave 10d:** 3/3 closed. Разблокировано: `vgm.5` (E2E smoke) + `4fw` (config_subscription.unsubscribe).
+
+**Следующая сессия:** Wave 10e — `vgm.5` + `4fw`. **Финальная wave до MVP.** После — Wave 11 (post-MVP tooling: fake-site, TargetConfig/FisUrlBuilder, smtp_host cleanup) и follow-up batch (vgj/dmu/4fw мелочи).
 
 ### Шаблон для будущих сессий
 

@@ -182,6 +182,7 @@ async def _lifespan_impl(
             level=logging.INFO,
             json_format=_json_fmt,
             filters=[StackPIIFilter()],
+            data_dir=data_dir,
         )
 
         container = container_factory(settings, data_dir)

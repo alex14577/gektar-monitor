@@ -23,6 +23,7 @@ import pytest
 
 from fis_monitor.infra.sqlite.connection import ConnectionProvider
 from fis_monitor.infra.sqlite.init_db import init_db
+from fis_monitor.utils.log import _AUDIT_DISABLED_ATTR
 
 # Canonical schema location — repo-rooted, robust against test-tree moves.
 SCHEMA_SQL_PATH = (
@@ -34,25 +35,33 @@ SCHEMA_SQL_PATH = (
 # ---------------------------------------------------------------------------
 
 _FIS_MONITOR_LOGGER = "fis_monitor"
+# Child loggers that also get handlers installed by setup_logging (plg.3).
+_CHILD_LOGGERS = ("fis_monitor.audit", "fis_monitor.requests")
 
 
 @pytest.fixture(autouse=True)
 def reset_fis_monitor_logger() -> Iterator[None]:
-    """Reset the ``fis_monitor`` logger to a clean state after every test.
+    """Reset the ``fis_monitor`` logger family to a clean state after every test.
 
     Removes all handlers and re-enables propagation so that log output from
     one test cannot affect another. This is especially important for tests in
-    ``tests/unit/utils/test_log.py`` that install handlers via ``setup_logging``.
+    ``tests/unit/utils/test_log.py`` that install handlers via ``setup_logging``,
+    and for plg.3 file-channel tests (audit / requests child loggers).
     """
     import contextlib
 
     yield
-    root_logger = logging.getLogger(_FIS_MONITOR_LOGGER)
-    for handler in list(root_logger.handlers):
-        root_logger.removeHandler(handler)
-        with contextlib.suppress(Exception):
-            handler.close()
-    root_logger.propagate = True
+    for logger_name in (_FIS_MONITOR_LOGGER, *_CHILD_LOGGERS):
+        lg = logging.getLogger(logger_name)
+        for handler in list(lg.handlers):
+            lg.removeHandler(handler)
+            with contextlib.suppress(Exception):
+                handler.close()
+        lg.propagate = True
+        # Clear fail-closed sentinel if present (plg.3 audit channel).
+        # Uses the imported constant so a rename doesn't silently break this.
+        if hasattr(lg, _AUDIT_DISABLED_ATTR):
+            setattr(lg, _AUDIT_DISABLED_ATTR, False)
 
 
 @pytest.fixture(scope="session")

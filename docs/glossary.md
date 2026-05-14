@@ -111,6 +111,12 @@
 
 - **tmp_db (pytest fixture)** — function-scope в `tests/conftest.py`. Возвращает `ConnectionProvider` подключённый к свежему `tmp_path/state.db` с применённым `schema.sql` через `init_db()`. WAL-режим выставляется per-connection (`ConnectionProvider._configure`, ADR-007). Cleanup: `provider.close_all()` в `finally`. Companions: `tmp_db_path` (Path) и `schema_sql` (session-scoped str). Реализовано в vgm.1.
 
+- **FilterMatcher** — `Protocol` (Layer 2.5, `domain/interfaces.py`) для ворот уведомлений. Единственный метод: `matches(lot: LotPublicDTO, filters: FiltersConfig) -> bool`. `True` → публиковать в EventBus + dispatch в NotifierDispatcher; `False` → пропустить молча. Вызывается из `MonitorCycleService` для каждого `was_new=True` лота и каждого лота со статус-изменением перед emit. Реализации: `RfSubjectFilterMatcher`, `AllFiltersMatcher`. Fail-open на неизвестных данных. Статeless, thread-safe. См. [[architecture/03-protocols]].
+
+- **RfSubjectFilterMatcher** — конкретная реализация `FilterMatcher` в `services/filter_matcher.py`. Фильтрует лоты по субъекту РФ. Алгоритм: пустой `rf_subjects` → True (pass-through, сохраняет поведение по умолчанию); иначе `lot.region` (str-имя) разрешается в integer-код через хардкодированный mapping `_RF_SUBJECT_NAMES` (89 субъектов РФ, источник ОКТМО) и сравнивается с `filters.rf_subjects`. Неизвестное имя региона → True (fail-open: новые регионы не теряются). `_NAME_TO_ID: ClassVar[dict[str, int]]` — инвертированный mapping, O(1) lookup.
+
+- **AllFiltersMatcher** — композитный `FilterMatcher` в `services/filter_matcher.py`. Логическое AND над последовательностью матчеров (`Sequence[FilterMatcher]`). Пустой список → True. Extension point: регистрировать новые фильтры (площадь, категория земли, дата создания) без изменения `MonitorCycleService`. Composition over inheritance pattern.
+
 ## Composition root
 
 - **Infra** — `@dataclass(frozen=True, repr=False)` в `src/fis_monitor/container.py`. Агрегирует системные швы Layer 0-2: clock, event_bus, conn_provider (concrete `ThreadLocalConnectionProvider` alias, **не** Protocol — canon §4.1), locker, config_source, cycle_progress_signal (`threading.Event`, soft-yield координатор N-M8), 6 repos, 7 адаптеров (http_client, list_parser, detail_parser, login_session, session_probe, autostart, smtp_host_policy). `frozen=True` → immutability после build_container; `repr=False` → защита от утечки SecretStr в crash-логи. Реализовано в 8ov.1. См. [[architecture/04-composition-root]], [[decisions/ADR-004-composition-root-container-infra-services|ADR-004]].
@@ -147,7 +153,7 @@
 
 - **NotifierConfig** — базовый Pydantic `BaseModel` для конфиг-схем плагин-каналов уведомлений. Конкретные классы: `EmailNotifierConfig`, `BrowserNotifierConfig`, `HeartbeatNotifierConfig`. Используется composition root для инициализации explicit registry (ADR-002). См. [[notifications]], [[decisions/ADR-002-plugin-discovery-explicit-registry|ADR-002]].
 
-- **import-linter (контракты архитектуры)** — инструмент статического анализа импортов, закреплённый в `dev`-зависимостях (`pyproject.toml`). Конфигурация в `.importlinter` в корне репо. Два контракта: `layers` — слоистая архитектура (composition/app → web → services → infra → domain, нарушение идёт снизу вверх), `domain_purity` — domain не импортирует инфра-библиотеки (sqlite3, requests, fastapi, playwright, smtplib). Запуск: `lint-imports`. Тест: `tests/test_import_linter_contracts.py`. Слои `composition` и `app` объявлены опциональными `(...)` до реализации в тасках `8ov.1`/`8ov.2`. См. [[decisions/ADR-006-import-linter-ci]].
+- **import-linter (контракты архитектуры)** — инструмент статического анализа импортов, закреплённый в `dev`-зависимостях (`pyproject.toml`). Конфигурация в `.importlinter` в корне репо. Три контракта: `layers` — слоистая архитектура (composition/app → web → services → infra → domain, нарушение идёт снизу вверх), `domain_purity` — domain не импортирует инфра-библиотеки (sqlite3, requests, fastapi, playwright, smtplib), `domain_no_logging` — domain не импортирует stdlib-модуль `logging` (observability — application/infra-concern, не domain; логирование через DI-колбэки или caller — см. [[decisions/ADR-017-secrets-secretstr-crash-dump-exclusion|ADR-017]], [[architecture/02-layers-dip]]). Запуск: `lint-imports`. Интеграционный тест: `tests/integration/test_import_linter.py` (`@pytest.mark.slow`). Слои `composition` и `app` объявлены опциональными `(...)` до реализации в тасках `8ov.1`/`8ov.2`. См. [[decisions/ADR-006-import-linter-ci]].
 
 ## Сервисы (Wave 3)
 
@@ -253,6 +259,17 @@
 
 - **`get_logger`** (`utils/log.py`) — thin alias над `logging.getLogger(name)`. Возвращает дочерний logger от `fis_monitor` через name-hierarchy. Decouples новые callers от прямого stdlib-импорта, сохраняя zero-migration для existing 18 `logger = logging.getLogger(__name__)` callsites в проекте (auto-inherit JSON-handler через name-hierarchy).
 
+## PII / Secrets (Wave 10d — security guarantees)
+
+- **`SecretStr` masking contract** — `SmtpCredentials.smtp_password` объявлен как `pydantic.SecretStr` (ADR-017). Гарантии, закреплённые тестами в `tests/unit/domain/test_smtp_credentials_secret_masking.py`:
+  1. `repr(creds)` НЕ содержит открытый пароль — Pydantic рендерит `SecretStr('**********')`.
+  2. `str(creds)` — то же.
+  3. `creds.model_dump_json()` НЕ содержит открытый пароль — путь JSON-логгера (`JsonFormatter._json_default → model_dump()`).
+  4. `creds.smtp_password.get_secret_value()` возвращает plaintext — единственный легитимный call-site: `smtp.login()` в `SmtpEmailNotifier`.
+  Контракт caller-responsibility: `get_secret_value()` вызывается ТОЛЬКО в момент SMTP-аутентификации, никогда в логах/исключениях/repr. `Infra` и `Services` dataclasses дополнительно защищены `repr=False`. См. [[decisions/ADR-017-secrets-secretstr-crash-dump-exclusion|ADR-017]], [[data-model/settings]].
+
+- **`domain_no_logging` contract** — import-linter forbidden-contract, гарантирующий что `fis_monitor.domain.*` никогда не импортирует stdlib-модуль `logging`. Rationale: observability — application/infrastructure concern (layered architecture, [[architecture/02-layers-dip]]); domain должен оставаться чистым от инфра-зависимостей (ADR-017). Нарушение: если domain-код захочет логировать — решение через DI (callback / Protocol), но не прямой `import logging`. Контракт определён в `.importlinter` секция `[importlinter:contract:domain_no_logging]`. Тест: `tests/integration/test_import_linter.py::test_lint_imports_passes` (`@pytest.mark.slow`). Запуск вручную: `lint-imports`. Pre-flight grep (CI sanity): `grep -rn "^import logging" src/fis_monitor/domain/` — должен быть пуст. См. [[decisions/ADR-017-secrets-secretstr-crash-dump-exclusion|ADR-017]], [[architecture/02-layers-dip]].
+
 ## Layer 0 (Wave 10b — Clock + ConfigSource)
 
 - **`SystemClock`** (`infra/clock.py`) — production-имплементация `Clock` Protocol. Stateless singleton-friendly, без ctor-аргументов. `now()` → `datetime.now(UTC)` (modern style; **НЕ** deprecated `datetime.utcnow()`), `monotonic()` → `time.monotonic()`. Инжектится во все сервисы, требующие детерминированного времени; тесты подменяют `FakeClock`. Заменил `_NotImplementedClock` stub из Wave 5.
@@ -262,6 +279,20 @@
 - **`RegionsBody`** (`web/routes/settings.py`) — Pydantic request-body для `POST /settings/regions`. Поле `regions: list[int]`, min_length=1, каждый элемент ge=1 le=80. Ограничения зеркалят допустимые коды регионов ФИС. FastAPI автоматически возвращает 422 при нарушении.
 
 - **`RecipientsBody`** (`web/routes/settings.py`) — Pydantic request-body для `POST /settings/recipients`. Поле `recipients: list[EmailStr]`, default `[]` (пустой список допустим — отключает email-уведомления). FastAPI автоматически возвращает 422 при невалидном email.
+
+## Logging channels (Wave 10d — plg.3)
+
+- **audit logger** (`fis_monitor.audit`) — Отдельный Python-logger, пишущий в `<data_dir>/logs/audit.jsonl`. Предназначен для записей config-diff с PII (адреса, учётные данные). **НЕ** имеет `StackPIIFilter` — PII в этом канале допустим. `propagate=False` исключает попадание записей в родительский `fis_monitor`-handler (у которого `StackPIIFilter` есть). Fail-closed: если `logs/` недоступен для записи — один WARNING через `fis_monitor`, затем silent no-op. NOT экспортируется в cloud-sync (R4-M7).
+
+- **app logger** (`fis_monitor`) — Существующий root-logger проекта. При наличии `data_dir` получает дополнительный `TimedRotatingFileHandler` → `<data_dir>/logs/app.jsonl`. **Имеет** `StackPIIFilter` (тот же экземпляр, что и у консольного handler). Все info+ записи из любого `fis_monitor.*` logger (кроме audit/requests у которых `propagate=False`) попадают сюда.
+
+- **requests logger** (`fis_monitor.requests`) — Отдельный Python-logger, пишущий в `<data_dir>/logs/requests.jsonl`. Записи попадают только через `log_request()` helper. `propagate=False` — records НЕ дублируются в `app.jsonl`. Содержит только whitelist-поля согласно `docs/architecture/10-9-http-logs.md`.
+
+- **`log_request` helper** (`utils/log.py`) — Функция `log_request(method, url_path, status, duration_ms, bytes, *, parser_version=None)`. Применяет query-политику canon §10.9 через `_apply_query_policy()`: login-роуты (`/auth*`, `/login*`) — query заменяется на `?<redacted>` (не удаляется, а маскируется); остальные роуты — query удаляется полностью. Пишет ровно whitelist-поля (`method`, `url_path`, `status`, `duration_ms`, `bytes`, `parser_version`). Никогда не пишет: `Cookie`, `Authorization`, `Set-Cookie`, тело запроса/ответа, сырые query-параметры. Нет `**kwargs` намеренно — новое поле требует явного добавления в сигнатуру и whitelist canon. Поля попадают в `ctx` JSON-конверта (стандарт `JsonFormatter`).
+
+- **fail-closed audit behaviour** — Если директория `<data_dir>/logs/` недоступна для создания файлов (PermissionError/OSError при открытии `audit.jsonl` или `app.jsonl`): (1) один WARNING через `fis_monitor` с описанием ошибки; (2) `_AUDIT_DISABLED_ATTR` sentinel выставляется на `fis_monitor.audit` logger; (3) все последующие вызовы `log_audit()` проверяют sentinel и молча возвращаются без записи; (4) исключения не всплывают наружу. Паттерн: fail-closed = безопасный режим (нет записи) без crash-loop.
+
+- **file channel rotation policy** — Все три file-channel handler'а создаются через `logging.handlers.TimedRotatingFileHandler(when="midnight", backupCount=30, utc=True)`. Ротация: ежедневно в 00:00 UTC, хранение 30 суток файлов. Формат имён ротированных файлов: `<name>.jsonl.YYYY-MM-DD`. Encoding: UTF-8. Логи живут в `<data_dir>/logs/` (data_dir = `--data-dir` CLI arg, default `./var`).
 
 ## См. также
 

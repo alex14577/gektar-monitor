@@ -43,6 +43,7 @@ from fis_monitor.domain.interfaces import (
     ConfigSource,
     CyclesRepository,
     EventBus,
+    FilterMatcher,
     HttpClient,
     ListParser,
     LotRepository,
@@ -189,6 +190,7 @@ class MonitorCycleService:
         config_source: ConfigSource,
         clock: Clock,
         cycle_progress_signal: threading.Event,
+        filter_matcher: FilterMatcher,
         list_url_template: str = _LIST_URL_DEFAULT,
         enrichment_workers: int = 4,
     ) -> None:
@@ -202,6 +204,7 @@ class MonitorCycleService:
         self._config_source = config_source
         self._clock = clock
         self.cycle_progress_signal = cycle_progress_signal
+        self._filter_matcher = filter_matcher
         self._list_url_template = list_url_template
         self._enrichment_workers = enrichment_workers
 
@@ -395,6 +398,16 @@ class MonitorCycleService:
             enriched_lots = lots  # fall back to non-enriched lots
 
         # ---------- Step 5: upsert + notify --------------------------------
+        # Step-5 re-reads config_source.current() so the filter snapshot can be
+        # hot-reloaded mid-pass without waiting for the next scheduler iteration.
+        # Note: run_forever reads its own snapshot at the top of each iteration
+        # for `regions` and `interval_minutes`.  The two snapshots may differ if
+        # a config reload occurs during a cycle — this is by-design: filters take
+        # effect ASAP (within the current pass); scheduling parameters take effect
+        # on the next iteration.  ConfigSource.current() is required to return an
+        # in-memory cached snapshot (no I/O), so the extra fetch is O(1).
+        current_filters = self._config_source.current().filters
+
         new_lots_count = 0
         for lot in enriched_lots:
             upsert_result = self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
@@ -402,23 +415,30 @@ class MonitorCycleService:
             if upsert_result.was_new:
                 new_lots_count += 1
                 public_dto = _lot_to_public_dto(lot)
-                self._event_bus.publish(
-                    SseLotNew(lot=public_dto, fragment_template="poster")
-                )
-                self._notifier_dispatcher.dispatch(public_dto)
+                if self._filter_matcher.matches(public_dto, current_filters):
+                    self._event_bus.publish(
+                        SseLotNew(lot=public_dto, fragment_template="poster")
+                    )
+                    self._notifier_dispatcher.dispatch(public_dto)
             elif upsert_result.changes:
                 # Publish status update for changed lots (optional, best-effort).
+                # Apply the same filter: status-change noise for filtered-out
+                # regions is equally unwanted as new-lot noise.
                 for change in upsert_result.changes:
                     if change.field == "status":
                         from fis_monitor.domain.models import SseLotStatus
 
-                        self._event_bus.publish(
-                            SseLotStatus(
-                                lot_id=lot.id,
-                                new_status=str(change.new_value),
-                                event_type="changed",
+                        lot_dto_for_filter = _lot_to_public_dto(lot)
+                        if self._filter_matcher.matches(
+                            lot_dto_for_filter, current_filters
+                        ):
+                            self._event_bus.publish(
+                                SseLotStatus(
+                                    lot_id=lot.id,
+                                    new_status=str(change.new_value),
+                                    event_type="changed",
+                                )
                             )
-                        )
                         break  # one SseLotStatus per lot per cycle is enough
 
         # ---------- Step 6: close cycle ------------------------------------

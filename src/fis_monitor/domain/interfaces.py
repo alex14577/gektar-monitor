@@ -43,6 +43,7 @@ from typing import (
 
 from fis_monitor.domain.models import (
     CycleResult,
+    FiltersConfig,
     LotPublicDTO,
     LotUpsertResult,
     LotUserState,
@@ -80,6 +81,7 @@ __all__ = [
     "DetailParser",
     "EventBus",
     "EventSubscription",
+    "FilterMatcher",
     "HttpClient",
     "ListParser",
     "Locker",
@@ -580,6 +582,34 @@ class MigrationRunner(Protocol):
         ``migration_runner=`` argument of ``init_db()``. Implementations
         typically delegate to ``run_pending``.
         """
+        ...
+
+
+# ===========================================================================
+# Layer 2.5 — notify-time filtering
+# ===========================================================================
+
+
+class FilterMatcher(Protocol):
+    """Per-lot notification gate evaluated before event_bus.publish + dispatcher.dispatch.
+
+    Returns ``True`` → emit the lot; ``False`` → skip silently.
+
+    Implementations MUST be stateless and thread-safe (called from the
+    monitor-cycle worker thread for every ``was_new=True`` lot and every
+    status-change lot within a cycle).
+
+    Design:
+      - Empty filter-set is always a pass-through (preserves current behaviour
+        when no filter is configured).
+      - ``AllFiltersMatcher`` composes multiple matchers via logical AND.
+
+    See docs/architecture/03-protocols.md (``[[architecture/03-protocols]]``).
+    Implementation: ``services/filter_matcher.py``.
+    """
+
+    def matches(self, lot: LotPublicDTO, filters: FiltersConfig) -> bool:
+        """Return ``True`` if ``lot`` passes all filter criteria in ``filters``."""
         ...
 
 
