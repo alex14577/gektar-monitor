@@ -38,6 +38,29 @@ PHPSESSID + _csrf без JSESSIONID **не достаточно** — серве
 ## TTL рабочей сессии
 По умолчанию `Max-Age` у `session-cookie` = 86400s (сутки), у PHPSESSID = Session (до закрытия браузера). На практике сессия живёт **до ESIA_SESSION** = 3 часа без активности. Если на ЕСИА была галка «Запомнить меня» — refresh-токен продлевает её до 30 дней.
 
+## UX flow — кнопка входа в мониторе
+
+Кнопки «Войти через Госуслуги» (modal в `base.html.jinja`) и «Войти заново» (banner в `feed.html.jinja`) реализованы как `<button type="button" data-action="login-start">` — без `href`. JS-обработчик в [[glossary#auth.js|`auth.js`]] ловит клики через event delegation и выполняет:
+
+```
+1. fetch POST /auth/start
+   → 202  → запустить polling GET /auth/status каждые 2 с (hard timeout 5 мин)
+   → 409  → job уже идёт → перейти в polling (join existing job)
+   → 429  → toast «Попробуйте через минуту», disable кнопки на 60 с
+   → 503  → toast «Сервис запускается»
+
+2. polling GET /auth/status:
+   while running == true → ждать
+   when running == false:
+     last_outcome.success == true  → toast «Вход выполнен» + window.location.reload()
+     last_outcome.success == false → toast с error-mapping + re-enable button
+       error «timeout»     → «Время вышло»
+       error «cancelled»   → «Отменено»
+       error «playwright:*» → «Ошибка браузера»
+```
+
+Variant B (bd gektar_monitor-oem): GET /auth/login роут не создавался — все действия через JS-fetch к существующим POST /auth/start и GET /auth/status. CSRF: POST проходит через `CsrfHostOriginMiddleware` автоматически (Origin header отправляется браузером с каждым fetch).
+
 ## Безопасное обращение с cookies
 - Cookies дают **доступ к ЛК пользователя в ФИС** (можно читать персональные данные, статусы заявлений, документы).
 - НЕ дают прямой доступ к Госуслугам — но через них можно подать заявление **от имени пользователя** на этом сайте. Поэтому скрипт должен делать **только GET-запросы**, никаких POST.
