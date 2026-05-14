@@ -19,6 +19,7 @@ import pytest
 
 from fis_monitor.composition import build_container
 from fis_monitor.container import Container, Infra, Services
+from fis_monitor.domain.models import TargetConfig
 from fis_monitor.infra.http.client import RequestsHttpClient
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
 from fis_monitor.infra.smtp.email_notifier import SmtpEmailNotifier
@@ -85,12 +86,12 @@ class TestBuildContainerLayerTopology:
     def test_http_client_default_timeout_uses_target_config(
         self, container: Container
     ) -> None:
-        """default_timeout read-timeout matches TargetConfig.request_timeout_seconds (default 90s)."""  # noqa: E501
+        """default_timeout read-timeout follows TargetConfig.request_timeout_seconds."""
         client = container.infra.http_client
         assert isinstance(client, RequestsHttpClient)
         connect_t, read_t = client._default_timeout  # type: ignore[union-attr]
         assert connect_t == 5.0
-        assert read_t == 90.0  # TargetConfig default
+        assert read_t == float(TargetConfig().request_timeout_seconds)
 
     def test_layer_4_services(self, container: Container) -> None:
         assert isinstance(
