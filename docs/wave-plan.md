@@ -169,8 +169,8 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 9 — Onboarding-gate + shutdown
 
-- [ ] `oxy.2` — Onboarding-gate middleware · haiku · ждёт `a4t.5`
-- [ ] `8ov.3` — three-phase shutdown lifespan · sonnet · ждёт `8ov.2`, `bye.6`, `bye.8` · **HIGH risk** (Thread+join races)
+- [x] `oxy.2` — Onboarding-gate middleware · sonnet · `web/onboarding_gate.py`
+- [x] `8ov.3` — three-phase shutdown lifespan + ThreadSupervisor + j19 bind_executor · sonnet · `app.py` + `infra/thread_supervisor.py`
 
 ### Wave 10 — E2E smoke
 
@@ -434,6 +434,43 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 **Итог wave:** 5/5 closed. Разблокированы: вся Wave 9 (`oxy.2`, `8ov.3`).
 
 **Следующая сессия:** Wave 9 — `oxy.2` onboarding-gate middleware + `8ov.3` HIGH-risk three-phase shutdown lifespan. После — Wave 10 (`vgm.5` E2E smoke).
+
+### Session (2026-05-14, part 4) — Wave 9 (3/3, MVP critical path empties before E2E)
+
+**Цель:** Wave 9 — `oxy.2` (Onboarding-gate middleware) + `8ov.3` (three-phase shutdown lifespan, HIGH-risk) + `j19` (bind pw_executor, included atomically in 8ov.3 implementation).
+
+**Pre-flight:**
+- Чтение ADR-014 (22 строки целиком), ADR-018 (15 строк), `architecture/04-composition-root.md` §4.3.bis + §4.4 (lifespan flow 296-373), `services/onboarding.py`, `services/login.py`, `services/notifier_dispatcher.py`, `infra/lock.py`, `services/full_scan.py` — все целевые seam'ы и API.
+- File-disjoint grep-check: oxy.2 → `web/onboarding_gate.py` (new); 8ov.3 → `app.py` + `infra/thread_supervisor.py` (new) + tests. Нулевое пересечение.
+- Идентифицированы 3 канонических разрыва (`MonitorCycleService.run_forever`, `EnrichmentService.bind_executor`, `config_subscription.unsubscribe` — все требуют ConfigSource/SessionMonitor/scheduler из других waves). Решение: вынести follow-up bd-tasks вместо in-scope expansion.
+
+**Сделано:**
+- `oxy.2` (sonnet writer) — 14 tests первой итерацией. Review (sonnet) NEEDS WORK [2 majors]: M1 whitelist `/onboarding` без trailing slash → `/onboarding-evil/*` silently whitelisted; M2 query-param bypass test vacuous (assert на 302 happens, не на server-decided URL wins). Оркестратор зафиксил вместо writer iter#2 (3-строчные правки): `_WHITELIST_PREFIXES`: `/onboarding` → `/onboarding/`; rewrite test на `REGIONS_SET + ?step=1 → /onboarding/smtp` (server-decided wins over query); добавлен boundary test `/onboarding-evil/wipe → 302`. 15 tests green.
+- `8ov.3 + j19` (sonnet writer) — `ThreadSupervisor` (phase 1 shared deadline budget, idempotent, daemon=True, ShutdownReport) + `app.py` lifespan three-phase + 1.5 (R3-C3) + R4-M1 Thread+join(5.0) + R4-M4 per-phase try/except + guaranteed lock release. `create_app(*, container_factory, locker_factory)` — DI inversion для import-linter compliance (app.py не импортирует composition.py). j19 закрыт атомарно: `container.services.login.bind_executor(pw_executor)` в startup. 14 tests первой итерацией. **Review (opus, HIGH-risk) APPROVE первого захода** (5 nits, glossary draft нужен — все non-blocking). Все 8 acceptance criteria pass. Тесты deterministic (threading.Event вместо time.sleep для hung-case). Оркестратор зачистил: N2 import contextlib top-level, N3 comment про faulthandler accuracy, N4 удалить dead `except BaseException: raise`.
+
+**Verify оркестратора:**
+- `pytest tests/ -q` → 898 passed, 3 skipped, 0 failures (+29 от baseline 869).
+- `ruff check` на 6 wave-9 файлах — all checks passed.
+
+**Vault обновления (orchestrator):**
+- `docs/glossary.md` — **+5 записей** новая секция «Сервисы (Wave 9)»: ThreadSupervisor, Phase 1.5, ContainerFactory, OnboardingGateMiddleware, OnboardingQuery.
+- Нет новых ADR (всё следует ADR-014 + ADR-018, разрывы канона — follow-up bd, не архитектурные изменения).
+
+**Follow-ups filed:**
+- `vgj` (P2) — `MonitorCycleService.run_forever` scheduler (no `run_forever` exists, lifespan не может supervise monitor_cycle, only `run_cycle(region)`).
+- `dmu` (P2) — `EnrichmentService.bind_executor` seam (lifespan создаёт `enrichment_pool` но не может прокинуть в service).
+- `4fw` (P3) — `config_subscription.unsubscribe` в lifespan phase 2 (ConfigSource stub → wire когда bye.9 лендит).
+
+**Итог wave:** 3/3 closed. Эпики `oxy` (Epic 7) + `8ov` (Epic 6) **auto-closed** (все дети done). Разблокирован `vgm.5` (Wave 10 E2E smoke).
+
+**Workflow-замечания:**
+- **opus-reviewer для HIGH-risk shutdown логики** — APPROVE round-1, ноль blocker'ов. Writer хорошо отработал ADR-014 verbatim. opus-стоит на critical-path lifecycle/state-machine задачах.
+- **Sonnet-reviewer на security/auth-related middleware** (oxy.2) — поймал boundary-bug (`/onboarding` prefix leak) и vacuous test (acceptance #19 не проверялся реально). 2 majors, оркестратор зафиксил 3-строчными правками.
+- **Параллель writer'ов работала** (oxy.2 + 8ov.3 в параллель, нулевое пересечение файлов). 4-я волна подряд с 3+ параллельными агентами без cross-file конфликтов.
+- **Recovery-стратегия — orchestrator fix вместо writer iter#2** для 3-line patches: 30 сек правки vs 5-min writer spawn. Hard cap rule allows minors-через-комментарий, но majors иногда дешевле зафиксить руками когда patch очевиден из review.
+- **import-linter discipline сработал**: writer сам выбрал `container_factory` required kwarg вместо тащить `from composition import build_container` в app.py — оркестратор отметил это decision как правильный в pre-flight, writer независимо пришёл к тому же решению.
+
+**Следующая сессия:** Wave 10 — `vgm.5` E2E smoke (lifespan → cycle → SSE → shutdown). **Последняя wave до MVP**. После — Wave 11 (post-MVP tooling: fake-site, TargetConfig/FisUrlBuilder, smtp_host cleanup) либо follow-up batch (vgj/dmu/4fw + плагины логирования из side-track).
 
 ---
 
