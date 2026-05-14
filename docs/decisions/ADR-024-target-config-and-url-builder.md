@@ -31,6 +31,18 @@
 
 **Consequences.**
 
+### SSL verification
+
+Upstream (`надальнийвосток.рф`) использует self-signed cert in chain →
+`RequestsHttpClient` сконфигурирован с `verify=False` в composition (Layer 2).
+`InsecureRequestWarning` подавляется на module-level в `composition.py` после
+всех imports.
+
+Mitigations: `_TORGI_ALLOWED_HOSTS` ограничивает Playwright допустимыми hosts;
+`TorgiUrlBuilder` constrains `base_url` отдельным конфигом. Threat model:
+man-in-the-middle между нашим сервером и upstream — out of scope (внутрироссийский
+гос-сервис без публичного CA).
+
 - Сервис после wire-up реально скачивает страницы `надальнийвосток.рф`.
 - Staging через `FIS_TARGET__BASE_URL=http://localhost:8765` (для Wave 11b fake-torgi).
 - Smoke-тесты могут задать custom `base_url` без перекомпиляции.

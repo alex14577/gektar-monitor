@@ -78,6 +78,20 @@ class TestBuildContainerLayerTopology:
         assert container.infra.detail_parser is not None
         assert container.infra.login_session is not None
 
+    def test_http_client_verify_false(self, container: Container) -> None:
+        """ADR-024: composition wires verify=False for self-signed-cert upstream."""
+        assert container.infra.http_client._verify is False  # type: ignore[union-attr]
+
+    def test_http_client_default_timeout_uses_target_config(
+        self, container: Container
+    ) -> None:
+        """default_timeout read-timeout matches TargetConfig.request_timeout_seconds (default 90s)."""  # noqa: E501
+        client = container.infra.http_client
+        assert isinstance(client, RequestsHttpClient)
+        connect_t, read_t = client._default_timeout  # type: ignore[union-attr]
+        assert connect_t == 5.0
+        assert read_t == 90.0  # TargetConfig default
+
     def test_layer_4_services(self, container: Container) -> None:
         assert isinstance(
             container.services.notifier_dispatcher, NotifierDispatcher

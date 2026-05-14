@@ -47,6 +47,9 @@ class RequestsHttpClient:
         self,
         session: requests.Session,
         sleep_fn: Callable[[float], None] = time.sleep,
+        *,
+        verify: bool = True,
+        default_timeout: tuple[float, float] | None = None,
     ) -> None:
         """Initialize RequestsHttpClient with DI dependencies.
 
@@ -54,9 +57,16 @@ class RequestsHttpClient:
             session: requests.Session instance to use for HTTP requests.
             sleep_fn: Callable[[float], None] for sleeping between retries.
                       Defaults to time.sleep for production, can be mocked in tests.
+            verify: Whether to verify SSL certificates. Default True (safe for tests).
+                    Set to False in composition for upstreams with self-signed certs
+                    (ADR-024).
+            default_timeout: (connect, read) timeout tuple. If None, uses module-level
+                             _DEFAULT_TIMEOUT (5.0, 30.0).
         """
         self._session = session
         self._sleep_fn = sleep_fn
+        self._verify = verify
+        self._default_timeout = default_timeout or _DEFAULT_TIMEOUT
 
     def get(
         self,
@@ -91,7 +101,7 @@ class RequestsHttpClient:
                             was ever received.
         """
         # Normalize timeout to tuple format
-        timeout_tuple = _DEFAULT_TIMEOUT if timeout is None else (timeout, timeout)
+        timeout_tuple = self._default_timeout if timeout is None else (timeout, timeout)
 
         # Prepare headers with User-Agent
         request_headers = dict(headers or {})
@@ -108,6 +118,7 @@ class RequestsHttpClient:
                     params=params,
                     headers=request_headers,
                     timeout=timeout_tuple,
+                    verify=self._verify,
                 )
 
                 # Check if response status should trigger a retry

@@ -32,6 +32,7 @@ import threading
 from pathlib import Path
 
 import requests
+import urllib3
 
 from fis_monitor.container import Container, Infra, Services
 from fis_monitor.domain.models import Settings
@@ -74,6 +75,11 @@ from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
 from fis_monitor.services.onboarding import OnboardingService
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
+
+# ADR-024: upstream (надальнийвосток.рф) uses self-signed cert in chain.
+# Suppress InsecureRequestWarning at module level — this service exclusively
+# talks to one upstream; the warning is noise rather than signal.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ---------------------------------------------------------------------------
 # Schema SQL — loaded once at module level (no repeated I/O on build_container
@@ -198,7 +204,12 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
 
     # ── Layer 2: infra adapters ─────────────────────────────────────────────
     http_session = requests.Session()
-    http_client = RequestsHttpClient(session=http_session)
+    target_cfg = config_source.current().target
+    http_client = RequestsHttpClient(
+        session=http_session,
+        verify=False,  # ADR-024: upstream uses self-signed cert in chain
+        default_timeout=(5.0, float(target_cfg.request_timeout_seconds)),
+    )
     list_parser = SelectolaxListParser()
     detail_parser = SelectolaxDetailParser()
     login_session = PlaywrightLoginSession(

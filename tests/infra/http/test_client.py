@@ -448,6 +448,72 @@ def test_user_agent_with_other_headers() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SSL verify injection (ADR-024)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_false_passed_to_session_get() -> None:
+    """verify=False is forwarded to session.get (ADR-024: self-signed cert upstream)."""
+    session = Mock(spec=requests.Session)
+    response = _mock_response(200, "OK")
+    session.get.return_value = response
+
+    client = RequestsHttpClient(session=session, verify=False)
+    client.get("https://example.com")
+
+    call_args = session.get.call_args
+    assert call_args is not None
+    assert call_args.kwargs["verify"] is False
+
+
+def test_verify_true_default_passed_to_session_get() -> None:
+    """verify defaults to True and is forwarded to session.get."""
+    session = Mock(spec=requests.Session)
+    response = _mock_response(200, "OK")
+    session.get.return_value = response
+
+    client = RequestsHttpClient(session=session)
+    client.get("https://example.com")
+
+    call_args = session.get.call_args
+    assert call_args is not None
+    assert call_args.kwargs["verify"] is True
+
+
+# ---------------------------------------------------------------------------
+# default_timeout injection
+# ---------------------------------------------------------------------------
+
+
+def test_default_timeout_tuple_passed_to_session_get() -> None:
+    """custom default_timeout=(5.0, 90.0) is used when caller passes no timeout."""
+    session = Mock(spec=requests.Session)
+    response = _mock_response(200, "OK")
+    session.get.return_value = response
+
+    client = RequestsHttpClient(session=session, default_timeout=(5.0, 90.0))
+    client.get("https://example.com")
+
+    call_args = session.get.call_args
+    assert call_args is not None
+    assert call_args.kwargs["timeout"] == (5.0, 90.0)
+
+
+def test_caller_timeout_overrides_default_timeout() -> None:
+    """Explicit timeout kwarg to .get() overrides the injected default_timeout."""
+    session = Mock(spec=requests.Session)
+    response = _mock_response(200, "OK")
+    session.get.return_value = response
+
+    client = RequestsHttpClient(session=session, default_timeout=(5.0, 90.0))
+    client.get("https://example.com", timeout=10.0)
+
+    call_args = session.get.call_args
+    assert call_args is not None
+    assert call_args.kwargs["timeout"] == (10.0, 10.0)
+
+
+# ---------------------------------------------------------------------------
 # DI: Session
 # ---------------------------------------------------------------------------
 
