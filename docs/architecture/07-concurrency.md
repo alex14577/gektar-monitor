@@ -87,7 +87,7 @@ Decisions-log говорит «приоритет: monitor > enrichment > full_s
 
 **SSE security:**
 - Принудительная проверка `Origin === http://127.0.0.1:8080` или `http://localhost:8080`; без Origin → 403. EventSource всегда same-origin Origin шлёт, поэтому это безопасно.
-- Onboarding-gate middleware покрывает `/sse/*`.
+- Onboarding-gate middleware покрывает `/events` (единственный SSE-роут; ADR-025).
 - Никакого `Access-Control-Allow-Origin: *` нигде, ни в одном роуте.
 - Integration-тест: `tests/integration/test_sse_security.py` — Origin: null → 403, Origin: evil.com → 403, без Origin → 403.
 

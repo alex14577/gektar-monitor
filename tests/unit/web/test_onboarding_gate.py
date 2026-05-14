@@ -202,10 +202,10 @@ def test_bare_onboarding_whitelisted() -> None:
 
 
 def test_sse_whitelisted() -> None:
-    """Test 7: not_started + GET /sse/events → 200 (no redirect)."""
+    """Test 7: not_started + GET /events → 200 (no redirect)."""
     fake = FakeOnboardingService(OnboardingState.NOT_STARTED)
     client = TestClient(_build_app(fake), follow_redirects=False)
-    resp = client.get("/sse/events")
+    resp = client.get("/events")
     assert resp.status_code == 200
 
 

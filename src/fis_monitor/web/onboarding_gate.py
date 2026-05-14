@@ -46,7 +46,7 @@ _COMPLETED_VALUE = "completed"
 # Prefixes that are always passed through, regardless of onboarding state.
 _WHITELIST_PREFIXES: tuple[str, ...] = (
     "/static/",
-    "/sse/",
+    "/events",
     "/api/health",
     "/onboarding/",
     "/auth/",
