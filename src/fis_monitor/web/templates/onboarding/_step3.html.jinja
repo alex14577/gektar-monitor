@@ -1,0 +1,25 @@
+{# Step 3 — email получателя (куда слать) #}
+<h1>Кому слать уведомления</h1>
+<p class="wiz__sub">
+  Адрес получателя — на него будут приходить письма от бот-ящика. Обычно это ваш личный email.
+</p>
+
+<div class="field">
+  <label class="field__label" for="email">Email получателя</label>
+  <input class="input" id="email" name="recipient_email" type="email"
+         value="{{ data.recipient_email or '' }}" placeholder="you@example.ru" autocomplete="email" />
+  <p style="font-size: 0.75rem; color: var(--muted); margin: 6px 0 0;">
+    Можно несколько через запятую: <span class="mono">you@x.ru, partner@y.ru</span>
+  </p>
+
+  <label class="check" style="margin-top: 12px;">
+    <input type="checkbox" name="send_test_email" value="1"
+           {% if data.send_test_email | default(true) %}checked{% endif %} />
+    <span class="check__label">Отправить мне тестовое письмо сейчас</span>
+  </label>
+
+  <div style="margin-top: 16px; padding: 12px 14px; background: var(--surface-2); border-radius: 8px; font-size: 0.875rem; color: var(--ink-2);">
+    Если оставить пустым — уведомления будут приходить только в браузер,
+    а email-канал можно включить позже на экране «Уведомления».
+  </div>
+</div>

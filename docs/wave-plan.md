@@ -163,9 +163,9 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 - [x] `oxy.3` — Routes lots + notifications + diagnostics · sonnet (повышено с haiku)
 - [x] `oxy.4` — Routes auth + **LoginService** (scope-extend) · sonnet · ждёт `bye.6`
-- [ ] `oxy.5` — Routes settings + onboarding · haiku · ждёт `a4t.5`, `a4t.6`
+- [x] `oxy.5` — Routes settings + onboarding · sonnet · ждёт `a4t.5`, `a4t.6`
 - [x] `oxy.6` — SSE endpoints + production drift-defence (M1 fix) · sonnet · ждёт `tic.3`
-- [ ] `oxy.7` — Templates/static · haiku
+- [x] `oxy.7` — Templates/static · sonnet
 
 ### Wave 9 — Onboarding-gate + shutdown
 
@@ -416,6 +416,24 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - `oxy.7` (templates/static) — НЕ запускали. Зависит от `oxy.1` ✓.
 
 **Следующая сессия:** Wave 8 part 3 — добить `oxy.5` + `oxy.7` (параллельно, файлы disjoint). После — Wave 9 (`oxy.2` onboarding-gate + `8ov.3` HIGH-risk three-phase shutdown lifespan + `j19` lifespan bind_executor). Wave 10 = `vgm.5` E2E smoke (по решению с review-цикла — НЕ заменяем на fake-site). Wave 11 (новая) = fake-site + `TargetConfig`/`FisUrlBuilder` + smtp_host cleanup (post-MVP tooling, разбита на 11a config-seam + 11b admin-UI; ADR-023; security mitigations per Security review).
+
+### Session (2026-05-14, part 3) — Wave 8 closeout (2/2)
+
+**Цель:** добить Wave 8 — `oxy.5` (settings + onboarding routes) + `oxy.7` (templates/static).
+
+**Сделано:**
+- `oxy.5` — JSON routers `web/routes/settings.py` (GET /settings, POST /settings/smtp, POST /settings/smtp/test) и `web/routes/onboarding.py` (GET /state, POST /advance, POST /skip-email); провайдер `get_config_source` в `web/deps.py` (ConfigSource живёт на Infra, не Services); 24 unit-теста, включая параметризованный guard-тест на все 4 FSM transitions и ordering-тест на DNS-вне-tx через SettingsService. Reviewer-cycle: 1 итерация (major: vacuous secret-leak test → ужесточён до явных assert'ов на "password"/"secret"/"**********" в response body).
+- `oxy.7` — verbatim copy `claude-design/templates/` → `web/templates/`, `claude-design/static/` → `web/static/` (base.html.jinja, feed.html.jinja, partials/, onboarding/wizard + step1-4, app.css, app.js); фабрика `web/templates.py::build_templates() -> Jinja2Templates` (без singleton, без StaticFiles mount — отложено в Wave 9 / 8ov.3); 4 smoke-теста. Reviewer-cycle: 1 итерация (major: отсутствовал `favicon.svg`, на который ссылается `base.html.jinja` → добавлен placeholder в обе папки + assert в smoke-тесте).
+
+**Out-of-scope discoveries (filed as follow-ups):**
+- `bd-2s3` (P2) — `ConfigSource.save()` Protocol + routes для regions/recipients mutation. Текущий `ConfigSource` read-only, мутация config.json требует расширения seam'а (ADR-решение нужно — `ConfigSource.save()` vs отдельный `SettingsWriter` Protocol).
+- `bd-4fv` (P4) — заменить placeholder favicon.svg финальным дизайном.
+
+**Vault:** no-op для ADR/architecture/data-model — таски следуют существующим паттернам (Wave 7 JSON routers + стандартный Jinja2Templates factory), новых архитектурных решений не принято. Glossary draft от обоих writer'ов был пустым.
+
+**Итог wave:** 5/5 closed. Разблокированы: вся Wave 9 (`oxy.2`, `8ov.3`).
+
+**Следующая сессия:** Wave 9 — `oxy.2` onboarding-gate middleware + `8ov.3` HIGH-risk three-phase shutdown lifespan. После — Wave 10 (`vgm.5` E2E smoke).
 
 ---
 

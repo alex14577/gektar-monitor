@@ -1,0 +1,58 @@
+{# ========================================================================
+   _lot_list.html.jinja — плотная list-карточка (для cool/cold/gone).
+   Раскрывается по клику data-action="expand" — после раскрытия CSS
+   адаптирует layout, но дополнительная разметка деталей опциональна:
+   её можно подгрузить лениво через hx-get="/lots/{{id}}/details".
+   ======================================================================== #}
+<article class="lot lot--list"
+         id="lot-{{ lot.id }}"
+         data-lot-id="{{ lot.id }}"
+         data-temp="{{ lot.temp }}"
+         data-seen="{{ 'true' if lot.is_seen else 'false' }}"
+         data-status="{{ lot.status | default('active') }}"
+         {% if lot.event == 'gone' %}data-event="gone"{% endif %}
+         {% if lot.appeared_at_epoch_ms %}data-appeared-at="{{ lot.appeared_at_epoch_ms }}"{% endif %}
+         tabindex="0">
+
+  {% if lot.event == 'gone' %}
+    <span class="lot__age">был свободен</span>
+  {% else %}
+    <span class="lot__age" data-role="age" title="{{ lot.appeared_at_iso }}">{{ lot.age_initial_hhmmss }}</span>
+  {% endif %}
+
+  <div class="lot__main">
+    <h3 class="lot__title">
+      {{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %} ·
+      {{ lot.area_ha | replace('.', ',') }} га
+    </h3>
+    <p class="lot__meta">
+      {% if lot.event == 'gone' %}
+        ушёл {{ lot.gone_at_human }} · стал «{{ lot.new_status_human | default('Зарезервирован') }}» ·
+      {% else %}
+        {{ lot.category_short | default('с/х') }}{% if lot.vri_short %} · {{ lot.vri_short }}{% endif %} ·
+      {% endif %}
+      <span class="lot__cad-inline">{{ lot.cadastral_no }}</span>
+    </p>
+  </div>
+
+  <div class="lot__actions">
+    {% if lot.event == 'gone' %}
+      <button class="btn btn--ghost btn--sm" type="button"
+              hx-post="/lots/{{ lot.id }}/archive" hx-target="#lot-{{ lot.id }}" hx-swap="outerHTML">
+        Архивировать
+      </button>
+    {% else %}
+      <a class="btn btn--sm btn--primary" href="{{ lot.url }}" target="_blank" rel="noopener"
+         {% if session.expired %}aria-disabled="true" tabindex="-1" style="pointer-events:none; opacity:0.5"{% endif %}>
+        Открыть ↗
+      </a>
+      <button class="btn btn--ghost btn--icon btn--sm" type="button" data-action="expand" aria-label="Подробнее">▼</button>
+    {% endif %}
+  </div>
+
+  {# Lazy-loaded details — server returns _lot_details.html.jinja fragment #}
+  <div class="lot__details"
+       hx-get="/lots/{{ lot.id }}/details"
+       hx-trigger="revealed once"
+       hx-swap="innerHTML"></div>
+</article>

@@ -1,0 +1,714 @@
+/* ========================================================================
+   Монитор гектара — minimal client JS
+   - age ticker (visible cards only, via IntersectionObserver)
+   - clipboard copy + toast
+   - SSE-listener stub (with comment markers)
+   - IntersectionObserver "seen" reporter for [NEW] badge
+   - aria-live announcements
+   - countdown header timer
+   - DND, star, expand/collapse toggles (UI only)
+   - lot freshness flash, sticky "N new above" pill, scroll persistence
+   - escalation progress, since-arrived counter
+   - context menu, pin, copy-as-markdown
+   ======================================================================== */
+(() => {
+  'use strict';
+
+  // ---------- helpers ----------
+  const $  = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+  const pad2 = n => String(n).padStart(2, '0');
+  function formatAge(seconds) {
+    if (seconds < 0) seconds = 0;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+  }
+  function tempForSeconds(s) {
+    if (s < 10 * 60) return 'hot';
+    if (s < 60 * 60) return 'warm';
+    if (s < 24 * 60 * 60) return 'cool';
+    return 'cold';
+  }
+
+  // ---------- toaster ----------
+  function ensureToaster() {
+    let el = $('.toaster');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'toaster';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function toast(msg, { timeout = 2200 } = {}) {
+    const wrap = ensureToaster();
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    wrap.appendChild(t);
+    setTimeout(() => {
+      t.style.transition = 'opacity 200ms';
+      t.style.opacity = '0';
+      setTimeout(() => t.remove(), 220);
+    }, timeout);
+  }
+
+  // ---------- aria-live announcer (assertive vs polite) ----------
+  function announce(msg, assertive = false) {
+    const id = assertive ? '__live_assert' : '__live_polite';
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.className = 'sr-only';
+      el.setAttribute('aria-live', assertive ? 'assertive' : 'polite');
+      el.setAttribute('aria-atomic', 'true');
+      document.body.appendChild(el);
+    }
+    el.textContent = '';
+    // tick the DOM so SR re-reads
+    setTimeout(() => { el.textContent = msg; }, 30);
+  }
+
+  // ---------- age ticker (visible only) ----------
+  const visible = new Set();
+  const ageIO = ('IntersectionObserver' in window)
+    ? new IntersectionObserver(entries => {
+        entries.forEach(e => {
+          if (e.isIntersecting) visible.add(e.target);
+          else visible.delete(e.target);
+        });
+      }, { rootMargin: '120px' })
+    : null;
+
+  function registerLot(el) {
+    if (!el.dataset.appearedAt) return;
+    if (ageIO) ageIO.observe(el);
+    else visible.add(el);
+  }
+  function tickAges() {
+    const nowMs = Date.now();
+    visible.forEach(el => {
+      const t0 = Number(el.dataset.appearedAt);
+      if (!t0) return;
+      const secs = Math.floor((nowMs - t0) / 1000);
+      const ageEl = el.querySelector('[data-role="age"]');
+      if (ageEl) ageEl.textContent = formatAge(secs);
+      const temp = tempForSeconds(secs);
+      if (el.dataset.temp !== temp) el.dataset.temp = temp;
+    });
+  }
+  setInterval(tickAges, 1000);
+  tickAges();
+
+  // initial registration
+  $$('.lot[data-appeared-at]').forEach(registerLot);
+
+  // ---------- "seen" reporter (NEW badge clears once scrolled into view ≥1s) ----------
+  const seenTimers = new WeakMap();
+  const seenIO = ('IntersectionObserver' in window)
+    ? new IntersectionObserver(entries => {
+        entries.forEach(e => {
+          const el = e.target;
+          if (e.isIntersecting && el.dataset.seen !== 'true') {
+            // start a 1s timer; clear if scrolled away
+            const t = setTimeout(() => {
+              el.dataset.seen = 'true';
+              const badge = el.querySelector('.chip--new');
+              if (badge) badge.remove();
+              // hx-post-like notification to server — replace with htmx in templates
+              // fetch(`/lots/${el.dataset.lotId}/seen`, { method: 'POST' });
+              seenIO.unobserve(el);
+            }, 1000);
+            seenTimers.set(el, t);
+          } else {
+            const t = seenTimers.get(el);
+            if (t) { clearTimeout(t); seenTimers.delete(el); }
+          }
+        });
+      }, { threshold: 0.6 })
+    : null;
+  if (seenIO) $$('.lot[data-seen="false"]').forEach(el => seenIO.observe(el));
+
+  // ---------- clipboard ----------
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Скопировано');
+    } catch {
+      // fallback
+      const t = document.createElement('textarea');
+      t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); toast('Скопировано'); }
+      finally { t.remove(); }
+    }
+  }
+  document.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-copy]');
+    if (!c) return;
+    e.preventDefault();
+    const val = c.dataset.copy || c.textContent.trim();
+    copyText(val);
+  });
+
+  // ---------- star toggle (UI only; server expected to receive via HTMX) ----------
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="star"]');
+    if (!btn) return;
+    const pressed = btn.getAttribute('aria-pressed') === 'true';
+    btn.setAttribute('aria-pressed', String(!pressed));
+    // hx-post stub:
+    // fetch(`/lots/${btn.dataset.lotId}/star`, { method: 'POST', body: JSON.stringify({ value: !pressed }) });
+  });
+
+  // ---------- expand details ----------
+  // Toggle "open" state on a lot, and sync the ▼/▲ caret on any expand button inside it.
+  function toggleLot(lot, forceOpen) {
+    if (!lot) return;
+    const willOpen = forceOpen !== undefined
+      ? Boolean(forceOpen)
+      : lot.dataset.open !== 'true';
+    lot.dataset.open = String(willOpen);
+    lot.setAttribute('aria-expanded', String(willOpen));
+    const caret = lot.querySelector('[data-action="expand"]');
+    if (caret) caret.textContent = willOpen ? '▲ Скрыть' : '▼ Детали';
+  }
+
+  // Explicit caret button — keeps working as before.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="expand"]');
+    if (!btn) return;
+    e.stopPropagation();
+    toggleLot(btn.closest('.lot'));
+  });
+
+  // Whole-card click → toggle expand.
+  // Skip clicks that landed on something interactive (links, buttons, inputs,
+  // copy icons, the star toggle, etc.) so they keep doing their own thing.
+  const INTERACTIVE = 'a, button, input, textarea, select, label, [data-copy], [role="button"], summary, details';
+  document.addEventListener('click', (e) => {
+    const lot = e.target.closest('.lot');
+    if (!lot) return;
+    // Ignore selection drags
+    if (window.getSelection && String(window.getSelection()).length > 0) return;
+    // Ignore clicks on anything interactive
+    if (e.target.closest(INTERACTIVE)) return;
+    // Don't toggle for "gone" diff cards (no details to show)
+    if (lot.dataset.event === 'gone') return;
+    toggleLot(lot);
+  });
+
+  // Keyboard: Enter or Space toggles the focused card.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const lot = e.target.closest('.lot');
+    if (!lot) return;
+    // only when the .lot itself is the focus target — don't hijack inputs/buttons
+    if (e.target !== lot) return;
+    if (lot.dataset.event === 'gone') return;
+    e.preventDefault();
+    toggleLot(lot);
+  });
+
+  // ---------- note inline open ----------
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="note"]');
+    if (!btn) return;
+    const lot = btn.closest('.lot');
+    if (!lot) return;
+    let area = lot.querySelector('.lot__note-input');
+    if (!area) {
+      area = document.createElement('textarea');
+      area.className = 'lot__note-input';
+      area.placeholder = 'Заметка (хранится локально)…';
+      area.setAttribute('aria-label', 'Заметка к лоту');
+      const cta = lot.querySelector('.lot__cta');
+      (cta || lot).appendChild(area);
+    }
+    area.focus();
+  });
+
+  // ---------- header countdown ----------
+  (function () {
+    const el = $('[data-countdown]');
+    if (!el) return;
+    const intervalMin = Number(el.dataset.countdown);
+    if (!Number.isFinite(intervalMin) || intervalMin <= 0) return;
+    let remaining = intervalMin * 60;
+    const tick = () => {
+      remaining -= 1;
+      if (remaining <= 0) remaining = intervalMin * 60;
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      el.textContent = `${m}:${pad2(s)}`;
+    };
+    setInterval(tick, 1000);
+  })();
+
+  // ---------- DND ----------
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="dnd-preset"]');
+    if (!btn) return;
+    const minutes = Number(btn.dataset.minutes || 60);
+    const until = new Date(Date.now() + minutes * 60 * 1000);
+    const hh = pad2(until.getHours()), mm = pad2(until.getMinutes());
+    toast(`Не беспокоить до ${hh}:${mm}`);
+    // hx-post stub: fetch('/dnd', { method: 'POST', body: JSON.stringify({ until: until.toISOString() }) });
+    const menu = btn.closest('[data-menu]');
+    if (menu) menu.hidden = true;
+  });
+  document.addEventListener('click', (e) => {
+    const trigger = e.target.closest('[data-toggle-menu]');
+    if (trigger) {
+      const id = trigger.dataset.toggleMenu;
+      const menu = document.getElementById(id);
+      if (menu) menu.hidden = !menu.hidden;
+      return;
+    }
+    // close all when clicking outside
+    if (!e.target.closest('[data-menu]')) {
+      $$('[data-menu]').forEach(m => m.hidden = true);
+    }
+  });
+
+  // ---------- modal close on Esc ----------
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const m = $('.modal-backdrop:not([hidden])');
+      if (m) m.hidden = true;
+    }
+  });
+
+  // ---------- SSE stub ----------
+  //
+  // Real wiring (replace stub when integrating with FastAPI sse-starlette):
+  //
+  //   const es = new EventSource('/sse/lots');
+  //   es.addEventListener('lot.new',       (e) => onLotNew(JSON.parse(e.data)));
+  //   es.addEventListener('lot.status',    (e) => onLotStatusChange(JSON.parse(e.data)));
+  //   es.addEventListener('cycle.tick',    (e) => onCycleTick(JSON.parse(e.data)));
+  //   es.addEventListener('session.warn',  (e) => onSessionWarn(JSON.parse(e.data)));
+  //   es.addEventListener('session.expired', () => onSessionExpired());
+  //
+  // For HTMX-driven UI, prefer hx-sse on the feed container, e.g.:
+  //   <main hx-ext="sse" sse-connect="/sse/lots" sse-swap="lot.new">…</main>
+  // and let the server send full <article class="lot">…</article> fragments.
+  //
+  // The handlers below are for vanilla-JS demos and for the "what to call where"
+  // map. Keep them when you do hand-rolled SSE.
+
+  // tier 1 — important (lot in subscribed subjects): "двойной pop"
+  // tier 2 — background (in observed macro-region only): "одинарный pop"
+  // tier 3 — diff (lot gone): "pluck"
+  function playNotificationSound(tier) {
+    // <PLACEHOLDER> wire actual audio assets
+    // const url = ({1: '/static/sfx/double_pop.mp3', 2:'/static/sfx/single_pop.mp3', 3:'/static/sfx/pluck.mp3'})[tier];
+    // (new Audio(url)).play().catch(()=>{});
+    console.debug('[notify] tier', tier);
+  }
+  function maybeBrowserNotify(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    try { new Notification(title, { body, icon: '/static/icons/icon-192.png' }); }
+    catch {}
+  }
+
+  function onLotNew(lot) {
+    // 1. play sound by tier
+    playNotificationSound(lot.tier || 1);
+    // 2. browser notification
+    maybeBrowserNotify('Новый лот', `${lot.region}, ${lot.area}`);
+    // 3. aria-live polite
+    announce(`Новый лот: ${lot.region}, ${lot.area} гектара.`);
+    // 4. DOM prepend (HTMX will normally do this server-side via sse-swap)
+    // const html = renderLotCard(lot);
+    // feed.insertAdjacentHTML('afterbegin', html);
+    // 5. start escalation timer
+    escalationStart();
+  }
+  function onLotStatusChange(diff) {
+    playNotificationSound(3);
+    announce(`Лот ушёл: ${diff.region}.`, false);
+  }
+  function onCycleTick(info) {
+    // refresh header countdown / health widget
+  }
+  function onSessionWarn(t) {
+    // show yellow banner; assertive announce
+    announce(`Сессия истекает в ${t.expires_at}. Продлите заранее.`, true);
+  }
+  function onSessionExpired() {
+    const m = $('#session-expired-modal');
+    if (m) m.hidden = false;
+    announce('Сессия истекла. Войдите через Госуслуги, чтобы продолжить.', true);
+  }
+
+  // ---------- escalation timer ----------
+  // first pop quiet → 60s later louder → 2min later title pulses
+  let escState = null;
+  function escalationStart() {
+    if (escState) return;
+    const baseTitle = document.title;
+    escState = {
+      t1: setTimeout(() => { playNotificationSound(1); }, 60_000),
+      t2: setTimeout(() => {
+        // pulse title every 1s with a red dot favicon
+        escState.pulse = setInterval(() => {
+          document.title = document.title.startsWith('⚠ ') ? baseTitle : '⚠ ' + baseTitle;
+        }, 1000);
+      }, 180_000),
+      baseTitle,
+    };
+    // any user interaction stops escalation
+    const stop = () => escalationStop();
+    ['click', 'keydown', 'focus'].forEach(ev => window.addEventListener(ev, stop, { once: true }));
+  }
+  function escalationStop() {
+    if (!escState) return;
+    clearTimeout(escState.t1);
+    clearTimeout(escState.t2);
+    if (escState.pulse) clearInterval(escState.pulse);
+    document.title = escState.baseTitle;
+    escState = null;
+  }
+
+  // ========================================================================
+  // ENHANCEMENTS (added in this iteration)
+  // ========================================================================
+
+  // ---------- 1. Double-click on cadastral copies it ----------
+  // Augments the explicit copy button. Triggers on any element with
+  // .lot__cad-inline (list cards) or .lot__cad text spans (poster cards).
+  document.addEventListener('dblclick', (e) => {
+    const target = e.target.closest('.lot__cad, .lot__cad-inline, [data-copy]');
+    if (!target) return;
+    // prefer a data-copy value if present, else trim text
+    const val = target.dataset.copy || target.textContent.trim();
+    if (!val) return;
+    e.preventDefault();
+    // small ephemeral selection so user sees the doubleclick "worked"
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    setTimeout(() => sel.removeAllRanges(), 600);
+    copyText(val);
+  });
+
+  // ---------- 2. Persist scroll position ----------
+  // Survives page reload and HTMX swaps. Per-pathname key.
+  (function () {
+    const KEY = `monitor:scroll:${location.pathname}`;
+    let restoring = true;
+    // restore on load
+    const saved = Number(sessionStorage.getItem(KEY) || 0);
+    if (saved > 0) {
+      // wait a tick for layout
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: saved, behavior: 'auto' });
+        // give layout one more frame, then start saving
+        setTimeout(() => { restoring = false; }, 100);
+      });
+    } else {
+      restoring = false;
+    }
+    let saveTimer = null;
+    window.addEventListener('scroll', () => {
+      if (restoring) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        sessionStorage.setItem(KEY, String(window.scrollY));
+      }, 120);
+    }, { passive: true });
+    // Re-restore after HTMX swap if we got scrolled to top
+    document.body.addEventListener('htmx:afterSwap', () => {
+      const v = Number(sessionStorage.getItem(KEY) || 0);
+      if (v > 0 && window.scrollY < 50) {
+        requestAnimationFrame(() => window.scrollTo({ top: v }));
+      }
+    });
+  })();
+
+  // ---------- 3. Sticky "↑ N новых сверху" pill ----------
+  // When a new lot is prepended above the user's current scroll position,
+  // accumulate a counter and surface a pill that scrolls them up smoothly.
+  (function () {
+    const feed = document.getElementById('feed');
+    if (!feed) return;
+
+    let pill = document.querySelector('.jump-new');
+    if (!pill) {
+      pill = document.createElement('button');
+      pill.className = 'jump-new';
+      pill.type = 'button';
+      pill.hidden = true;
+      pill.setAttribute('aria-live', 'polite');
+      pill.innerHTML = '<span class="jump-new__count">1</span> новый сверху <span aria-hidden="true">↑</span>';
+      document.body.appendChild(pill);
+    }
+    let pending = 0;
+    function show() {
+      pill.hidden = false;
+      pill.querySelector('.jump-new__count').textContent = String(pending);
+    }
+    function clearAndScroll() {
+      pending = 0;
+      pill.hidden = true;
+      // scroll to the first not-yet-seen lot
+      const target = feed.querySelector('.lot[data-seen="false"]') || feed.firstElementChild;
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    pill.addEventListener('click', clearAndScroll);
+
+    // Hook 1: htmx prepended a new fragment via SSE
+    feed.addEventListener('htmx:afterSwap', (e) => {
+      // only when actually added to top
+      if (e.detail && e.detail.target === feed) {
+        if (window.scrollY > 200) { pending += 1; show(); }
+      }
+    });
+
+    // Hook 2: vanilla DOM prepend (Monitor.onLotNew path)
+    const mo = new MutationObserver(muts => {
+      muts.forEach(m => {
+        m.addedNodes.forEach(n => {
+          if (n.nodeType !== 1) return;
+          if (n.classList && n.classList.contains('lot')) {
+            // 4. Freshness flash (Tier 3, #4)
+            n.dataset.fresh = 'true';
+            setTimeout(() => { delete n.dataset.fresh; }, 2400);
+            // re-register for age ticker
+            if (n.dataset.appearedAt) registerLot(n);
+            if (window.scrollY > 200) { pending += 1; show(); }
+          }
+        });
+      });
+    });
+    mo.observe(feed, { childList: true, subtree: true });
+
+    // Hide pill once scrolled to top manually
+    window.addEventListener('scroll', () => {
+      if (window.scrollY < 200 && !pill.hidden) {
+        pending = 0;
+        pill.hidden = true;
+      }
+    }, { passive: true });
+  })();
+
+  // ---------- 5. Escalation progress indicator ----------
+  // When escalationStart() runs, we publish a small data-attr on <body>
+  // so a header chip can render a countdown. The chip itself is HTML.
+  const _origEscStart = escalationStart;
+  const _origEscStop  = escalationStop;
+  let escTickTimer = null;
+  // override in-place
+  // eslint-disable-next-line no-func-assign
+  escalationStart = function () {
+    if (escState) return;
+    _origEscStart.apply(this, arguments);
+    const startedAt = Date.now();
+    document.body.dataset.escalating = 'true';
+    escTickTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const chip = document.getElementById('escalation-chip');
+      if (!chip) return;
+      // tier transitions: 60s and 180s
+      let next, label;
+      if (elapsed < 60)   { next = 60  - elapsed; label = 'Громче через'; }
+      else if (elapsed < 180) { next = 180 - elapsed; label = 'Title-pulse через'; }
+      else                { next = 0; label = 'Эскалация активна'; }
+      chip.hidden = false;
+      chip.querySelector('[data-role="esc-label"]').textContent = label;
+      chip.querySelector('[data-role="esc-time"]').textContent =
+        next > 0 ? `0:${String(next).padStart(2,'0')}` : '—';
+    }, 1000);
+  };
+  // eslint-disable-next-line no-func-assign
+  escalationStop = function () {
+    _origEscStop.apply(this, arguments);
+    clearInterval(escTickTimer);
+    delete document.body.dataset.escalating;
+    const chip = document.getElementById('escalation-chip');
+    if (chip) chip.hidden = true;
+  };
+
+  // ---------- 6. Since-arrived counter ----------
+  (function () {
+    const el = document.querySelector('[data-since-arrived]');
+    if (!el) return;
+    const t0 = Date.now();
+    function plural(n, forms) {
+      // [1, 2-4, 5-20] — стандартные русские формы
+      const n10 = n % 10, n100 = n % 100;
+      if (n10 === 1 && n100 !== 11) return forms[0];
+      if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return forms[1];
+      return forms[2];
+    }
+    function fmt() {
+      const secs = Math.floor((Date.now() - t0) / 1000);
+      if (secs < 60) return `${secs} ${plural(secs, ['секунду', 'секунды', 'секунд'])}`;
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return `${mins} ${plural(mins, ['минуту', 'минуты', 'минут'])}`;
+      const hrs = Math.floor(mins / 60);
+      return `${hrs} ${plural(hrs, ['час', 'часа', 'часов'])}`;
+    }
+    function tick() { el.textContent = fmt(); }
+    tick();
+    setInterval(tick, 1000);
+  })();
+
+  // ---------- 7. Density toggle (compact / auto / poster) ----------
+  // localStorage key: monitor:density = 'auto' | 'compact' | 'poster'
+  (function () {
+    const DKEY = 'monitor:density';
+    const apply = (mode) => {
+      document.body.dataset.density = mode;
+      // visual sync of any density radio
+      document.querySelectorAll('[data-density-option]').forEach(el => {
+        el.setAttribute('aria-pressed', String(el.dataset.densityOption === mode));
+      });
+    };
+    apply(localStorage.getItem(DKEY) || 'auto');
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-density-option]');
+      if (!btn) return;
+      const mode = btn.dataset.densityOption;
+      localStorage.setItem(DKEY, mode);
+      apply(mode);
+      toast(`Плотность: ${({auto:'авто', compact:'плотно', poster:'постер'})[mode]}`);
+    });
+  })();
+
+  // ---------- 8. Pin lot to top ----------
+  // localStorage key: monitor:pinned = ['id1', 'id2']
+  (function () {
+    const PKEY = 'monitor:pinned';
+    function loadPinned() {
+      try { return JSON.parse(localStorage.getItem(PKEY) || '[]'); }
+      catch { return []; }
+    }
+    function savePinned(ids) { localStorage.setItem(PKEY, JSON.stringify(ids)); }
+
+    function applyPinned() {
+      const ids = loadPinned();
+      ids.forEach(id => {
+        const lot = document.getElementById('lot-' + id) || document.querySelector(`.lot[data-lot-id="${CSS.escape(id)}"]`);
+        if (lot) lot.dataset.pinned = 'true';
+      });
+    }
+    applyPinned();
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action="pin"]');
+      if (!btn) return;
+      const lot = btn.closest('.lot');
+      if (!lot) return;
+      const id = lot.dataset.lotId;
+      let ids = loadPinned();
+      if (ids.includes(id)) {
+        ids = ids.filter(x => x !== id);
+        delete lot.dataset.pinned;
+        toast('Снято с закрепления');
+      } else {
+        ids.unshift(id);
+        lot.dataset.pinned = 'true';
+        // move to top of its zone
+        const zone = lot.closest('.zone');
+        if (zone) {
+          const head = zone.querySelector('.zone__head');
+          if (head && head.nextSibling !== lot) zone.insertBefore(lot, head.nextSibling);
+        }
+        toast('Закреплено сверху');
+      }
+      savePinned(ids);
+    });
+  })();
+
+  // ---------- 9. Copy as Markdown ----------
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="copy-md"]');
+    if (!btn) return;
+    const lot = btn.closest('.lot');
+    if (!lot) return;
+    const title = lot.querySelector('.lot__title')?.textContent.trim() || '';
+    const cad   = lot.querySelector('.lot__cad, .lot__cad-inline')?.textContent.trim() || '';
+    const meta  = lot.querySelector('.lot__meta')?.textContent.trim() || '';
+    const url   = lot.querySelector('a.btn--primary')?.getAttribute('href') || '';
+    const md = `**${title}**\n${meta}\n\`${cad}\`${url ? `\n[Открыть на сайте](${url})` : ''}`;
+    copyText(md);
+  });
+
+  // ---------- Context menu for lots (right-click) ----------
+  // Lightweight, no library. Spawns a <div class="ctx-menu"> at pointer position.
+  document.addEventListener('contextmenu', (e) => {
+    const lot = e.target.closest('.lot');
+    if (!lot) return;
+    if (lot.dataset.event === 'gone') return; // nothing actionable
+    e.preventDefault();
+    closeCtxMenu();
+    const id = lot.dataset.lotId || '';
+    const isPinned = lot.dataset.pinned === 'true';
+    const isStarred = lot.querySelector('[data-action="star"]')?.getAttribute('aria-pressed') === 'true';
+    const menu = document.createElement('div');
+    menu.className = 'ctx-menu';
+    menu.setAttribute('role', 'menu');
+    menu.style.left = `${Math.min(e.clientX, window.innerWidth - 240)}px`;
+    menu.style.top  = `${Math.min(e.clientY, window.innerHeight - 280)}px`;
+    menu.innerHTML = `
+      <button role="menuitem" data-ctx="open">Открыть на сайте</button>
+      <button role="menuitem" data-ctx="copy-cad">Скопировать кадастровый</button>
+      <button role="menuitem" data-ctx="copy-md">Скопировать как Markdown</button>
+      <hr/>
+      <button role="menuitem" data-ctx="star">${isStarred ? 'Убрать звезду' : 'В избранное ★'}</button>
+      <button role="menuitem" data-ctx="pin">${isPinned ? 'Открепить' : 'Закрепить сверху'}</button>
+      <button role="menuitem" data-ctx="note">Заметка…</button>
+    `;
+    document.body.appendChild(menu);
+    menu.addEventListener('click', (ev) => {
+      const m = ev.target.closest('[data-ctx]');
+      if (!m) return;
+      const action = m.dataset.ctx;
+      closeCtxMenu();
+      if (action === 'open') {
+        lot.querySelector('a.btn--primary')?.click();
+      } else if (action === 'copy-cad') {
+        const cad = lot.querySelector('.lot__cad, .lot__cad-inline')?.textContent.trim();
+        if (cad) copyText(cad);
+      } else if (action === 'copy-md') {
+        lot.querySelector('[data-action="copy-md"]')?.click() ||
+          // synthetic — copy-md handler reads from the lot regardless of source button
+          (function(){ const fake = document.createElement('button'); fake.dataset.action='copy-md'; lot.appendChild(fake); fake.click(); fake.remove(); })();
+      } else if (action === 'star') {
+        lot.querySelector('[data-action="star"]')?.click();
+      } else if (action === 'pin') {
+        // dispatch a synthetic pin
+        const fake = document.createElement('button'); fake.dataset.action='pin'; lot.appendChild(fake); fake.click(); fake.remove();
+      } else if (action === 'note') {
+        lot.querySelector('[data-action="note"]')?.click();
+      }
+    });
+  });
+  function closeCtxMenu() {
+    document.querySelectorAll('.ctx-menu').forEach(m => m.remove());
+  }
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.ctx-menu')) closeCtxMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeCtxMenu();
+  });
+
+  // expose for templates / debugging
+  window.Monitor = {
+    toast, announce, copyText,
+    onLotNew, onLotStatusChange, onCycleTick, onSessionWarn, onSessionExpired,
+    registerLot, formatAge, tempForSeconds,
+  };
+})();

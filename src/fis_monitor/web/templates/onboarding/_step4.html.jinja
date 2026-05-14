@@ -1,0 +1,51 @@
+{# Step 4 — финал: всё настроено #}
+<div class="wiz__success" aria-hidden="true">
+  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin: 0 auto; display:block;">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="9 12 11 14 15 10"/>
+  </svg>
+</div>
+<h1>Мониторинг запущен</h1>
+<p class="wiz__sub" style="max-width: 460px; margin: 0 auto 24px;">
+  Держите эту вкладку открытой, чтобы получать уведомления о новых лотах. Когда лот появится — услышите звук и увидите карточку в ленте.
+</p>
+
+<div style="display: grid; gap: 8px; max-width: 420px; margin: 0 auto 28px; font-size: 0.875rem; color: var(--ink-2); text-align: left;">
+  <div style="display: flex; gap: 10px; align-items: flex-start;">
+    <span style="color: var(--accent); flex: none;">✓</span>
+    <span>Наблюдаем за
+      <b>
+      {%- set names = {'dfo': 'ДФО', 'arctic': 'Арктикой'} -%}
+      {%- for r in data.regions -%}
+        {{ names[r] }}{% if not loop.last %} и {% endif %}
+      {%- endfor -%}
+      </b>
+    </span>
+  </div>
+  {% if data.smtp_login %}
+    <div style="display: flex; gap: 10px; align-items: flex-start;">
+      <span style="color: var(--accent); flex: none;">✓</span>
+      <span>Бот шлёт от&nbsp;<span class="mono">{{ data.smtp_login }}</span></span>
+    </div>
+  {% else %}
+    <div style="display: flex; gap: 10px; align-items: flex-start;">
+      <span style="color: var(--muted); flex: none;">·</span>
+      <span style="color: var(--muted);">Бот-ящик можно настроить позже на экране «Уведомления»</span>
+    </div>
+  {% endif %}
+  {% if data.recipient_email %}
+    <div style="display: flex; gap: 10px; align-items: flex-start;">
+      <span style="color: var(--accent); flex: none;">✓</span>
+      <span>Получатель: <b>{{ data.recipient_email }}</b> + браузер</span>
+    </div>
+  {% else %}
+    <div style="display: flex; gap: 10px; align-items: flex-start;">
+      <span style="color: var(--accent); flex: none;">✓</span>
+      <span>Уведомления — только в браузере</span>
+    </div>
+  {% endif %}
+  <div style="display: flex; gap: 10px; align-items: flex-start;">
+    <span style="color: var(--accent); flex: none;">✓</span>
+    <span>Проверка каждые <b>{{ settings.interval_minutes | default(15) }} минут</b> (можно изменить в Настройках)</span>
+  </div>
+</div>

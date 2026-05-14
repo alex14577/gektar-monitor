@@ -19,7 +19,7 @@ from fastapi import Depends, Request
 
 if TYPE_CHECKING:
     from fis_monitor.container import Container
-    from fis_monitor.domain.interfaces import NotificationsRepository
+    from fis_monitor.domain.interfaces import ConfigSource, NotificationsRepository
     from fis_monitor.infra.sse.sse_stream import SseStreamer
     from fis_monitor.services.diagnostics import DiagnosticsService
     from fis_monitor.services.enrichment import EnrichmentService
@@ -111,6 +111,16 @@ def get_sse_streamer(request: Request) -> SseStreamer:
     Route tests override this via ``app.dependency_overrides``.
     """
     return request.app.state.container.infra.sse_streamer
+
+
+def get_config_source(c: Container = Depends(get_container)) -> ConfigSource:
+    """Return the live ConfigSource from the composition root.
+
+    ``config_source`` lives on ``Infra`` (layer 0 — systemic utility without
+    business-logic dependencies).  Routes use this to serve a Settings snapshot
+    without depending on the Container directly.
+    """
+    return c.infra.config_source
 
 
 def get_csrf_origin_whitelist(request: Request) -> frozenset[str]:
