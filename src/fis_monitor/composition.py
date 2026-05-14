@@ -85,7 +85,17 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Schema SQL — loaded once at module level (no repeated I/O on build_container
 # calls in tests).
 # ---------------------------------------------------------------------------
-_SCHEMA_SQL_PATH = Path(__file__).resolve().parent.parent.parent / "docs" / "db" / "schema.sql"
+def _resolve_schema_path() -> Path:
+    # PyInstaller --onedir layout: bundled data sits under sys._MEIPASS
+    # (= bin/_internal/), schema lands at _internal/docs/db/schema.sql per
+    # build/fis-monitor.spec.  Dev layout: schema lives at <project-root>/docs/db/.
+    import sys
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "docs" / "db" / "schema.sql"
+    return Path(__file__).resolve().parent.parent.parent / "docs" / "db" / "schema.sql"
+
+
+_SCHEMA_SQL_PATH = _resolve_schema_path()
 
 
 def _load_schema_sql() -> str:
