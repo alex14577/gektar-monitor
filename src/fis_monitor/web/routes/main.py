@@ -69,7 +69,15 @@ async def feed_page(
     in future bd-tasks (LotQueryService, HealthService, DndService).
     """
     settings: Settings = config_source.current()  # type: ignore[attr-defined]
-    raw_status: SessionStatus = session_probe.check()  # type: ignore[attr-defined]
+    # SessionProbe.check() in production graph is currently
+    # _NotImplementedSessionProbe (bd a4t.8 — HttpSessionProbe deferred).
+    # Defensive fallback: NotImplementedError → assume EXPIRED so the
+    # session-expired modal renders with the "Войти через Госуслуги" CTA —
+    # correct default for a fresh post-onboarding instance with no cookies yet.
+    try:
+        raw_status: SessionStatus = session_probe.check()  # type: ignore[attr-defined]
+    except NotImplementedError:
+        raw_status = SessionStatus.EXPIRED
 
     session = _build_session_context(raw_status)
     monitor = _build_monitor_context(settings)
