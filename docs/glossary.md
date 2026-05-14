@@ -183,6 +183,28 @@
 
 - **EventSubscription.wait_one / alive (extension Wave 4)** — добавлено в Protocol для поддержки SseStreamer'а: `wait_one(timeout: float) -> T | None` (blocking dequeue для использования в executor-thread; на queue.Empty или dead-subscription → None) + `alive: bool` (read-only property для disambiguation `None`-результата). Backwards-compatible с tic.2: существующие callers (`iter()`, `unsubscribe()`, context-manager) не задеты.
 
+## Сервисы (Wave 7)
+
+- **DiagnosticsService** (`services/diagnostics/service.py`) — Layer 4 use case: собирает `diagnostic.zip` (state.db + audit.jsonl + logs) с **fail-closed schema-snapshot guard** и cloud-sync-aware PII exclusion. DI: `data_dir: Path`, `audit_path: Path`, `exclude_policy: DiagnosticsExcludePolicy`, `cloud_sync_detector: CloudSyncDetector` (Protocol), `clock: Clock`. `build_zip(output_path) -> BuildZipResult`: (1) `_validate_schema(state.db)` против `DIAGNOSTIC_SCHEMA_V1` — на drift (extra column ИЛИ missing table) логирует `ERROR diagnostic.schema_drift` и возвращает `ok=False, schema_ok=False, ui_message=_GENERIC_UI_MESSAGE` (generic, БЕЗ деталей — R4-M10); (2) atomic write через `tempfile.mkstemp` + `ZipFile` + `os.replace` (защита от partial-state на retry); (3) если `cloud_sync_detector.is_in_cloud_sync(data_dir)` → `audit.jsonl` исключён из zip (fail-closed на cloud-sync surface — R4-M7); audit-данные с PII никогда не покидают локальный диск.
+
+- **DIAGNOSTIC_SCHEMA_V1** (`services/diagnostics/service.py`) — `dict[str, frozenset[str]]` SSOT канонических колонок per table для **fail-closed schema-drift detection**. Это **структурный guard**, НЕ data-allowlist: содержит `recipient` в `notifications` (часть PK по ADR-019), хотя PII-фильтрация на data-уровне делается через `DiagnosticsExcludePolicy.EXCLUDED_DB_FIELDS`. Update только после явного PII review при добавлении колонок в schema.
+
+- **CloudSyncDetector / DefaultCloudSyncDetector** (`services/diagnostics/service.py`) — `@runtime_checkable Protocol` + path-segment string match реализация (Dropbox, iCloud, OneDrive, Google Drive). Инъекция в `DiagnosticsService` — тестируется stub'ом без файловой системы. SRP separation: detection отделена от zip-сборки.
+
+- **BuildZipResult** (`services/diagnostics/service.py`) — `@dataclass(frozen=True)` возврат `DiagnosticsService.build_zip()`. Поля: `ok: bool`, `output_path: Path`, `files_included: tuple[str, ...]`, `schema_ok: bool`, `audit_included: bool`, `ui_message: str`. `ok=False` ⇒ zip-файл НЕ создан на диске (atomic temp+rename rollback).
+
+- **LotQueryService** (`services/lot_query.py`) — Layer 4 read-side CQRS use case (фильтры + cursor pagination, FTS deferred). DI: `lot_repo: LotRepository`, `user_state_repo: UserStateRepository`, `conn_provider: ConnectionProvider`, `clock: Clock`. `search(filters: LotFilters, *, page_size: int, cursor: str | None) -> Page[LotUserDTO]`. Инварианты: (1) `page_size ∈ [1, 200]` валидируется через `ValueError`; (2) keyset cursor — opaque `base64url(str(lot_id))` (stable pagination, **НЕ** offset); (3) `fts_query` → `NotImplementedError` (deferred bd-issue); (4) **N+1 eliminated** через `user_state_repo.get_many(ids)` — одна query на страницу; (5) **freshness через injected Clock**, НЕ hardcoded — `age_seconds = now - lot.first_seen.timestamp()` → `_compute_freshness` (hot<1h, warm<24h, cold else), single clock call per `search()`. `row_to_lot` импортируется как **публичный** helper из `infra/sqlite/repositories/lots.py` (промотирован с `_row_to_lot` ради устранения private cross-module import).
+
+- **LotFilters** (`services/lot_query.py`) — `@dataclass(frozen=True)` фильтр-критерии для `LotQueryService.search`. Поля: `regions: tuple[int, ...]`, `area_sqm_min/max: Decimal | None` (имена отражают реальный SQL — НЕ price-aliases), `status: str | None` (валидируется в `__post_init__` против `frozenset({"Свободен", "Зарезервирован"})` → `ValueError`), `fts_query: str | None`. Инвариант: фильтры комбинируются конъюнктивно в `_build_query`.
+
+- **Page[T]** (`services/lot_query.py`) — PEP-695 generic `@dataclass(frozen=True)` envelope для paginated results. Поля: `items: tuple[T, ...]`, `next_cursor: str | None`, `has_more: bool`. Контракт `has_more=True ⇔ next_cursor is not None`. Тип-параметр явный: `Page[LotUserDTO]` в публичном API сервиса.
+
+## Веб-стек (Wave 7)
+
+- **CsrfHostOriginMiddleware** (`web/middleware.py`) — pure-ASGI middleware (НЕ Starlette `BaseHTTPMiddleware` — избегает streaming-проблем): на **state-changing methods** (POST/PUT/PATCH/DELETE) проверяет `Host` против allow-list И `Origin` против whitelist (точное совпадение, lower-case normalised на конструкторе). Mismatch → **421 Misdirected Request** (унифицировано Host- и Origin-fail per [[decisions/ADR-011-dns-rebinding-host-allowlist|ADR-011]] правка). Safe methods (GET/HEAD/OPTIONS) пропускаются. `scope["type"] != "http"` (lifespan/websocket) — early-return. Реализовано в oxy.1.
+
+- **loopback_csrf_config** (`web/middleware.py`) — SSOT-фабрика `(port: int) -> (host_allowlist: frozenset[str], origin_whitelist: frozenset[str])`. Возвращает frozensets для `127.0.0.1:<port>` + `localhost:<port>`. Потребляется всеми точками сборки middleware — устраняет дублирование host-литералов. Реализовано в oxy.1.
+
 ## См. также
 
 - [[decisions-log]]

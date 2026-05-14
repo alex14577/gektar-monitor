@@ -55,7 +55,7 @@ def _parse_dt(raw: str | None) -> datetime | None:
     return parsed
 
 
-def _row_to_lot(row: sqlite3.Row | tuple) -> Lot:
+def row_to_lot(row: sqlite3.Row | tuple) -> Lot:
     """Convert a DB row (all lots columns in schema order) to a Lot."""
     (
         id_,
@@ -270,7 +270,7 @@ class SqliteLotRepository:
             row = cur.fetchone()
             cur.close()
 
-            old_lot: Lot | None = _row_to_lot(row) if row is not None else None
+            old_lot: Lot | None = row_to_lot(row) if row is not None else None
 
             # Step 3 — compute diff inside tx (R3-C2).
             changes: list[FieldChange] = compute_changes(old_lot, lot, tracked)
@@ -409,7 +409,7 @@ class SqliteLotRepository:
         cur.close()
         if row is None:
             return None
-        return _row_to_lot(row)
+        return row_to_lot(row)
 
     def list_active(self, *, limit: int, offset: int) -> list[Lot]:
         """Return active lots ordered by ``date_create DESC``."""
@@ -423,7 +423,7 @@ class SqliteLotRepository:
         )
         rows = cur.fetchall()
         cur.close()
-        return [_row_to_lot(r) for r in rows]
+        return [row_to_lot(r) for r in rows]
 
     # ------------------------------------------------------------------
     # last_known_id — stored in state k/v table as "last_known_id_<region>"

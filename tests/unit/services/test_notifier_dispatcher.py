@@ -887,28 +887,51 @@ def test_recipients_of_unknown_channel_empty():
 # ===========================================================================
 
 
-def test_smtp_failed_event_published_with_pii_safe_detail():
-    """SseSmtpFailed must not contain recipient; detail capped at 200 chars."""
+def test_smtp_failed_event_published_with_pii_safe_detail(caplog):
+    """SseSmtpFailed must not contain PII detail; audit log must contain it.
+
+    Acceptance #2: detail (email-style PII) not in SSE payload.
+    Acceptance #3: detail not in str(event).
+    Acceptance #4: detail IS present in structured log record (audit trail).
+    M3: error_category is a valid ErrorCategory member.
+    """
+    import typing
+
+    from fis_monitor.domain.models import ErrorCategory
+
     dispatcher, registry, _nr, _, __, ___, event_bus, *_ = _make_dispatcher()
     notifier = FakeNotifier("email")
     registry.register(notifier)
     lot = _make_lot_public()
 
-    long_detail = "x" * 500
-    notifier.queue_result(NotifyResult(ok=False, detail=long_detail, retryable=False))
+    pii_detail = "secret@example.com"
+    notifier.queue_result(NotifyResult(ok=False, detail=pii_detail, retryable=False))
 
-    dispatcher._send_one(lot, notifier, "secret@example.com")
+    with caplog.at_level(logging.INFO, logger="fis_monitor.services.notifier_dispatcher"):
+        dispatcher._send_one(lot, notifier, "recipient@example.com")
 
     events = event_bus.smtp_failed_events()
     assert len(events) == 1
     evt = events[0]
-    # SseSmtpFailed has no recipient field (PII-safe model)
+
+    # Acceptance #2-3: PII detail not in SSE event
     assert not hasattr(evt, "recipient")
-    # detail is NOT in the SSE event payload
     assert not hasattr(evt, "detail")
-    # channel_id and attempt_no are present
+    assert pii_detail not in str(evt)
+
+    # Acceptance #4: audit log record carries the detail (not stripped)
+    log_records = [r for r in caplog.records if r.getMessage() == "dispatcher.smtp_failed"]
+    assert log_records, "Expected at least one 'dispatcher.smtp_failed' log record"
+    audit_record = log_records[0]
+    assert audit_record.detail == pii_detail  # type: ignore[attr-defined]
+
+    # channel_id and attempt_no are present in SSE
     assert evt.channel_id == "email"
     assert evt.attempt_no >= 1
+
+    # M3: error_category is a valid closed-enum member
+    valid_categories = typing.get_args(ErrorCategory)
+    assert evt.error_category in valid_categories
 
 
 def test_smtp_failed_detail_truncated_in_log(caplog):
@@ -921,12 +944,15 @@ def test_smtp_failed_detail_truncated_in_log(caplog):
     long_detail = "A" * 300
     notifier.queue_result(NotifyResult(ok=False, detail=long_detail, retryable=False))
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.WARNING, logger="fis_monitor.services.notifier_dispatcher"):
         dispatcher._send_one(lot, notifier, "target@example.com")
 
     # The full 300-char detail must not appear in logs
     assert "A" * 300 not in caplog.text
-    # But 200 chars is fine (detail truncated in _publish_smtp_failed)
+    # The truncated 200-char prefix IS present in the audit log record
+    log_records = [r for r in caplog.records if r.getMessage() == "dispatcher.smtp_failed"]
+    assert log_records, "Expected 'dispatcher.smtp_failed' log record"
+    assert log_records[0].detail == "A" * 200  # type: ignore[attr-defined]
     assert "dispatcher.smtp_failed" in caplog.text
 
 

@@ -154,10 +154,10 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 ### Wave 7 — CSRF + read-side services
 
-- [ ] `oxy.1` — CSRF middleware · sonnet · ждёт `8ov.4` · **MED risk** (security)
-- [ ] `a4t.7` — DiagnosticsService · haiku
-- [ ] `a4t.8` — LotQueryService · haiku
-- [ ] `arl` — Test: Dispatcher маппит NotifyResult.detail в ErrorCategory · sonnet · ждёт `a4t.3`
+- [x] `oxy.1` — CSRF middleware · sonnet · ждёт `8ov.4` · **MED risk** (security)
+- [x] `a4t.7` — DiagnosticsService · haiku
+- [x] `a4t.8` — LotQueryService · haiku
+- [x] `arl` — Test: Dispatcher маппит NotifyResult.detail в ErrorCategory · sonnet · ждёт `a4t.3`
 
 ### Wave 8 — Web routes fan-out
 
@@ -350,6 +350,38 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - **Sub-agent socket-error mid-write** (8ov.2 writer-фаза, 197s) — composition.py (406 LOC) на диске, тесты не написались. Оркестратор сам дописал тесты вместо повторного спавна — быстрее и контекст уже в голове. Pattern: при socket-error в большой Sonnet-task оркестратор оценивает остаток работы и решает сам/новый writer.
 - **Inline stubs vs Optional fields** (decision при старте): выбрана стратегия inline stubs в composition.py с raise NotImplementedError (vs Optional[X] = None в Container dataclass). Pro: канон-shape Infra/Services сохранён; Con: 9 минорных классов в одном файле, чуть-чуть шума. Trade-off в пользу cohesion канона.
 - **Минимальный FullScanService отдельной таской** (d7k spawned по запросу user) вместо stub — добавил полдня работы, но Wave 5 теперь имеет реальный removal-detection вместо placeholder'а. Канон не предписывал это решение — pure product call.
+
+---
+
+### Session (2026-05-14) — Wave 7 finalize (resume after interrupt)
+
+**Цель:** добить незавершённую Wave 7 (4 таски in_progress: oxy.1 CSRF, a4t.7 Diagnostics, a4t.8 LotQuery, arl Dispatcher PII test).
+
+**Состояние на старте:** 5 untracked + 1 modified файл, тесты падают (test_build_zip_happy_path: schema drift на recipient), 14 ruff errors, ни одна таска не закрыта.
+
+**Сделано:**
+- `oxy.1` — review (opus): APPROVE with minors. Vault-reconcile ADR-011 (403→421 унификация + Referer-trim) — оркестратор.
+- `a4t.7` — review #1 (sonnet) NEEDS WORK [2B+5M+minors] → writer iter#1 (sonnet, ~10min): B1 recipient в DIAGNOSTIC_SCHEMA_V1, B2 fail-closed missing-table, M2 atomic tempfile+os.replace zip-write, M3 nested-if collapse, M1/M4/M5 + ruff --fix → review #2 APPROVE. 12/12 tests.
+- `a4t.8` — review #1 NEEDS WORK [2B+4M+minors] → writer iter#1 (sonnet, ~13min): B1 31 новый теста в test_lot_query.py (cursor round-trip, _build_query 8 combos, search() c fakes, has_more, fts NIE, anti-mock pattern), B2 `get_connection()`→`get()` (runtime AttributeError), M1 page_size [1,200] validate, M2 `UserStateRepository.get_many()` добавлен в Protocol → eliminate N+1, M3 `_compute_freshness` через injected Clock (hot/warm/cold), M4 `_row_to_lot`→public `row_to_lot` в infra/sqlite/repositories/lots.py + 3 call-sites + noqa removed. Minors: PEP-695 `class Page[T]`, area_sqm_min/max, status whitelist validation → review #2 APPROVE. 754/757 passed (3 skipped).
+- `arl` — review #1 NEEDS WORK [1B+2M+minor] → writer iter#1 (sonnet, ~9min): B1 caplog at INFO + assert `audit_record.detail == pii_detail`, M2 `pii_detail = "secret@example.com"` + три ассерта (str-not-in-evt, no detail attr, в audit-log есть), M3 `_classify_error(NotifyResult) -> ErrorCategory` (retryable/timeout/5xx/4xx) + assert `evt.error_category in typing.get_args(ErrorCategory)`, minor positive truncation prefix assert → review #2 APPROVE. 30/30 tests.
+
+**Verify оркестратора (playbook §7):**
+- `pytest tests/ -q` → all pass (3 skipped pre-existing).
+- `ruff check` на 10 wave-7 файлах — all checks passed. (Pre-existing RUF001 в tests/domain/conftest.py — НЕ wave-7 surface, commit 81a78f9.)
+
+**Итог wave:** 4/4 closed. Разблокированы: вся Wave 8 (oxy.3/4/5/6/7) + oxy.2 (онбординг-гейт).
+
+**Vault обновления (orchestrator):**
+- `docs/decisions/ADR-011-dns-rebinding-host-allowlist.md` — переписан: унификация 421 для Host- и Origin-fail, strict-Origin-only (Referer вычеркнут), rationale за status-code-унификацию, ссылка на `CsrfHostOriginMiddleware`.
+- `docs/glossary.md` — +9 записей в новых секциях «Сервисы (Wave 7)» и «Веб-стек (Wave 7)»: DiagnosticsService, DIAGNOSTIC_SCHEMA_V1, CloudSyncDetector/DefaultCloudSyncDetector, BuildZipResult, LotQueryService, LotFilters, Page[T], CsrfHostOriginMiddleware, loopback_csrf_config.
+- Нет новых ADR (ADR-011 правка достаточна).
+
+**Workflow-замечания:**
+- **Параллельная Wave-7 фиксация (3 writer-агента одновременно, file disjoint)** — сработала чисто, нулевое пересечение grep-проверено заранее (a4t.7=diagnostics, a4t.8=lot_query, arl=dispatcher). 3 review-цикла + 3 fix-цикла за один тур без блокировок.
+- **Sub-agent extension Protocol (a4t.8 M2)**: writer добавил `get_many` в `UserStateRepository` Protocol сам — корректное расширение DIP-seam, но **реализация в infra-репозитории НЕ добавлена** (есть follow-up flag в reviewer'е #2). Если `LotQueryService` подключится к боевому wiring через bye.7 — runtime AttributeError. Создать follow-up bd-issue при подключении.
+- **Pre-existing ruff errors** в tests/domain/conftest.py (3 RUF001 ambiguous Cyrillic К/K) — не wave-7 surface, оставлены как есть.
+
+**Следующая сессия:** Wave 8 — Web routes fan-out. 5 тасок (oxy.3/4/5/6/7), все haiku кроме oxy.4 (ждёт `bye.6`). Высокая параллельность — разные route-модули, минимальные пересечения через `web/router.py`. После Wave 8 — Wave 9 (oxy.2 onboarding-gate + 8ov.3 three-phase shutdown HIGH risk), потом Wave 10 (vgm.5 E2E smoke). **3 волны до MVP**.
 
 ---
 

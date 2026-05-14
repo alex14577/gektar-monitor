@@ -42,8 +42,10 @@ from fis_monitor.domain.interfaces import (
     SettingsRepository,
 )
 from fis_monitor.domain.models import (
+    ErrorCategory,
     LotPublicDTO,
     NotificationRecord,
+    NotifyResult,
     SseSmtpFailed,
 )
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
@@ -61,6 +63,29 @@ MAX_TOTAL_ATTEMPTS: int = 10
 _CHANNEL_EMAIL = "email"
 _CHANNEL_BROWSER = "browser"
 _CHANNEL_HEARTBEAT = "heartbeat"
+
+
+def _classify_error(result: NotifyResult) -> ErrorCategory:
+    """Map a ``NotifyResult`` failure to a closed ``ErrorCategory``.
+
+    Uses ``retryable`` as the primary signal — retryable failures are
+    transient network/service errors; non-retryable are treated as
+    ``http_4xx`` (auth / bad-request class) unless the detail suggests
+    an internal fault.
+
+    This keeps ``error_category`` semantically useful while preserving
+    the invariant that ``SseSmtpFailed.error_category`` is always a
+    valid ``ErrorCategory`` member (closed enum, never a raw exception
+    class name).
+    """
+    if result.retryable:
+        return "network"
+    detail_lower = (result.detail or "").lower()
+    if "timeout" in detail_lower:
+        return "timeout"
+    if "5xx" in detail_lower or "server error" in detail_lower:
+        return "http_5xx"
+    return "http_4xx"
 
 
 class NotifierDispatcher:
@@ -318,15 +343,19 @@ class NotifierDispatcher:
         lot: LotPublicDTO,
         channel_id: str,
         attempt_no: int,
-        result: object,
+        result: NotifyResult,
     ) -> None:
         """Publish ``SseSmtpFailed`` on the event bus (PII-safe).
 
         ``result.detail`` is truncated to 200 chars before logging;
         it is NOT included in the SSE payload (see ``SseSmtpFailed`` model).
         The recipient address is NEVER included.
+
+        ``error_category`` is derived via ``_classify_error()`` so it is
+        always a valid closed-``ErrorCategory`` member — never a raw
+        exception class name or free-form string.
         """
-        detail: str = getattr(result, "detail", "")
+        detail: str = result.detail or ""
         detail_safe = detail[:200] if detail else ""
         logger.warning(
             "dispatcher.smtp_failed",
@@ -341,6 +370,6 @@ class NotifierDispatcher:
             timestamp=self._clock.now(),
             channel_id=channel_id,
             attempt_no=attempt_no,
-            error_category="network",  # best-effort; notifier could expose typed category
+            error_category=_classify_error(result),
         )
         self._event_bus.publish(event)
