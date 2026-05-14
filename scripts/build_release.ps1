@@ -144,8 +144,7 @@ Copy-Item $BinaryDir -Destination (Join-Path $StageRoot "bin") -Recurse
 # browsers/ ← downloaded Chromium
 Copy-Item $BrowsersDir -Destination (Join-Path $StageRoot "browsers") -Recurse
 
-# Launchers and README
-Copy-Item (Join-Path $TemplatesDir "run.sh")    (Join-Path $StageRoot "run.sh")
+# Launcher (Windows only — run.sh принадлежит Linux-сборке) and README
 Copy-Item (Join-Path $TemplatesDir "run.bat")   (Join-Path $StageRoot "run.bat")
 Copy-Item (Join-Path $TemplatesDir "README.txt") (Join-Path $StageRoot "README.txt")
 

@@ -122,9 +122,8 @@ cp -r "$BINARY_DIR" "$STAGE_ROOT/bin"
 # browsers/ ← downloaded Chromium
 cp -r "$BROWSERS_DIR" "$STAGE_ROOT/browsers"
 
-# Launcher scripts and README
+# Launcher script (Linux only — run.bat принадлежит Windows-сборке) and README
 install -m 0755 "$TEMPLATES_DIR/run.sh" "$STAGE_ROOT/run.sh"
-install -m 0644 "$TEMPLATES_DIR/run.bat" "$STAGE_ROOT/run.bat"
 install -m 0644 "$TEMPLATES_DIR/README.txt" "$STAGE_ROOT/README.txt"
 
 # Verify expected layout
