@@ -38,7 +38,7 @@ function Get-ProjectVersion {
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-$ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir   = $PSScriptRoot
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $BuildDir    = Join-Path $ProjectRoot "build"
 $DistDir     = Join-Path $ProjectRoot "dist"
