@@ -67,8 +67,11 @@ class OnboardingService(Protocol):
     # Raises InvalidTransitionError(current, requested) при провале guard.
 
     def skip_email(self) -> None: ...
-    # Atomic SET state.email_skipped=true. Применяется только в state
-    # smtp_configured или recipients_set.
+    # Atomic SET state.email_skipped=true. Применяется в email-фазе:
+    # regions_set (step 2 «Настроить позже»), smtp_configured (step 3 skip),
+    # recipients_set (step 4 skip). Запрещён в not_started и completed.
+    # Историческое: до 0vn разрешён только в {smtp_configured, recipients_set} —
+    # расширен на regions_set чтобы убрать chicken-and-egg на step 2.
 
     def url_for_current_step(self) -> str: ...
     # Маппит state на URL UI: regions_set → /onboarding/smtp, и т.д.

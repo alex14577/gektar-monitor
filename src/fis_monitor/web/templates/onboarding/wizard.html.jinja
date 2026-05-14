@@ -1,8 +1,10 @@
 {# ========================================================================
    onboarding/wizard.html.jinja — full-screen wizard (4 шага).
    Сервер передаёт `step` (1..4) и формы предыдущих шагов через `data`.
-   POST на /onboarding/save?step=N. Финальный шаг ставит flag onboarded=true
-   и редиректит на /.
+   Submit через htmx (hx-post → HX-Redirect или re-render .wiz__inner).
+   Plain form-submit без Origin блокируется CsrfHostOriginMiddleware (421);
+   htmx всегда шлёт Origin → одинаково работает в Firefox/Chrome/Safari.
+   Финальный шаг ставит state=COMPLETED и редиректит на /.
    ======================================================================== #}
 {% extends "base.html.jinja" %}
 
@@ -21,11 +23,8 @@
       </div>
     </header>
 
-    <form class="wiz__body"
-          method="post"
-          action="/onboarding/save?step={{ step }}"
-          enctype="application/x-www-form-urlencoded"
-          autocomplete="on">
+    {# Form БЕЗ method/action — submission через htmx на кнопках в footer. #}
+    <form class="wiz__body" autocomplete="on">
       <div class="wiz__inner">
         {% if step == 1 %}
           {% include "onboarding/_step1.html.jinja" %}
@@ -47,11 +46,29 @@
 
         <div style="display: flex; gap: 8px;">
           {% if step == 2 %}
-            <button class="btn btn--ghost" type="submit" name="action" value="skip">Настроить позже</button>
+            <button class="btn btn--ghost"
+                    type="button"
+                    name="action" value="skip"
+                    hx-post="/onboarding/save?step={{ step }}"
+                    hx-include="closest form"
+                    hx-target=".wiz__inner"
+                    hx-swap="innerHTML">Настроить позже</button>
           {% elif step == 3 %}
-            <button class="btn btn--ghost" type="submit" name="action" value="skip">Пропустить — только браузерные</button>
+            <button class="btn btn--ghost"
+                    type="button"
+                    name="action" value="skip"
+                    hx-post="/onboarding/save?step={{ step }}"
+                    hx-include="closest form"
+                    hx-target=".wiz__inner"
+                    hx-swap="innerHTML">Пропустить — только браузерные</button>
           {% endif %}
-          <button class="btn btn--primary btn--lg" type="submit" name="action" value="next">
+          <button class="btn btn--primary btn--lg"
+                  type="button"
+                  name="action" value="next"
+                  hx-post="/onboarding/save?step={{ step }}"
+                  hx-include="closest form"
+                  hx-target=".wiz__inner"
+                  hx-swap="innerHTML">
             {{ 'Открыть панель →' if step == 4 else 'Дальше →' }}
           </button>
         </div>

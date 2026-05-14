@@ -233,11 +233,16 @@ class TestEmailSkipped:
         svc.skip_email()
         assert (KEY_EMAIL_SKIPPED, "true") in repo.set_calls
 
-    def test_skip_email_only_allowed_in_smtp_configured_or_recipients_set(self) -> None:
-        """skip_email raises in all other states."""
+    def test_skip_email_allowed_in_regions_set(self) -> None:
+        """skip_email at REGIONS_SET — step 2 «Настроить позже» CTA (0vn fix)."""
+        svc, repo, _ = _service(state=OnboardingState.REGIONS_SET)
+        svc.skip_email()
+        assert (KEY_EMAIL_SKIPPED, "true") in repo.set_calls
+
+    def test_skip_email_disallowed_outside_email_phase(self) -> None:
+        """skip_email raises in NOT_STARTED and COMPLETED — pre/post email-phase."""
         disallowed_states = [
             OnboardingState.NOT_STARTED,
-            OnboardingState.REGIONS_SET,
             OnboardingState.COMPLETED,
         ]
         for state in disallowed_states:

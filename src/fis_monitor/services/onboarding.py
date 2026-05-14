@@ -123,15 +123,27 @@ class OnboardingService:
     def skip_email(self) -> None:
         """Set the email_skipped flag.
 
-        Only valid in ``smtp_configured`` or ``recipients_set``.
+        Allowed once the user has reached the email-configuration phase:
+        ``regions_set`` (step 2 — кнопка «Настроить позже» прямо на SMTP-форме),
+        ``smtp_configured`` (step 3 — пропустить получателей), or
+        ``recipients_set`` (step 4 — пропустить тест-email).
         Raises ``InvalidTransitionError`` in any other state.
+
+        Note: extended from {smtp_configured, recipients_set} to also include
+        regions_set per 0vn runtime fix — без этого «Настроить позже» на step 2
+        упирался в chicken-and-egg: невозможно advance до smtp_configured без
+        email_skipped, и невозможно поставить email_skipped до smtp_configured.
         """
         curr = self._repo.get_onboarding()
-        allowed = {OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET}
+        allowed = {
+            OnboardingState.REGIONS_SET,
+            OnboardingState.SMTP_CONFIGURED,
+            OnboardingState.RECIPIENTS_SET,
+        }
         if curr not in allowed:
             raise InvalidTransitionError(
                 curr.value,
-                "smtp_configured|recipients_set",
+                "regions_set|smtp_configured|recipients_set",
                 "skip_email",
             )
         self._repo.set(KEY_EMAIL_SKIPPED, "true")
