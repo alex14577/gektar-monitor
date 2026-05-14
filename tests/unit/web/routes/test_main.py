@@ -23,7 +23,13 @@ from fastapi.testclient import TestClient
 
 from fis_monitor.domain.interfaces import ConfigSubscription
 from fis_monitor.domain.models import SessionStatus, Settings
-from fis_monitor.web.deps import get_config_source, get_session_probe, get_templates
+from fis_monitor.services.login import LoginStatus
+from fis_monitor.web.deps import (
+    get_config_source,
+    get_login,
+    get_session_probe,
+    get_templates,
+)
 from fis_monitor.web.routes.main import router
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 from tests.factories import make_settings
@@ -92,11 +98,19 @@ def _make_app(
     fake_probe = FakeSessionProbe(status=session_status)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+    # Real FakeSessionProbe.check() never raises NotImplementedError, so the
+    # fallback to LoginService.status() is dormant in these tests. We still
+    # override get_login so the dep resolver does not touch app.state.container.
+    class _StubLogin:
+        def status(self) -> LoginStatus:
+            return LoginStatus(running=False, last_outcome=None)
+
     app = FastAPI()
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(router)
     app.dependency_overrides[get_config_source] = lambda: fake_cfg
     app.dependency_overrides[get_session_probe] = lambda: fake_probe
+    app.dependency_overrides[get_login] = lambda: _StubLogin()
     app.dependency_overrides[get_templates] = lambda: templates
     return app, fake_cfg, fake_probe
 

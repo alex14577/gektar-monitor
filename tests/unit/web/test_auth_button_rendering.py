@@ -17,7 +17,13 @@ from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
 from fis_monitor.domain.models import SessionStatus, Settings
-from fis_monitor.web.deps import get_config_source, get_session_probe, get_templates
+from fis_monitor.services.login import LoginStatus
+from fis_monitor.web.deps import (
+    get_config_source,
+    get_login,
+    get_session_probe,
+    get_templates,
+)
 from fis_monitor.web.routes.main import router
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 from tests.factories import make_settings
@@ -69,6 +75,12 @@ def _make_app(
     app.include_router(router)
     app.dependency_overrides[get_config_source] = _FakeConfigSource
     app.dependency_overrides[get_session_probe] = lambda: _FakeSessionProbe(session_status)
+
+    class _StubLogin:
+        def status(self) -> LoginStatus:
+            return LoginStatus(running=False, last_outcome=None)
+
+    app.dependency_overrides[get_login] = lambda: _StubLogin()
     app.dependency_overrides[get_templates] = lambda: templates
     return app
 

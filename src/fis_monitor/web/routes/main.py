@@ -20,7 +20,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from fis_monitor.domain.models import SessionStatus, Settings
-from fis_monitor.web.deps import get_config_source, get_session_probe, get_templates
+from fis_monitor.services.login import LoginService
+from fis_monitor.web.deps import (
+    get_config_source,
+    get_login,
+    get_session_probe,
+    get_templates,
+)
 
 router = APIRouter(prefix="", tags=["main"])
 
@@ -58,6 +64,7 @@ async def feed_page(
     request: Request,
     config_source: object = Depends(get_config_source),
     session_probe: object = Depends(get_session_probe),
+    login: LoginService = Depends(get_login),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
     """Render the main feed page (state=COMPLETED guaranteed by middleware).
@@ -71,13 +78,21 @@ async def feed_page(
     settings: Settings = config_source.current()  # type: ignore[attr-defined]
     # SessionProbe.check() in production graph is currently
     # _NotImplementedSessionProbe (bd a4t.8 — HttpSessionProbe deferred).
-    # Defensive fallback: NotImplementedError → assume EXPIRED so the
-    # session-expired modal renders with the "Войти через Госуслуги" CTA —
-    # correct default for a fresh post-onboarding instance with no cookies yet.
+    # Defensive fallback: NotImplementedError → consult LoginService.
+    # If the user has just completed a successful headed login in this process,
+    # LoginService.status().last_outcome.success is True — treat session as
+    # ACTIVE so the "Сессия истекла" modal disappears after the post-login
+    # window.location.reload() in auth.js. Otherwise default to EXPIRED so a
+    # fresh post-onboarding instance with no cookies surfaces the login CTA.
     try:
         raw_status: SessionStatus = session_probe.check()  # type: ignore[attr-defined]
     except NotImplementedError:
-        raw_status = SessionStatus.EXPIRED
+        last = login.status().last_outcome
+        raw_status = (
+            SessionStatus.ACTIVE
+            if last is not None and last.success
+            else SessionStatus.EXPIRED
+        )
 
     session = _build_session_context(raw_status)
     monitor = _build_monitor_context(settings)
