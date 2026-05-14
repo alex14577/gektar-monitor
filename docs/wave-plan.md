@@ -198,6 +198,11 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 - [x] `vgm.5` — E2E smoke (lifespan up → SSE event → shutdown → lock released). Sonnet writer + sonnet reviewer APPROVE+2majors → fix-iter 1 APPROVE. Strategy: hand-wired minimal Container (no DB, no Playwright) + async SSE consumer в daemon thread. Found production wiring gap: `container.infra.sse_streamer` не существует → bd `ydj` (P1).
 - [ ] `4fw` (P3) — `config_subscription.unsubscribe` в lifespan phase 2. Defer: требует `MonitorCycleService.on_config_reload()` который сейчас не существует. Текущий cycle уже re-reads `config_source.current()` каждую итерацию loop'а, push-уведомления не критичны для MVP.
 
+**10f — closeout (production wiring gaps):**
+- [x] `ydj` (P1) — SseStreamer wiring через late-binding `bind_executor()` (mirror LoginService j19). `Infra.sse_streamer` field, lifespan вызывает `bind_executor(sse_executor)` после создания pool'а. Sonnet writer + sonnet reviewer APPROVE 0/0.
+- [x] `2h5` (P1) — `SqliteUserStateRepository`: UPSERT per-method на `lot_user_state` + `state` KV для `last_visit_at`, chunked `get_many` (500 ids), tzinfo=UTC контракт. Sonnet writer + sonnet reviewer APPROVE 0/0.
+- [x] `z6b` (P1) — wire `SqliteUserStateRepository` + `DiagnosticsService` + `LotQueryService` в `build_container` (заменены 3 `_NotImplemented*` стаба). Sonnet writer + sonnet reviewer APPROVE с 1 latent-blocker-как-minor → fix-iter 1: `ConnectionProvider.get_connection()` → `.get()` rename (Protocol vs concrete drift; 20 files, чистый rename). Reviewer #2 APPROVE 0/0.
+
 ### Side-track (параллельно с Wave 2-8) — Logging
 
 Изолированы (`utils/logging/`), последовательны внутри цепочки:
