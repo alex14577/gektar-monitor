@@ -187,6 +187,20 @@ def test_onboarding_prefix_whitelisted() -> None:
     assert resp.status_code == 200
 
 
+def test_bare_onboarding_whitelisted() -> None:
+    """M1 (53e review): GET /onboarding (no trailing slash) — exact-match whitelist.
+
+    Without this rule the bare path falls through to the state check and the
+    middleware short-circuits the router's own bookmark-friendly entry route.
+    """
+    fake = FakeOnboardingService(OnboardingState.NOT_STARTED)
+    client = TestClient(_build_app(fake), follow_redirects=False)
+    resp = client.get("/onboarding")
+    assert resp.status_code == 200
+    # State must NOT have been queried — exact whitelist short-circuits.
+    assert fake.current_call_count == 0
+
+
 def test_sse_whitelisted() -> None:
     """Test 7: not_started + GET /sse/events → 200 (no redirect)."""
     fake = FakeOnboardingService(OnboardingState.NOT_STARTED)

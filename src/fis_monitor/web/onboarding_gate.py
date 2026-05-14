@@ -87,7 +87,13 @@ class OnboardingGateMiddleware:
         path: str = scope.get("path", "/")
 
         # Whitelisted prefixes — pass through without reading the DB.
-        if any(path.startswith(prefix) for prefix in _WHITELIST_PREFIXES):
+        # Bare "/onboarding" (no trailing slash) is also whitelisted so the
+        # router's bookmark-friendly entry route is reachable in production;
+        # otherwise the middleware would intercept it before the router could
+        # render its own server-derived redirect (M1 fix from 53e review).
+        if path == "/onboarding" or any(
+            path.startswith(prefix) for prefix in _WHITELIST_PREFIXES
+        ):
             await self._app(scope, receive, send)
             return
 
