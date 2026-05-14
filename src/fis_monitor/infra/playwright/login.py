@@ -161,7 +161,20 @@ class PlaywrightLoginSession:
                         _log.debug("_run_login: browser.close() raised", exc_info=True)
 
         except Exception as exc:
-            return self._map_exception(exc)
+            outcome, unmapped = self._map_exception(exc)
+            if unmapped:
+                _log.error(
+                    "PlaywrightLoginSession._run_login: unexpected exception type=%s",
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+            else:
+                _log.debug(
+                    "PlaywrightLoginSession._run_login: mapped exception type=%s hint=%s",
+                    type(exc).__name__,
+                    outcome.error,
+                )
+            return outcome
 
     def _wait_for_login(
         self,
@@ -189,7 +202,20 @@ class PlaywrightLoginSession:
         try:
             page.wait_for_url(_LOGIN_SUCCESS_URL_GLOB, timeout=timeout_ms)
         except Exception as exc:
-            return self._map_exception(exc)
+            outcome, unmapped = self._map_exception(exc)
+            if unmapped:
+                _log.error(
+                    "PlaywrightLoginSession._wait_for_login: unexpected exception type=%s",
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+            else:
+                _log.debug(
+                    "PlaywrightLoginSession._wait_for_login: mapped exception type=%s hint=%s",
+                    type(exc).__name__,
+                    outcome.error,
+                )
+            return outcome
 
         # Success: let Playwright persist the context (cookies saved to profile).
         _log.info("PlaywrightLoginSession: login succeeded")
@@ -216,25 +242,39 @@ class PlaywrightLoginSession:
         return _handler
 
     @staticmethod
-    def _map_exception(exc: BaseException) -> LoginOutcome:
-        """Map a Playwright (or other) exception to a ``LoginOutcome`` error hint."""
-        # Import lazily to avoid hard dependency at module load time.
+    def _map_exception(exc: BaseException) -> tuple[LoginOutcome, bool]:
+        """Map a Playwright (or other) exception to a ``LoginOutcome`` error hint.
+
+        Returns:
+            A ``(outcome, unmapped)`` pair where ``unmapped`` is ``True`` when
+            the exception did not match any known pattern (caller should log at
+            ERROR level; known hints are logged at DEBUG by the caller).
+        """
         exc_type = type(exc).__name__
         exc_str = str(exc).lower()
 
         hint: LoginErrorHint
+        unmapped = False
         if "targetclosed" in exc_type.lower() or "targetclosed" in exc_str:
             hint = "cancelled"
         elif "timeout" in exc_type.lower() or "timeout" in exc_str:
             hint = "timeout"
         elif "disconnect" in exc_type.lower() or "disconnect" in exc_str:
             hint = "playwright_disconnect"
+        elif "executable doesn't exist" in exc_str or "please run: playwright install" in exc_str:
+            hint = "playwright_missing_binary"
+        elif (
+            "host system is missing dependencies" in exc_str
+            or (
+                "missing" in exc_str
+                and any(lib in exc_str for lib in ("libnss", "libatk", "libgtk"))
+            )
+        ):
+            hint = "playwright_missing_deps"
         elif "playwright" in exc_type.lower() or "playwright" in exc_str:
             hint = "playwright_other"
         else:
-            _log.debug(
-                "PlaywrightLoginSession: unexpected exception type=%s", exc_type, exc_info=exc
-            )
             hint = "playwright_other"
+            unmapped = True
 
-        return LoginOutcome(success=False, cookies_updated=False, error=hint)
+        return LoginOutcome(success=False, cookies_updated=False, error=hint), unmapped

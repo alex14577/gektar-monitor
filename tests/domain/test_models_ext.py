@@ -339,6 +339,8 @@ def test_login_outcome_error_literal_closed_set():
         "cancelled",
         "playwright_disconnect",
         "playwright_timeout",
+        "playwright_missing_binary",
+        "playwright_missing_deps",
         "playwright_other",
         None,
     ):
@@ -364,6 +366,8 @@ def test_login_outcome_error_literal_closed_set():
         "cancelled",
         "playwright_disconnect",
         "playwright_timeout",
+        "playwright_missing_binary",
+        "playwright_missing_deps",
         "playwright_other",
     }
     # The unresolved-source annotation must also not contain the legacy

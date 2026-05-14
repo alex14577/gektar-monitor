@@ -44,6 +44,8 @@
     if (!error) return 'Ошибка входа';
     if (error === 'timeout') return 'Время вышло';
     if (error === 'cancelled') return 'Отменено';
+    if (error === 'playwright_missing_binary') return 'Браузер не установлен. Выполните: playwright install chromium';
+    if (error === 'playwright_missing_deps') return 'Не хватает системных библиотек для браузера. Выполните: sudo playwright install-deps chromium';
     if (String(error).indexOf('playwright') === 0) return 'Ошибка браузера';
     return 'Ошибка входа: ' + error;
   }

@@ -11,6 +11,9 @@ Test matrix:
 6. ``test_deadline_timeout``              — elapsed > deadline returns error="timeout".
 7. ``test_headless_false``                — launch_persistent_context called with headless=False.
 8. ``test_di_playwright_factory``         — custom playwright_factory is used (DI).
+9. ``test_map_exception_missing_binary``  — _map_exception maps missing-binary message to correct hint.
+10. ``test_map_exception_missing_deps``   — _map_exception maps missing-deps message to correct hint.
+11. ``test_map_exception_unmapped_logs_error`` — unmapped exception triggers ERROR log.
 """
 
 from __future__ import annotations
@@ -335,3 +338,78 @@ def test_di_playwright_factory(tmp_path: Path) -> None:
     session.open_headed_login(deadline=60.0)
 
     assert custom_factory.called, "custom playwright_factory was not called"
+
+
+# ---------------------------------------------------------------------------
+# Test 9: _map_exception → playwright_missing_binary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "BrowserType.launch_persistent_context: Executable doesn't exist at /home/alex/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome",
+        "Looks like Playwright was just installed... Please run: playwright install",
+    ],
+)
+def test_map_exception_missing_binary(message: str) -> None:
+    """Exceptions mentioning a missing executable map to playwright_missing_binary."""
+    exc = RuntimeError(message)
+    outcome, unmapped = PlaywrightLoginSession._map_exception(exc)
+    assert outcome.error == "playwright_missing_binary"
+    assert outcome.success is False
+    assert unmapped is False
+
+
+# ---------------------------------------------------------------------------
+# Test 10: _map_exception → playwright_missing_deps
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Host system is missing dependencies",
+        "error while loading shared libraries: missing libnss3.so",
+        "missing libatk-1.0.so.0 required by chromium",
+        "could not load libgtk-3.so.0: missing",
+    ],
+)
+def test_map_exception_missing_deps(message: str) -> None:
+    """Exceptions mentioning missing system libraries map to playwright_missing_deps."""
+    exc = RuntimeError(message)
+    outcome, unmapped = PlaywrightLoginSession._map_exception(exc)
+    assert outcome.error == "playwright_missing_deps"
+    assert outcome.success is False
+    assert unmapped is False
+
+
+# ---------------------------------------------------------------------------
+# Test 11: unmapped exception → ERROR log (via open_headed_login integration)
+# ---------------------------------------------------------------------------
+
+
+def test_map_exception_unmapped_logs_error(tmp_path: Path, caplog) -> None:  # type: ignore[no-untyped-def]
+    """An exception that matches no known pattern must be logged at ERROR level."""
+    import logging
+
+    strange_exc = ValueError("something completely unknown and unrelated")
+
+    def _raising_wait_for_url(*args, **kwargs):
+        raise strange_exc
+
+    page = _make_page_mock(wait_for_url_side_effect=_raising_wait_for_url)
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+
+    session = _make_session(playwright_factory=factory, profile_dir=tmp_path)
+
+    with caplog.at_level(logging.ERROR, logger="fis_monitor.infra.playwright.login"):
+        outcome = session.open_headed_login(deadline=60.0)
+
+    assert outcome.success is False
+    assert outcome.error == "playwright_other"
+    assert any(
+        record.levelno == logging.ERROR
+        for record in caplog.records
+    ), "Expected at least one ERROR log record for unmapped exception"
