@@ -6,6 +6,8 @@ Tests:
 - lot_detail_url produces correct URL for a lot_id
 - region=1 (int) formats correctly (not "[1]" etc.)
 - frozen dataclass rejects attribute mutation
+- default sort=-DATE_CREATE is appended raw (RFC 3986 unreserved chars)
+- custom sort=-DATE_UPDATE is substituted correctly
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ import dataclasses
 
 import pytest
 
-from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
+from fis_monitor.infra.http.url_builder import DEFAULT_LIST_SORT, TorgiUrlBuilder
 
 _DEFAULT_BASE = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai"
 _CUSTOM_BASE = "http://localhost:8765"
@@ -28,7 +30,7 @@ class TestLotListUrl:
         assert url == (
             "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai"
             "/cabinet/free-lot"
-            "?FreeLotSearch%5BrfSubjectId%5D%5B%5D=27&use_filter_pocket=1"
+            "?FreeLotSearch%5BrfSubjectId%5D%5B%5D=27&use_filter_pocket=1&sort=-DATE_CREATE"
         )
 
     def test_custom_base_url(self) -> None:
@@ -37,7 +39,7 @@ class TestLotListUrl:
         assert url == (
             "http://localhost:8765"
             "/cabinet/free-lot"
-            "?FreeLotSearch%5BrfSubjectId%5D%5B%5D=27&use_filter_pocket=1"
+            "?FreeLotSearch%5BrfSubjectId%5D%5B%5D=27&use_filter_pocket=1&sort=-DATE_CREATE"
         )
 
     def test_region_1_formats_as_scalar(self) -> None:
@@ -52,6 +54,21 @@ class TestLotListUrl:
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
         url = builder.lot_list_url(region=27)
         assert "use_filter_pocket=1" in url
+
+    def test_default_sort_is_date_create_desc(self) -> None:
+        """Default sort=DEFAULT_LIST_SORT ("-DATE_CREATE") appears raw in URL."""
+        assert DEFAULT_LIST_SORT == "-DATE_CREATE"
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=27)
+        # "-" and "_" are RFC 3986 unreserved chars — no encoding needed.
+        assert "sort=-DATE_CREATE" in url
+
+    def test_custom_sort_date_update(self) -> None:
+        """Custom sort='-DATE_UPDATE' substitutes correctly."""
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=5, sort="-DATE_UPDATE")
+        assert "sort=-DATE_UPDATE" in url
+        assert "DATE_CREATE" not in url
 
 
 class TestLotDetailUrl:

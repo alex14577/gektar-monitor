@@ -93,6 +93,7 @@ class FakeHttpClient:
 
     def __init__(self, response_text: str = "<html/>", raises: Exception | None = None) -> None:
         self.calls: list[str] = []
+        self.headers_by_call: list[dict[str, str] | None] = []
         self._response_text = response_text
         self._raises = raises
 
@@ -105,6 +106,7 @@ class FakeHttpClient:
         timeout: float | None = None,
     ) -> HttpResponse:
         self.calls.append(url)
+        self.headers_by_call.append(dict(headers) if headers is not None else None)
         if self._raises is not None:
             raise self._raises
         return HttpResponse(
@@ -817,3 +819,75 @@ class TestAllFakeMethodsInvoked:
         assert isinstance(clock.monotonic(), float)
         assert clock.now_calls == 1
         assert clock.monotonic_calls == 1
+
+
+class TestPjaxHeaders:
+    """run_cycle passes PJAX headers to http.get on list-page fetch."""
+
+    def test_list_fetch_sends_pjax_headers(self) -> None:
+        """_run_cycle_inner must call http.get with X-PJAX and X-PJAX-Container headers."""
+        from fis_monitor.services.monitor_cycle import _PJAX_HEADERS
+
+        http = FakeHttpClient()
+        svc, *_ = _make_service(
+            http=http,
+            list_parser=FakeListParser(rows=[]),
+        )
+
+        svc.run_cycle(_REGION)
+
+        assert len(http.calls) == 1, "expected exactly one HTTP call"
+        assert len(http.headers_by_call) == 1
+        sent_headers = http.headers_by_call[0]
+        assert sent_headers is not None, "headers must not be None"
+        for key, value in _PJAX_HEADERS.items():
+            assert key in sent_headers, f"expected header {key!r} to be sent"
+            assert sent_headers[key] == value, (
+                f"header {key!r}: expected {value!r}, got {sent_headers[key]!r}"
+            )
+
+
+class TestParserPjaxFragmentCompat:
+    """SelectolaxListParser handles PJAX fragment (no <html> wrapper) correctly."""
+
+    def test_parser_parses_pjax_fragment_with_one_tr(self) -> None:
+        """Synthetic PJAX fragment with one tr[data-key] — parser stays compatible.
+
+        PJAX response starts with <div> (not <html>). Parser must find tbody and
+        extract lot rows — confirms compat without needing a real PJAX fixture.
+        """
+        from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
+
+        # Minimal PJAX fragment (no <html>/<head>/<body> wrapper)
+        fragment = (
+            '<div id="free-lots-pjax-container">'
+            "<table><tbody>"
+            '<tr data-key="100">'
+            '<td data-col-seq="0"><a>77:01:0001:1</a></td>'
+            '<td data-col-seq="1">1 000 кв.м</td>'
+            '<td data-col-seq="2">Москва</td>'
+            '<td data-col-seq="3">ЦАО</td>'
+            '<td data-col-seq="4"></td>'
+            '<td data-col-seq="5">г. Москва</td>'  # noqa: RUF001
+            '<td data-col-seq="6">0</td>'
+            '<td data-col-seq="7">Земли населённых пунктов</td>'
+            '<td data-col-seq="8">ИЖС</td>'
+            '<td title="ДГИ г. Москвы" data-col-seq="9">ДГИ</td>'  # noqa: RUF001
+            '<td data-col-seq="10">14.05.2026</td>'
+            '<td data-col-seq="11">Росреестр</td>'
+            '<td data-col-seq="12">14.05.2026</td>'
+            '<td data-col-seq="13">Свободен</td>'
+            "<td></td><td></td>"  # extra cols (parser checks >=14)
+            "</tr>"
+            "</tbody></table>"
+            "</div>"
+        )
+
+        parser = SelectolaxListParser()
+        rows = parser.parse(fragment)
+
+        assert len(rows) == 1, f"expected 1 row, got {len(rows)}: {rows}"
+        assert rows[0].id == 100
+        assert rows[0].cadastral_no == "77:01:0001:1"
+        assert rows[0].area_sqm == 1000
+        assert rows[0].region == "Москва"

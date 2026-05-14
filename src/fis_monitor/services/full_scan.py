@@ -44,6 +44,7 @@ from fis_monitor.domain.interfaces import (
     ListParser,
     LotRepository,
 )
+from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 
 logger = logging.getLogger(__name__)
@@ -234,9 +235,11 @@ class FullScanService:
 
         MVP: single page; full pagination is out of scope.
         """
+        # Default sort=-DATE_CREATE is irrelevant for full-scan id-collection
+        # (we read all ids regardless of order); kept for URL uniformity.
         url = self._url_builder.lot_list_url(region=region)
         try:
-            response = self._http.get(url)
+            response = self._http.get(url, headers=_PJAX_HEADERS)
         except UpstreamError:
             logger.warning(
                 "full_scan: HTTP error fetching region=%s — skipping region",

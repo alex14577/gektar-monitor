@@ -58,6 +58,7 @@ from fis_monitor.domain.models import (
     SseLotNew,
     TrackedField,
 )
+from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
 
@@ -342,7 +343,7 @@ class MonitorCycleService:
         try:
             self.cycle_progress_signal.set()
             try:
-                response = self._http.get(url)
+                response = self._http.get(url, headers=_PJAX_HEADERS)
             finally:
                 self.cycle_progress_signal.clear()
         except UpstreamError as exc:
