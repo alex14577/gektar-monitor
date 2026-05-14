@@ -649,6 +649,17 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 
 **Итог:** 1/1 closed (`7y3`).
 
+### Session (2026-05-14, part 13) — Docs fix `gektar_monitor-9rp`
+
+**Цель:** Полный перезапись `docs/web/api-reference.md` под фактические роуты.
+
+**Сделано:**
+- `9rp` — `docs/web/api-reference.md` переписан полностью: 8 роутеров (auth/3, lots/2, notifications/1, settings/5, diagnostics/1, events/1, onboarding/3+5 UI, main/1). Удалено ~20 несуществующих endpoints (`/api/login`, `/api/stream`, `/api/config`, `/api/lots/mark-seen`, `/api/status`, `/api/cycles`, `/api/enrichment`, `/api/export/diagnostic`, `/api/notifiers` и др.). Исправлен `POST /onboarding/smtp-test` — поля `smtp_login/smtp_pass` вместо старых `smtp_user/smtp_password/use_default`. Vault: glossary +0 записей (ADR не нужен) — исправлена одна запись `LotPublicDTO vs LotUserDTO`: стale `GET /api/lots/{id}/user-state` → актуальные `GET /lots` + `GET /lots/{lot_id}`.
+
+**Итог:** 1/1 closed. Vault: no новых ADR; glossary 1 fix.
+
+---
+
 ### Шаблон для будущих сессий
 
 ```markdown

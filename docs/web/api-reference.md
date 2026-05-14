@@ -1,186 +1,342 @@
 # API Reference
 
-Локальный HTTP API приложения. Bind: `127.0.0.1:8080`.
-Аутентификация: CSRF (см. [[decisions-log]] → CSRF).
-Все изменяющие запросы требуют `X-CSRF-Token` header + проверку `Origin`/`Host`.
+Локальный HTTP API приложения. Bind: `127.0.0.1:8080` (см. [[decisions/ADR-011-dns-rebinding-host-allowlist|ADR-011]]).
 
-Секреты (пароли, токены) во всех GET-ответах маскируются `***`.
+**CSRF:** все POST-запросы защищены `CsrfHostOriginMiddleware`. Заголовок `Origin` или `Host` проверяется автоматически — дополнительная обработка в роутах не нужна.
 
-## Лоты
+**Onboarding gate:** пока `OnboardingState != COMPLETED`, `OnboardingGateMiddleware` перенаправляет любой не-whitelisted GET на `/onboarding/`. Whitelist: `/static/`, `/events`, `/onboarding/`, `/auth/`.
 
-### GET /api/lots
-Список лотов с фильтрацией.
-**Query**: `region` (int, опц), `limit` (int, дефолт 50), `offset` (int, дефолт 0).
-**Response 200**: `{ "lots": [...], "total": N }`.
+---
 
-### GET /api/lots/{id}
-Полная карточка лота, включая `raw_json` enrichment-данных.
-**Response 200**: объект лота.
-**Response 404**: лот не найден.
+## Auth (`/auth`)
 
-### GET /api/lots/new
-Список новых необработанных лотов (`notified=false`).
-**Response 200**: массив лотов.
+### POST /auth/start
 
-### GET /api/lots/history
-История всех обнаружений за период.
-**Query**: `limit`, `offset`.
+Запустить headed-login (Playwright) через ЕСИА.
 
-### POST /api/lots/mark-seen
-Пометить лот как просмотренный. CSRF обязательно.
-**Body**: `{ "lot_id": N }`.
+**Rate limit:** 1 запрос / 60 с на client IP.
+**Single-flight:** второй вызов при уже запущенном job → 409.
 
-## Статус и мониторинг
+**Response:**
 
-### GET /api/status
-Текущее состояние приложения.
-**Response 200**: `{ "session": "active|expired", "last_cycle": "...", "queue_size": N, "uptime_sec": ..., "lots_count": N }`.
+| Код | Тело | Условие |
+|-----|------|---------|
+| 202 | `{"status": "started"}` | Job запущен |
+| 409 | `{"detail": "Login already in progress"}` | Job уже работает |
+| 429 | `{"detail": "Too many requests — try again in 60 seconds"}` | Rate limit превышен |
+| 503 | `{"detail": "Login service not initialized — startup not yet complete"}` | Executor ещё не привязан (фаза 1.5 lifespan не завершена) |
 
-### GET /api/cycles
-История циклов мониторинга (таблица `cycles`).
-**Query**: `limit` (дефолт 50), `offset`.
-**Response 200**: `{ "cycles": [{ "id", "started_at", "finished_at", "status", "lots_fetched", "new_lots", "error" }, ...] }`.
+---
 
-### POST /api/cycle/run
-Триггерит цикл мониторинга вручную. CSRF обязательно.
-**Response 202**: `{ "queued": true }`.
-Эквивалент `POST /api/check-now` из ранних версий доков.
+### GET /auth/status
 
-### POST /api/pause
-Поставить цикл мониторинга на паузу. CSRF обязательно.
+Текущий статус login job.
 
-### POST /api/resume
-Возобновить цикл мониторинга. CSRF обязательно.
+**Response 200:**
 
-## Конфиг
+```json
+{
+  "running": true,
+  "last_outcome": {
+    "success": true,
+    "cookies_updated": true,
+    "error": null
+  }
+}
+```
 
-### GET /api/config
-Текущий `config.json` (без секретов — пароли маскируются `***`).
-Схема ключей: см. [[config-reference]].
+`last_outcome` равен `null` если ни одного job ещё не запускалось. Поле `error` — контролируемое enum-значение (`"timeout"`, `"cancelled"`, `"playwright_other"`, `"playwright_missing_binary"`, `"playwright_missing_deps"` и пр.) — никогда не содержит сырые исключения.
 
-### PUT /api/config
-Обновить config целиком или частично. CSRF обязательно.
-**Body**: см. [[config-reference]].
-File-watch перезагрузит без рестарта.
-**Response 200**: новый config (маскированный).
-**Response 422**: ошибка валидации Pydantic — `{ "field": "...", "message": "..." }`.
+---
 
-## Аутентификация ЕСИА
+### POST /auth/cancel
 
-### POST /api/login
-Запускает Playwright headed-окно для логина через ЕСИА. CSRF обязательно.
-**Response 202**: `{ "started": true }`.
-Эквивалент `POST /api/login/start`.
+Отменить активный login job. Идемпотентен: возвращает 204 даже если job не активен.
 
-### GET /api/login/status
-Текущий статус процесса логина (в процессе / успех / ошибка).
-**Response 200**: `{ "state": "idle|running|ok|failed", "message": "..." }`.
+**Response 204** (пустое тело).
 
-### POST /api/logout
-Очищает `profile/` (Playwright persistent context). CSRF обязательно.
-**Response 200**: `{ "ok": true }`.
+---
 
-## Уведомления
+## Lots (`/lots`)
 
-### GET /api/notifiers
-Список зарегистрированных плагинов-каналов.
-**Response 200**: `[{ "channel_id", "display_name", "description", "enabled", "config_schema", "recipient_label", "recipient_placeholder" }, ...]`.
-Конфиг каждого канала с маскированными секретами.
+### GET /lots
 
-### PUT /api/notifiers/{channel_id}
-Обновить конфиг канала и список получателей. CSRF обязательно.
-**Body**: соответствует `config_schema` канала.
-Пустое поле пароля = «не менять текущее значение».
+Отфильтрованный список лотов с cursor-пагинацией.
 
-### POST /api/notifiers/{channel_id}/test
-Отправить тестовое уведомление через канал. CSRF обязательно.
-**Response 200**: `{ "ok": bool, "message": str }`.
+**Query-параметры:**
 
-### POST /api/notifiers/{channel_id}/discover-recipients
-Авто-обнаружение получателей (например, Telegram `chat_id` через `getUpdates`). CSRF обязательно.
-*(планируется в v2, плагин-интерфейс готов в MVP)*
+| Параметр | Тип | По умолчанию | Описание |
+|----------|-----|-------------|----------|
+| `regions` | `list[int]` (повторяемый) | — | Фильтр по ID региона (можно передать несколько) |
+| `area_sqm_min` | `decimal` | — | Минимальная площадь, кв. м |
+| `area_sqm_max` | `decimal` | — | Максимальная площадь, кв. м |
+| `status` | `str` | — | Статус лота |
+| `cursor` | `str` | — | Opaque cursor для следующей страницы (base64url) |
+| `page_size` | `int` | `50` | Размер страницы, от 1 до 200 |
 
-### GET /api/notifications/history
-Журнал отправленных уведомлений.
-**Query**: `lot_id` (опц), `channel` (опц), `limit`, `offset`.
-**Response 200**: `{ "items": [{ "lot_id", "channel", "recipient", "sent_at" }, ...] }`.
+**Response 200:**
 
-## Enrichment
+```json
+{
+  "items": [{ ...LotUserDTO... }],
+  "next_cursor": "base64url-string-or-null",
+  "has_more": true
+}
+```
 
-### GET /api/enrichment/queue
-Размер очереди enrichment + список ожидающих `lot_id`.
-**Response 200**: `{ "size": N, "pending": [lot_id, ...] }`.
+**Ошибки:**
 
-### POST /api/enrichment/retry
-Перезапустить зависшие задачи enrichment. CSRF обязательно.
-**Response 202**: `{ "requeued": N }`.
+| Код | Условие |
+|-----|---------|
+| 422 | Невалидные параметры фильтрации или некорректный cursor |
 
-## Self-diagnostic
+---
 
-### GET /api/export/diagnostic
-ZIP с логами + `state.db` (без секретов — пароли SMTP/токены обнуляются).
-Для отправки разработчику при проблеме.
-**Response 200**: `application/zip`.
+### GET /lots/{lot_id}
 
-## SSE Events
+Карточка одного лота по числовому ID.
 
-### GET /api/stream
-Long-lived SSE stream для live-обновлений UI. Реализация — `sse-starlette` (см. [[decisions-log]]).
-Origin-check как у CSRF, токен не требуется (GET, idempotent).
-Альтернативный путь `GET /events` — алиас (см. [[web/ui-architecture]]).
+**Path-параметр:** `lot_id` — целое число.
 
-#### Event: `lot.new`
-Новый лот появился в реестре.
-Payload — HTML-фрагмент `_lot_poster.html.jinja` или `_lot_list.html.jinja` (выбирается сервером по контексту вьюхи).
-Атрибуты карточки: `data-tier="match|silent|gone"`, `data-lot-id`, `data-age-seconds`.
-Frontend играет звук только при `data-tier="match"` (см. [[decisions-log]] → «Tier лота решает сервер»).
+**Response 200:** объект `LotUserDTO` (JSON).
 
-#### Event: `lot.status`
-Лот изменил статус или пропал (removal-detection).
-Payload — HTML-фрагмент с `hx-swap-oob` для in-place замены конкретной карточки.
-Атрибут `data-tier="gone"`. **Звук не играется** (см. [[decisions-log]] → Removal-detection).
+**Response 404:** `{"detail": "Lot {lot_id} not found"}`.
 
-#### Event: `status`
-Статус системы: ЕСИА-сессия, следующий цикл, DND, pause.
-Payload — HTML-фрагмент `_header_status.html.jinja`.
+---
 
-#### Event: `expired`
-ЕСИА-сессия истекла.
-Payload — пустой div с `hx-swap-oob`, снимающий `hidden` с `#session-expired-modal`.
+## Notifications (`/notifications`)
 
-#### Multi-tab fan-out
-Один источник (background queue) → N очередей подписчиков. Каждая открытая вкладка — своя очередь.
-Реализация: `queue.Queue` per subscriber, fan-out в источнике через broadcast. Sync→async мост:
-`await loop.run_in_executor(None, q.get)` в SSE-generator'е (см. [[decisions-log]] → «SSE мост sync→async»,
-`web/sse.py`).
+### GET /notifications
 
-#### Origin-check
-`GET /api/stream` проверяет `Origin` header: должен быть `http://127.0.0.1:8080` или
-`http://localhost:8080`. Иначе `403`.
+Список последних записей об отправленных уведомлениях.
 
-## Onboarding
+**Query-параметры:**
 
-Wizard первого запуска (см. [[decisions-log]] → «Onboarding 4 шага», «Onboarding-gate: redirect»).
-Пока `state.onboarded != true` middleware редиректит любой GET на `/onboarding?step=1`.
+| Параметр | Тип | По умолчанию | Диапазон |
+|----------|-----|-------------|---------|
+| `limit` | `int` | `100` | 1–500 |
 
-### GET /onboarding?step=N
-Шаг wizard'а (1..4). Возвращает `onboarding/wizard.html.jinja` с подгруженным фрагментом шага.
+**Response 200:** JSON-массив объектов `NotificationRecord` (сериализован через `model_dump(mode="json")`).
 
-### POST /onboarding/save?step=N
-Сохранить шаг. CSRF обязательно. Body — поля step'а (form-encoded).
-**Response**: `302` на `?step=N+1` или на `/` после финала (выставляется `state.onboarded=true`).
+---
 
-### POST /onboarding/smtp-test
-Проверка SMTP-подключения (используется на шаге 2). CSRF обязательно.
-**Body**: `{ "smtp_host", "smtp_port", "smtp_user", "smtp_password", "use_default" }`.
-**Response 200**: HTML-фрагмент чипа результата (`✓ подключено` / `✗ ошибка: ...`).
-До получения `ok` кнопка «Далее» на шаге 2 заблокирована (исключение — «Пропустить email»,
-см. [[decisions-log]] → «Проверить SMTP в онбординге обязательно»).
+## Settings (`/settings`)
+
+### GET /settings
+
+Текущий снимок `Settings`. Поля `SecretStr` (пароли) сериализуются Pydantic как `"**********"` — никогда не попадают в ответ открытым текстом.
+
+**Response 200:** JSON-объект `Settings` (`model_dump(mode="json")`).
+
+---
+
+### POST /settings/smtp
+
+Сохранить SMTP-credentials. Трёхфазная валидация:
+1. Формат (Pydantic `SmtpCredentials`).
+2. DNS + host policy (`SmtpHostPolicy.resolve_and_check`) — **вне транзакции**.
+3. Запись в `state.db` через `SmtpCredentialsRepository.save()`.
+
+**Request body (`SmtpCredentialsBody`):**
+
+| Поле | Тип | По умолчанию | Описание |
+|------|-----|-------------|----------|
+| `smtp_user` | `str` | обязательно | Логин SMTP |
+| `smtp_password` | `str` | обязательно | Пароль SMTP |
+| `smtp_host` | `str` | обязательно | SMTP-сервер |
+| `smtp_port` | `int` | `587` | Порт |
+| `use_default` | `bool` | `true` | Использовать дефолтный from-адрес |
+
+**Response:**
+
+| Код | Условие |
+|-----|---------|
+| 204 | Успех, тело пустое |
+| 400 | DNS / host policy ошибка (`SmtpHostPolicyError`) |
+| 422 | Невалидное имя хоста, порт вне диапазона, пустые обязательные поля |
+
+---
+
+### POST /settings/smtp/test
+
+Отправить тестовое письмо. Использует синтетический фикстурный `LotPublicDTO` (id=0, cadastral_no=`"00:00:0000000:0000"`) — полный SMTP-путь (STARTTLS, DNS, аутентификация) проверяется реально.
+
+**Request body (`SmtpTestBody`):**
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `recipient` | `str` | Email-адрес получателя тестового письма |
+
+**Response 200:**
+
+```json
+{"ok": true, "detail": "..."}
+```
+
+`ok` равен `false` при ошибке отправки; `detail` содержит описание без PII.
+
+---
+
+### POST /settings/regions
+
+Заменить список отслеживаемых регионов. Триггерит watchdog-reload настроек.
+
+**Request body (`RegionsBody`):**
+
+| Поле | Тип | Ограничения |
+|------|-----|-------------|
+| `regions` | `list[int]` | min_length=1; каждый элемент ge=1, le=80 |
+
+**Response 200:** `{"ok": true}`.
+
+**Response 422:** пустой список, значение вне 1–80.
+
+---
+
+### POST /settings/recipients
+
+Заменить список email-получателей уведомлений. Пустой список допустим — отключает email-уведомления.
+
+**Request body (`RecipientsBody`):**
+
+| Поле | Тип | Ограничения |
+|------|-----|-------------|
+| `recipients` | `list[EmailStr]` | по умолчанию `[]`; каждый элемент — валидный RFC-5321 email |
+
+**Response 200:** `{"ok": true}`.
+
+**Response 422:** невалидный email-адрес.
+
+---
+
+## Diagnostics (`/diagnostics`)
+
+### POST /diagnostics/build
+
+Собрать диагностический ZIP-архив (`diagnostic.zip`) с `state.db`, `audit.jsonl` и логами.
+
+**Fail-closed:** если обнаружен schema-drift (лишняя колонка или отсутствующая таблица в `state.db`), возвращается 503 с общим сообщением — детали схемы не раскрываются (ADR-012, R3-M5, R4-M10). PII-поля исключаются через `DiagnosticsExcludePolicy`. `audit.jsonl` исключается из архива если `data_dir` находится в облачном хранилище (Dropbox, iCloud и др.).
+
+**Response:**
+
+| Код | Тип контента | Условие |
+|-----|-------------|---------|
+| 200 | `application/zip`, filename=`diagnostic.zip` | Успех |
+| 500 | `application/json` | Сборка архива не удалась по другой причине |
+| 503 | `application/json`, `{"error": "schema_drift", "ui_message": "..."}` | Schema-drift (fail-closed) |
+
+---
+
+## Events (`/events`)
+
+### GET /events
+
+SSE-стрим live-обновлений для браузера. Media type: `text/event-stream`.
+
+**Origin check (DNS-rebinding защита):** GET-запросы не проходят через `CsrfHostOriginMiddleware` (safe method), поэтому роут проверяет заголовок `Origin` самостоятельно:
+- Нет `Origin` — разрешено.
+- `Origin` в whitelist — разрешено.
+- `Origin` не в whitelist — **421 Misdirected Request**.
+
+**Response:** `StreamingResponse` с заголовками `Cache-Control: no-cache`, `X-Accel-Buffering: no`.
+
+**SSE-события:**
+
+| Тип события | Описание | Payload |
+|-------------|----------|---------|
+| `lot.new` | Новый лот в реестре | HTML-фрагмент карточки лота (`data-tier`, `data-lot-id`, `data-age-seconds`) |
+| `lot.status` | Лот изменил статус или пропал | HTML-фрагмент с `hx-swap-oob` |
+| `status` | Состояние системы (сессия, следующий цикл, DND) | HTML-фрагмент `_header_status.html.jinja` |
+| `session.expired` | ЕСИА-сессия истекла | HTML-фрагмент с `hx-swap-oob`, снимающий `hidden` с `#session-expired-modal` |
+
+Неизвестные типы событий молча дропаются внутри `SseStreamer` (schema-drift protection, `sse.schema_drift` в лог).
+
+---
+
+## Onboarding (`/onboarding`)
+
+Wizard первого запуска. FSM: `not_started → regions_set → smtp_configured → recipients_set → completed`. Полная спецификация — [[onboarding]].
+
+### GET /onboarding/state
+
+Текущее состояние FSM и URL для отображения соответствующего шага.
+
+**Response 200:**
+
+```json
+{"state": "not_started", "url": "/onboarding/regions"}
+```
+
+Возможные значения `state`: `not_started`, `regions_set`, `smtp_configured`, `recipients_set`, `completed`.
+
+---
+
+### POST /onboarding/advance
+
+Попытка перехода между состояниями FSM.
+
+**Request body (`AdvanceBody`):**
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `from_state` | `str` | Ожидаемое текущее состояние (строковое значение enum) |
+| `to_state` | `str` | Целевое состояние |
+
+**Response:**
+
+| Код | Условие |
+|-----|---------|
+| 204 | Переход выполнен, тело пустое |
+| 409 | Переход запрещён: guard не пройден или mismatch состояния. Тело: `{"error": "invalid_transition", "current_state": "...", "redirect_to": "/onboarding"}` |
+| 422 | `from_state` или `to_state` — невалидное значение enum |
+
+---
+
+### POST /onboarding/skip-email
+
+Установить флаг `email_skipped`. Разрешено только в состояниях `smtp_configured` или `recipients_set`.
+
+**Response:**
+
+| Код | Условие |
+|-----|---------|
+| 204 | Флаг установлен, тело пустое |
+| 409 | Текущее состояние не позволяет skip. Тело: `{"error": "invalid_transition", "current_state": "...", "redirect_to": "/onboarding"}` |
+
+---
+
+### Wizard UI (HTML, not in OpenAPI schema)
+
+Следующие маршруты возвращают HTML и помечены `include_in_schema=False`. Они используются браузером и htmx, а не REST-клиентами.
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/onboarding` | Bare entry: 302 на `url_for_current_step()` |
+| GET | `/onboarding/regions` | Шаг 1 (state=`not_started`). Несовпадение состояния → 302 |
+| GET | `/onboarding/smtp` | Шаг 2 (state=`regions_set`). Несовпадение → 302 |
+| GET | `/onboarding/recipients` | Шаг 3 (state=`smtp_configured`). Несовпадение → 302 |
+| GET | `/onboarding/test-email` | Шаг 4 (state=`recipients_set`). Несовпадение → 302 |
+| POST | `/onboarding/save?step=N` | htmx dispatcher: form-data по шагу, action=`next`\|`skip`. Успех → 200 + `HX-Redirect`. Ошибка валидации → 200 + re-render фрагмента |
+| POST | `/onboarding/smtp-test` | htmx фрагмент: проверка SMTP. Form-data: `smtp_host`, `smtp_port`, `smtp_login`, `smtp_pass`. Ответ — `<span id="smtp-test-result" ...>` для htmx outerHTML swap. Всегда 200 |
+
+---
+
+## Main (`/`)
+
+### GET /
+
+HTML главного экрана (feed). Доступен только при `OnboardingState=COMPLETED` (gate middleware гарантирует это до роута). Шаблон `feed.html.jinja`.
+
+**Помечен** `include_in_schema=False`. Контекст: `SessionStatus` (через `SessionProbe`), `Settings.interval_minutes`, MVP-заглушки для lot-feed, health, scope, filters (заполняются в будущих bd-тасках).
+
+---
 
 ## См. также
 
 - [[web/ui-architecture]] — обоснование стека и маршрутов
-- [[product/monitoring-plan]] — цикл, очереди, безопасность
-- [[notifications]] — плагин-архитектура каналов
-- [[config-reference]] — таблица ключей `config.json`
-- [[decisions-log]] — CSRF, bind, idempotency и прочие решения
+- [[onboarding]] — спецификация FSM и контракт 409-тела
+- [[decisions/ADR-011-dns-rebinding-host-allowlist|ADR-011]] — CSRF, bind, Origin-check
+- [[decisions/ADR-015-smtp-host-validation|ADR-015]] — DNS-вне-tx инвариант для SMTP
+- [[decisions/ADR-018-onboarding-fsm-server-enforced|ADR-018]] — Onboarding gate
+- [[decisions/ADR-019-notification-state-machine|ADR-019]] — Notification state machine
+- [[decisions/ADR-025-sse-single-endpoint|ADR-025]] — единый роут `/events`

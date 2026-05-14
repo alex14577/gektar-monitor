@@ -53,7 +53,7 @@
 
 - **TrackedField** — `Literal["status", "area_sqm", "date_update", "auction", "is_active", "list_presence"]`. Whitelist полей для tracking в `lots_history`. `ALLOWED_TRACKED_FIELDS` в `domain/diff.py` деривируется через `typing.get_args(TrackedField)` — SSOT, дрейф Literal ↔ frozenset невозможен. См. [[decisions/ADR-022-allowed-tracked-fields-ssot-smtp-policy-error|ADR-022]].
 
-- **LotPublicDTO vs LotUserDTO** — `LotPublicDTO` публикуется через EventBus (без `user-state`). `LotUserDTO` возвращается в server-rendered HTML или через `GET /api/lots/{id}/user-state` (добавляет `starred`, `submitted`, `note`). `raw_json` исключён из обоих через `@model_serializer`. Разделение — forward-compat с multi-user v3. См. [[data-model/lot]], [[decisions/ADR-003-error-strategy-exceptions-result-for-notifier|ADR-003]].
+- **LotPublicDTO vs LotUserDTO** — `LotPublicDTO` публикуется через EventBus (без `user-state`). `LotUserDTO` возвращается через `GET /lots` и `GET /lots/{lot_id}` (добавляет поля пользовательского состояния: `starred`, `submitted`, `note` — forward-compat с multi-user v3). `raw_json` исключён из обоих через `@model_serializer`. См. [[data-model/lot]], [[decisions/ADR-003-error-strategy-exceptions-result-for-notifier|ADR-003]].
 
 - **ResolvedSmtpEndpoint** — `@dataclass(frozen=True, slots=True)` с полями `ip`, `family`, `port`, `original_host`. Результат `SmtpHostPolicy.resolve_and_check()`. `ip` используется для TCP-connect (pin, закрывает TOCTOU), `original_host` — для SNI и TLS-cert verification. Не Pydantic-модель: infra-internal, не сериализуется. См. [[data-model/notifications]], [[decisions/ADR-015-smtp-host-validation|ADR-015]], [[decisions/ADR-021-manual-starttls-connect-by-ip|ADR-021]].
 
