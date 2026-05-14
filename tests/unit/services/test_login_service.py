@@ -13,6 +13,10 @@ Coverage:
   6. bind_executor() rebinds the executor.
   7. start_login() without executor → RuntimeError.
   8. FakeLoginSession all-methods invocation (anti-mock).
+  9. start_refresh() → LoginJobHandle with a future (success path).
+ 10. start_refresh() while job running → LoginBusyError (single-flight).
+ 11. start_refresh() without executor → RuntimeError.
+ 12. start_refresh() outcome needs_manual_login propagates correctly.
 """
 
 from __future__ import annotations
@@ -49,17 +53,26 @@ class FakeClock:
 class FakeLoginSession:
     """Fake LoginSession that records calls — exercises ALL Protocol methods.
 
-    ``open_headed_login`` blocks until ``_release_event`` is set, allowing
-    tests to control job completion timing.
+    ``open_headed_login`` and ``silent_refresh`` both block until
+    ``_release_event`` is set, allowing tests to control job completion timing.
+    ``refresh_outcome`` controls what ``silent_refresh`` returns.
     """
 
-    def __init__(self, outcome: LoginOutcome | None = None) -> None:
+    def __init__(
+        self,
+        outcome: LoginOutcome | None = None,
+        refresh_outcome: LoginOutcome | None = None,
+    ) -> None:
         self._outcome = outcome or LoginOutcome(
+            success=True, cookies_updated=True, error=None
+        )
+        self._refresh_outcome = refresh_outcome or LoginOutcome(
             success=True, cookies_updated=True, error=None
         )
         self._release_event = threading.Event()
         self._cancel_called = False
         self._open_called = False
+        self._refresh_called = False
 
     def open_headed_login(self, *, deadline: float) -> LoginOutcome:
         """Block until released; return the configured outcome."""
@@ -67,16 +80,22 @@ class FakeLoginSession:
         self._release_event.wait(timeout=5.0)
         return self._outcome
 
+    def silent_refresh(self, *, deadline: float) -> LoginOutcome:
+        """Block until released; return the configured refresh outcome."""
+        self._refresh_called = True
+        self._release_event.wait(timeout=5.0)
+        return self._refresh_outcome
+
     def cancel(self) -> None:
         """Record that cancel was called."""
         self._cancel_called = True
-        # Unblock open_headed_login so the future resolves.
+        # Unblock open_headed_login / silent_refresh so the future resolves.
         self._release_event.set()
 
     # Test helpers
 
     def release(self) -> None:
-        """Unblock the worker thread (simulate login completed)."""
+        """Unblock the worker thread (simulate login/refresh completed)."""
         self._release_event.set()
 
 
@@ -108,6 +127,10 @@ def test_fake_login_session_all_methods() -> None:
     result = sess.open_headed_login(deadline=300.0)
     assert isinstance(result, LoginOutcome)
     assert sess._open_called is True
+    # silent_refresh() also returns a LoginOutcome (event already set above)
+    result2 = sess.silent_refresh(deadline=30.0)
+    assert isinstance(result2, LoginOutcome)
+    assert sess._refresh_called is True
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +273,9 @@ class _RaisingLoginSession:
     def open_headed_login(self, *, deadline: float) -> LoginOutcome:
         raise RuntimeError("simulated playwright crash")
 
+    def silent_refresh(self, *, deadline: float) -> LoginOutcome:
+        raise RuntimeError("simulated playwright crash in refresh")
+
     def cancel(self) -> None:
         pass
 
@@ -277,3 +303,64 @@ def test_unhandled_exception_in_run_login_maps_to_playwright_other() -> None:
     assert st.last_outcome is not None
     assert st.last_outcome.success is False
     assert st.last_outcome.error == "playwright_other"
+
+
+# ---------------------------------------------------------------------------
+# Tests: start_refresh()
+# ---------------------------------------------------------------------------
+
+
+def test_start_refresh_returns_handle() -> None:
+    """start_refresh() with an executor returns a LoginJobHandle (success path)."""
+    sess = FakeLoginSession(
+        refresh_outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
+    )
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        svc, _ = _make_service(session=sess, executor=ex)
+        handle = svc.start_refresh()
+        assert isinstance(handle, LoginJobHandle)
+        sess.release()
+        outcome = handle.future.result(timeout=5.0)
+    assert outcome.success is True
+    assert sess._refresh_called is True
+
+
+def test_start_refresh_single_flight_raises_busy() -> None:
+    """start_refresh() while a job is running → LoginBusyError."""
+    sess = FakeLoginSession()
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        svc, _ = _make_service(session=sess, executor=ex)
+        handle = svc.start_refresh()
+        # Job is still running (session not released yet).
+        with pytest.raises(LoginBusyError):
+            svc.start_refresh()
+        # Also cannot start a headed login while refresh is in progress.
+        with pytest.raises(LoginBusyError):
+            svc.start_login()
+        sess.release()
+        handle.future.result(timeout=5.0)
+
+
+def test_start_refresh_without_executor_raises() -> None:
+    """start_refresh() without a bound executor raises RuntimeError."""
+    svc, _ = _make_service(executor=None)
+    with pytest.raises(RuntimeError, match="no executor bound"):
+        svc.start_refresh()
+
+
+def test_start_refresh_needs_manual_login_propagates() -> None:
+    """start_refresh() with needs_manual_login outcome sets last_outcome correctly."""
+    needs_login = LoginOutcome(
+        success=False, cookies_updated=False, error="needs_manual_login"
+    )
+    sess = FakeLoginSession(refresh_outcome=needs_login)
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        svc, _ = _make_service(session=sess, executor=ex)
+        handle = svc.start_refresh()
+        sess.release()
+        outcome = handle.future.result(timeout=5.0)
+    assert outcome.success is False
+    assert outcome.error == "needs_manual_login"
+    st = svc.status()
+    assert st.last_outcome is not None
+    assert st.last_outcome.error == "needs_manual_login"

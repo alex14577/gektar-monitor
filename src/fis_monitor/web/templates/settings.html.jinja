@@ -1,0 +1,150 @@
+{# ========================================================================
+   settings.html.jinja — Settings page with section anchors.
+   Context: settings (Settings model instance).
+   Sections: #scope, #smtp, #notifications, #monitoring.
+   Forms use native POST to existing endpoints; after submit the browser
+   follows the redirect back to /settings#<section> (PRG pattern).
+   ======================================================================== #}
+{% extends "base.html.jinja" %}
+
+{% block main %}
+<div class="settings-page" style="max-width: 720px; margin: 0 auto; padding: 24px 16px;">
+
+  <h1 style="margin: 0 0 32px; font-size: 1.5rem; font-weight: 600;">Настройки</h1>
+
+  {# ------------------------------------------------------------------ #}
+  {# Section: Regions (scope)                                            #}
+  {# ------------------------------------------------------------------ #}
+  <section id="scope" style="margin-bottom: 40px;">
+    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Регионы мониторинга</h2>
+    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+      Лоты из выбранных кадастровых округов (1–80) отслеживаются. Перечислите через запятую.
+    </p>
+
+    <form method="post" action="/settings/regions">
+      <div class="field" style="max-width: 480px;">
+        <label class="field__label" for="regions-input">Номера округов</label>
+        <input class="input" id="regions-input" name="regions_csv" type="text"
+               value="{{ settings.regions | join(', ') }}"
+               placeholder="1, 2, 25, 27"
+               autocomplete="off" />
+        <p style="font-size: 0.75rem; color: var(--muted); margin: 6px 0 0;">
+          Допустимые значения: 1–80. Пример: <span class="mono">1, 2, 25</span>
+        </p>
+      </div>
+      <button class="btn btn--primary" type="submit" style="margin-top: 16px;">
+        Сохранить регионы
+      </button>
+    </form>
+  </section>
+
+  <hr style="border: none; border-top: 1px solid var(--line); margin-bottom: 40px;" />
+
+  {# ------------------------------------------------------------------ #}
+  {# Section: SMTP credentials                                           #}
+  {# ------------------------------------------------------------------ #}
+  <section id="smtp" style="margin-bottom: 40px;">
+    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">SMTP-настройки</h2>
+    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+      Параметры почтового ящика бота-отправителя. Пароль хранится локально в зашифрованном виде.
+    </p>
+
+    <form method="post" action="/settings/smtp" style="max-width: 560px;">
+      <div style="display: grid; grid-template-columns: 1fr 120px; gap: 12px;">
+        <div>
+          <label class="field__label" for="smtp-host">SMTP-сервер</label>
+          <input class="input" id="smtp-host" name="smtp_host" type="text"
+                 value="{{ settings.notifications.email.smtp_host or '' }}"
+                 placeholder="smtp.yandex.ru"
+                 autocomplete="off" required />
+        </div>
+        <div>
+          <label class="field__label" for="smtp-port">Порт</label>
+          <input class="input mono" id="smtp-port" name="smtp_port" type="number"
+                 value="{{ settings.notifications.email.smtp_port or 587 }}"
+                 min="1" max="65535" />
+        </div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <label class="field__label" for="smtp-user">Логин (адрес ящика бота)</label>
+        <input class="input" id="smtp-user" name="smtp_user" type="email"
+               value=""
+               placeholder="monitor-bot@вашдомен.ру"
+               autocomplete="username" required />
+      </div>
+
+      <div style="margin-top: 12px;">
+        <label class="field__label" for="smtp-password">Пароль ящика</label>
+        <div style="position: relative;">
+          <input class="input" id="smtp-password" name="smtp_password" type="password"
+                 placeholder="••••••••••••" autocomplete="new-password" required
+                 style="padding-right: 44px;" />
+          <button type="button"
+                  aria-label="Показать пароль" aria-pressed="false"
+                  style="position:absolute; right:6px; top:50%; transform:translateY(-50%); width:32px; height:32px; display:grid; place-items:center; border:0; background:transparent; cursor:pointer; color: var(--muted); border-radius: 4px;"
+                  onclick="const p=document.getElementById('smtp-password'); const s=p.type==='text'; p.type=s?'password':'text'; this.setAttribute('aria-pressed', String(!s));">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 12px; margin-top: 20px; align-items: center; flex-wrap: wrap;">
+        <button class="btn btn--primary" type="submit">Сохранить SMTP</button>
+        <a class="btn btn--ghost" href="/settings/smtp/test-form" style="display:none">Проверить подключение</a>
+      </div>
+    </form>
+  </section>
+
+  <hr style="border: none; border-top: 1px solid var(--line); margin-bottom: 40px;" />
+
+  {# ------------------------------------------------------------------ #}
+  {# Section: Notification recipients                                    #}
+  {# ------------------------------------------------------------------ #}
+  <section id="notifications" style="margin-bottom: 40px;">
+    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Получатели уведомлений</h2>
+    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+      Email-адреса, на которые отправляются уведомления о новых лотах. По одному на строку.
+      Пустой список отключает email-уведомления.
+    </p>
+
+    <form method="post" action="/settings/recipients" style="max-width: 480px;">
+      <div class="field">
+        <label class="field__label" for="recipients-input">Адреса получателей</label>
+        <textarea class="input" id="recipients-input" name="recipients_text"
+                  rows="4"
+                  placeholder="you@example.com&#10;colleague@example.com"
+                  style="font-family: var(--font-mono, monospace); resize: vertical;">{{ settings.notifications.email.recipients | join('\n') }}</textarea>
+      </div>
+      <button class="btn btn--primary" type="submit" style="margin-top: 16px;">
+        Сохранить получателей
+      </button>
+    </form>
+  </section>
+
+  <hr style="border: none; border-top: 1px solid var(--line); margin-bottom: 40px;" />
+
+  {# ------------------------------------------------------------------ #}
+  {# Section: Monitoring schedule (read-only, no POST endpoints yet)     #}
+  {# TODO: add POST /settings/monitoring when scheduling UI is built     #}
+  {# ------------------------------------------------------------------ #}
+  <section id="monitoring" style="margin-bottom: 40px;">
+    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Расписание мониторинга</h2>
+    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+      Только просмотр. Редактирование через конфигурационный файл (config.json).
+    </p>
+
+    <dl style="display: grid; grid-template-columns: max-content 1fr; gap: 8px 24px; font-size: 0.875rem;">
+      <dt style="color: var(--muted);">Интервал опроса</dt>
+      <dd style="margin: 0;">
+        <span class="mono">{{ settings.interval_minutes }}</span> мин.
+        {% if settings.interval_minutes == 0 %}<span style="color: var(--muted);"> (непрерывно)</span>{% endif %}
+      </dd>
+
+      <dt style="color: var(--muted);">Полное сканирование</dt>
+      <dd style="margin: 0;"><span class="mono">{{ settings.monitoring.full_scan_time }}</span></dd>
+    </dl>
+  </section>
+
+</div>
+{% endblock %}

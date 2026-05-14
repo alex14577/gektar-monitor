@@ -63,16 +63,21 @@ from fis_monitor.infra.sqlite.repositories.user_state import SqliteUserStateRepo
 from fis_monitor.infra.sse.browser_sse_notifier import BrowserSseNotifier
 from fis_monitor.infra.sse.bus import ThreadEventBus
 from fis_monitor.infra.sse.sse_stream import SseStreamer
+from fis_monitor.services.backfill import BackfillService
+from fis_monitor.services.catchup_dismiss import CatchupDismissService
 from fis_monitor.services.diagnostics.exclude_policy import DiagnosticsExcludePolicy
 from fis_monitor.services.diagnostics.service import DiagnosticsService
+from fis_monitor.services.dnd import DndService
 from fis_monitor.services.enrichment import EnrichmentService
 from fis_monitor.services.filter_matcher import AllFiltersMatcher, RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
 from fis_monitor.services.login import LoginService
 from fis_monitor.services.lot_query import LotQueryService
+from fis_monitor.services.lot_user_state import LotUserStateService
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
 from fis_monitor.services.onboarding import OnboardingService
+from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 
@@ -332,6 +337,12 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         url_builder=url_builder,
     )
 
+    paginated_fetcher = PaginatedListFetcher(
+        http=http_client,
+        list_parser=list_parser,
+        url_builder=url_builder,
+    )
+
     full_scan = FullScanService(
         http=http_client,
         list_parser=list_parser,
@@ -342,6 +353,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         event_bus=event_bus,
         cycle_progress_signal=cycle_progress_signal,
         url_builder=url_builder,
+        paginated_fetcher=paginated_fetcher,
     )
 
     onboarding = OnboardingService(
@@ -377,6 +389,22 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         clock=clock,
     )
 
+    lot_user_state = LotUserStateService(
+        lot_repo=lot_repo,
+        user_state_repo=user_state_repo,
+    )
+
+    backfill = BackfillService(
+        fetcher=paginated_fetcher,
+        lot_repo=lot_repo,
+        config_source=config_source,
+        monitor_cycle=monitor_cycle,
+    )
+
+    dnd = DndService(settings_repo=settings_repo)
+
+    catchup_dismiss = CatchupDismissService(state_repo=settings_repo, clock=clock)
+
     services = Services(
         notifier_dispatcher=notifier_dispatcher,
         monitor_cycle=monitor_cycle,
@@ -389,6 +417,10 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         session_monitor=session_monitor,
         diagnostics=diagnostics,
         lot_query=lot_query,
+        lot_user_state=lot_user_state,
+        backfill=backfill,
+        dnd=dnd,
+        catchup_dismiss=catchup_dismiss,
     )
 
     return Container(infra=infra, services=services)

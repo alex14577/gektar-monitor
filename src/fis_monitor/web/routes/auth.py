@@ -1,15 +1,19 @@
 """FastAPI APIRouter for authentication endpoints.
 
 Endpoints:
-  POST /auth/start  — start a headed-login job (single-flight, rate-limited).
-  GET  /auth/status — return current login status.
-  POST /auth/cancel — cancel the active login job (idempotent).
+  POST /auth/start   — start a headed-login job (single-flight, rate-limited).
+  POST /auth/refresh — silent cookie refresh (headless, no visible window).
+  GET  /auth/status  — return current login status.
+  POST /auth/cancel  — cancel the active login job (idempotent).
 
-Rate limiting: /auth/start is limited to 1 request per 60 seconds per client IP.
-Single-flight: a second POST /auth/start while a job is running → 409 Conflict.
+Rate limiting:
+  /auth/start   — 1 request per 60 seconds per client IP.
+  /auth/refresh — 1 request per 60 seconds per client IP (independent quota).
+Single-flight: a second POST /auth/start or /auth/refresh while a job is
+  running → 409 Conflict.
 
 DI: ``LoginService`` is injected via ``Depends(get_login)``.
-    ``RateLimiter`` is provided as a module-level singleton (application-scoped).
+    ``RateLimiter`` singletons are module-level (application-scoped).
 
 CSRF: POST endpoints pass through ``CsrfHostOriginMiddleware`` automatically —
 no per-endpoint CSRF handling needed here.
@@ -37,6 +41,11 @@ __all__ = ["router"]
 # ---------------------------------------------------------------------------
 
 _auth_rate_limiter = RateLimiter(max_requests=1, window_seconds=60.0)
+
+# Separate rate-limiter for /auth/refresh — 1 request per 60 seconds per IP.
+# Kept as a distinct object so /auth/start and /auth/refresh consume independent
+# quotas (a forced-refresh attempt does not block a legitimate manual login).
+_refresh_rate_limiter = RateLimiter(max_requests=1, window_seconds=60.0)
 
 # ---------------------------------------------------------------------------
 # Router
@@ -116,6 +125,52 @@ def auth_status(
                 else None
             ),
         }
+    )
+
+
+@router.post("/refresh", status_code=202)
+def auth_refresh(
+    request: Request,
+    svc: LoginService = Depends(get_login),
+) -> JSONResponse:
+    """Start a silent-refresh job (no visible browser window).
+
+    Called from the UI when the session is expiring soon (``expires_soon``
+    banner).  Navigates to /cabinet/ headlessly using the persistent-context
+    profile; if ЕСИА cookies are still valid the server lands on /cabinet/
+    and new session cookies are persisted automatically.
+
+    Clients should poll ``GET /auth/status`` to learn the outcome.  A
+    ``last_outcome.error == "needs_manual_login"`` means the user must
+    trigger ``POST /auth/start`` for a full headed login.
+
+    Returns:
+        202 Accepted  — silent-refresh job started.
+        409 Conflict  — a login or refresh job is already running.
+        429 Too Many Requests — rate limit exceeded (1 req / 60 s per IP).
+        503 Service Unavailable — executor not bound (startup incomplete).
+    """
+    ip = client_ip(request)
+    now = time.monotonic()
+    if not _refresh_rate_limiter.acquire(ip, now=now):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests — try again in 60 seconds",
+        )
+
+    try:
+        svc.start_refresh()
+    except LoginBusyError as exc:
+        raise HTTPException(status_code=409, detail="Login already in progress") from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Login service not initialized — startup not yet complete",
+        ) from exc
+
+    return JSONResponse(
+        status_code=202,
+        content={"status": "refreshing"},
     )
 
 

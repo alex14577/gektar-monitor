@@ -14,17 +14,24 @@ Container and testable via app.dependency_overrides.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, EmailStr, Field
 
 from fis_monitor.domain.errors import SmtpHostPolicyError
 from fis_monitor.domain.models import LotPublicDTO, SmtpCredentials
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
-from fis_monitor.web.deps import get_config_source, get_settings_service, get_smtp_test
+from fis_monitor.web.deps import (
+    get_config_source,
+    get_settings_service,
+    get_smtp_test,
+    get_templates,
+)
 
 __all__ = ["router"]
 
@@ -128,16 +135,51 @@ def _test_lot_fixture() -> LotPublicDTO:
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
+def _prefers_html(accept: str) -> bool:
+    """Return True if the Accept header prefers text/html over application/json.
+
+    MVP implementation: checks for 'text/html' substring presence without a
+    full quality-value parser.  Sufficient for browser vs API-client distinction.
+    """
+    if not accept:
+        return False
+    # Browsers always include 'text/html'; pure API clients typically send
+    # 'application/json' or omit the header entirely.
+    return "text/html" in accept and "application/json" not in accept.split(",")[0]
+
+
+@router.get("", response_model=None)
 def get_settings(
+    request: Request,
     config_source: Any = Depends(get_config_source),
+    templates: Jinja2Templates = Depends(get_templates),
 ) -> JSONResponse:
     """Return the current Settings snapshot.
 
-    Serialises via ``model_dump(mode="json")`` — SecretStr fields are
+    Content-negotiation:
+    - ``Accept: text/html`` → HTML settings page (settings.html.jinja).
+    - Otherwise → JSON (original behaviour, default for API clients).
+
+    JSON serialises via ``model_dump(mode="json")`` — SecretStr fields are
     excluded automatically by Pydantic's serialiser.
     """
     settings = config_source.current()
+    accept = request.headers.get("accept", "")
+    if _prefers_html(accept):
+        ctx: dict[str, Any] = {
+            "settings": settings,
+            # Stubs required by base.html.jinja header/partial rendering.
+            "dnd": SimpleNamespace(active=False, until_hhmm=""),
+            "session": SimpleNamespace(expired=False),
+            "monitor": SimpleNamespace(
+                state="active",
+                expires_at_hhmm="",
+                interval_minutes=settings.interval_minutes,
+                next_cycle_mmss="—",
+                last_new_human="—",
+            ),
+        }
+        return templates.TemplateResponse(request, "settings.html.jinja", ctx)
     return JSONResponse(content=settings.model_dump(mode="json"))
 
 

@@ -1,8 +1,12 @@
 """FastAPI APIRouter for lot catalog endpoints.
 
 Endpoints:
-  GET /lots          — filtered, paginated lot catalog via LotQueryService.search()
-  GET /lots/{lot_id} — single lot via LotRepository.get()
+  GET  /lots                   — filtered, paginated lot catalog via LotQueryService.search()
+  GET  /lots/{lot_id}          — single lot via LotQueryService.get_by_id()
+  GET  /lots/{lot_id}/details  — HTMX partial: lot detail card + user state
+  POST /lots/{lot_id}/star     — toggle starred flag (204)
+  POST /lots/{lot_id}/archive  — toggle archived flag (204)
+  POST /lots/{lot_id}/note     — set free-text note, max 4096 chars (204)
 
 DI: all dependencies are injected via Depends(); routes are decoupled from
 Container and testable via app.dependency_overrides.
@@ -13,12 +17,15 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from fis_monitor.domain.models import LotUserDTO
 from fis_monitor.services.lot_query import LotFilters, LotQueryService, Page
-from fis_monitor.web.deps import get_lot_query
+from fis_monitor.services.lot_user_state import LotNotFoundError, LotUserStateService
+from fis_monitor.web.deps import get_lot_query, get_lot_user_state_service, get_templates
 
 # ---------------------------------------------------------------------------
 # Router
@@ -89,3 +96,83 @@ def get_lot(
     if lot is None:
         raise HTTPException(status_code=404, detail=f"Lot {lot_id} not found")
     return JSONResponse(content=lot.model_dump(mode="json"))
+
+
+# ---------------------------------------------------------------------------
+# User-state endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{lot_id}/details")
+def get_lot_details(
+    lot_id: int,
+    request: Request,
+    svc: LotUserStateService = Depends(get_lot_user_state_service),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """Return an HTMX partial with the lot detail card + user state.
+
+    Returns 200 HTML fragment suitable for hx-swap on the caller side.
+    Returns 404 when the lot does not exist.
+    """
+    result = svc.details(lot_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Lot {lot_id} not found")
+    lot, user_state = result
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/_lot_details.html.jinja",
+        context={"lot": lot, "user_state": user_state},
+    )
+
+
+@router.post("/{lot_id}/star", status_code=204)
+def toggle_star(
+    lot_id: int,
+    svc: LotUserStateService = Depends(get_lot_user_state_service),
+) -> Response:
+    """Toggle the starred flag for a lot. Returns 204 on success, 404 if lot missing."""
+    try:
+        svc.toggle_star(lot_id)
+    except LotNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@router.post("/{lot_id}/archive", status_code=204)
+def toggle_archive(
+    lot_id: int,
+    svc: LotUserStateService = Depends(get_lot_user_state_service),
+) -> Response:
+    """Toggle the archived flag for a lot. Returns 204 on success, 404 if lot missing."""
+    try:
+        svc.toggle_archive(lot_id)
+    except LotNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+class _NoteBody(BaseModel):
+    """Request body for POST /lots/{lot_id}/note."""
+
+    note: str = Field(max_length=4096)
+
+
+@router.post("/{lot_id}/note", status_code=204)
+def set_note(
+    lot_id: int,
+    body: _NoteBody,
+    svc: LotUserStateService = Depends(get_lot_user_state_service),
+) -> Response:
+    """Persist a free-text note for a lot.
+
+    Accepts JSON body: ``{"note": "..."}`` (max 4096 chars).
+    Returns 204 on success, 400 if note too long, 404 if lot missing.
+    """
+    try:
+        svc.set_note(lot_id, body.note)
+    except LotNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)

@@ -245,13 +245,26 @@ class SqliteLotRepository:
     # upsert
     # ------------------------------------------------------------------
 
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
+    def upsert(
+        self,
+        lot: Lot,
+        *,
+        tracked: Sequence[TrackedField],
+        notify: bool = True,
+    ) -> LotUpsertResult:
         """Insert-or-update ``lot`` atomically.
 
         ``compute_changes`` is called INSIDE the ``BEGIN IMMEDIATE``
         transaction so there is no TOCTOU window between SELECT-old and
         UPDATE (R3-C2 / ADR-016).
+
+        ``notify=False`` is a caller-side hint — the repository itself does
+        not publish SSE events; notification logic lives in service-layer
+        callers (``MonitorCycleService``).  The kwarg is declared here so
+        ``BackfillService`` can pass ``notify=False`` as a self-documenting
+        signal that this upsert must not trigger SSE/notifications.
         """
+        del notify  # consumed by service-layer callers, not the repository
         # Defence-in-depth: validate tracked fields before acquiring the writer
         # lock. compute_changes performs the same check inside the tx; this
         # guard catches callers that bypass static type checking early.
@@ -525,3 +538,19 @@ class SqliteLotRepository:
         rows = cur.fetchall()
         cur.close()
         return [row[0] for row in rows]
+
+    # ------------------------------------------------------------------
+    # count_active
+    # ------------------------------------------------------------------
+
+    def count_active(self) -> int:
+        """Return the total number of active lots.
+
+        Single read-only ``SELECT COUNT(*)`` — no BEGIN IMMEDIATE needed.
+        Used by lifespan auto-trigger to decide whether to start a backfill.
+        """
+        conn = self._conn_provider.get()
+        cur = conn.execute("SELECT COUNT(*) FROM lots WHERE is_active = 1")
+        row = cur.fetchone()
+        cur.close()
+        return int(row[0]) if row else 0

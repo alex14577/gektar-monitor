@@ -13,6 +13,10 @@ Coverage:
   6. Rate limit: second POST /auth/start within 60s → 429.
   7. Rate limit: POST /auth/start after 60s → 202 again.
   8. FakeLoginService all-methods invocation (anti-mock §6).
+  9. POST /auth/refresh → 202 Accepted on success.
+ 10. POST /auth/refresh → 409 when busy.
+ 11. POST /auth/refresh → 429 when rate-limited.
+ 12. POST /auth/refresh → 503 when no executor.
 """
 
 from __future__ import annotations
@@ -41,6 +45,8 @@ class FakeLoginService:
     """Fake LoginService that implements ALL public methods of the real service.
 
     Configurable to simulate: idle, running, busy, no-executor (503), outcomes.
+    ``refresh_busy`` controls whether ``start_refresh()`` raises LoginBusyError
+    independently of the ``busy`` flag (allows testing refresh-specific 409).
     """
 
     def __init__(
@@ -50,21 +56,38 @@ class FakeLoginService:
         running: bool = False,
         last_outcome: LoginOutcome | None = None,
         no_executor: bool = False,
+        refresh_busy: bool = False,
+        refresh_no_executor: bool = False,
     ) -> None:
         self._busy = busy
         self._running = running
         self._last_outcome = last_outcome
         self._no_executor = no_executor
+        self._refresh_busy = refresh_busy
+        self._refresh_no_executor = refresh_no_executor
         self.start_called = False
         self.cancel_called = False
         self.status_called = False
         self.bind_executor_called = False
+        self.refresh_called = False
 
     def start_login(self) -> LoginJobHandle:
         self.start_called = True
         if self._busy:
             raise LoginBusyError("Login already in progress")
         if self._no_executor:
+            raise RuntimeError("LoginService: no executor bound — call bind_executor() first")
+        f: Future[LoginOutcome] = Future()
+        f.set_result(
+            LoginOutcome(success=True, cookies_updated=True, error=None)
+        )
+        return LoginJobHandle(future=f)
+
+    def start_refresh(self) -> LoginJobHandle:
+        self.refresh_called = True
+        if self._refresh_busy or self._busy:
+            raise LoginBusyError("Login/refresh already in progress")
+        if self._refresh_no_executor or self._no_executor:
             raise RuntimeError("LoginService: no executor bound — call bind_executor() first")
         f: Future[LoginOutcome] = Future()
         f.set_result(
@@ -91,6 +114,7 @@ class FakeLoginService:
 def _build_app(
     fake_svc: FakeLoginService,
     rate_limiter: RateLimiter | None = None,
+    refresh_rate_limiter: RateLimiter | None = None,
 ) -> FastAPI:
     """Build a minimal FastAPI app with the auth router and injected fakes."""
     import fis_monitor.web.routes.auth as auth_module
@@ -102,6 +126,9 @@ def _build_app(
     if rate_limiter is not None:
         # Replace the module-level singleton for this test.
         auth_module._auth_rate_limiter = rate_limiter
+
+    if refresh_rate_limiter is not None:
+        auth_module._refresh_rate_limiter = refresh_rate_limiter
 
     return app
 
@@ -117,6 +144,10 @@ def test_fake_login_service_all_methods() -> None:
     handle = fake.start_login()
     assert isinstance(handle, LoginJobHandle)
     assert fake.start_called is True
+
+    handle2 = fake.start_refresh()
+    assert isinstance(handle2, LoginJobHandle)
+    assert fake.refresh_called is True
 
     fake.cancel_active_job()
     assert fake.cancel_called is True
@@ -287,5 +318,67 @@ def test_auth_start_503_when_no_executor() -> None:
     app = _build_app(fake, rate_limiter=rl)
     with TestClient(app) as client:
         resp = client.post("/auth/start")
+    assert resp.status_code == 503
+    assert "not initialized" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/refresh
+# ---------------------------------------------------------------------------
+
+
+def test_auth_refresh_202() -> None:
+    """POST /auth/refresh returns 202 with status='refreshing' on success."""
+    fake = FakeLoginService()
+    rl = RateLimiter(max_requests=100, window_seconds=60.0)
+    app = _build_app(fake, refresh_rate_limiter=rl)
+    with TestClient(app) as client:
+        resp = client.post("/auth/refresh")
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "refreshing"
+    assert fake.refresh_called is True
+
+
+def test_auth_refresh_409_when_busy() -> None:
+    """POST /auth/refresh returns 409 when a login/refresh job is already running."""
+    fake = FakeLoginService(refresh_busy=True)
+    rl = RateLimiter(max_requests=100, window_seconds=60.0)
+    app = _build_app(fake, refresh_rate_limiter=rl)
+    with TestClient(app) as client:
+        resp = client.post("/auth/refresh")
+    assert resp.status_code == 409
+
+
+def test_auth_refresh_429_rate_limit() -> None:
+    """POST /auth/refresh returns 429 when rate limit is exceeded."""
+    fake = FakeLoginService()
+    rl = RateLimiter(max_requests=1, window_seconds=60.0)
+    app = _build_app(fake, refresh_rate_limiter=rl)
+
+    _now = [0.0]
+    original_acquire = rl.acquire
+
+    def _controlled_acquire(key: str, *, now: float) -> bool:
+        return original_acquire(key, now=_now[0])
+
+    rl.acquire = _controlled_acquire  # type: ignore[method-assign]
+
+    with TestClient(app) as client:
+        resp1 = client.post("/auth/refresh")
+        assert resp1.status_code == 202
+
+        # Still within 60s window.
+        _now[0] = 30.0
+        resp2 = client.post("/auth/refresh")
+        assert resp2.status_code == 429
+
+
+def test_auth_refresh_503_when_no_executor() -> None:
+    """POST /auth/refresh returns 503 when executor is not yet bound."""
+    fake = FakeLoginService(refresh_no_executor=True)
+    rl = RateLimiter(max_requests=100, window_seconds=60.0)
+    app = _build_app(fake, refresh_rate_limiter=rl)
+    with TestClient(app) as client:
+        resp = client.post("/auth/refresh")
     assert resp.status_code == 503
     assert "not initialized" in resp.json()["detail"]

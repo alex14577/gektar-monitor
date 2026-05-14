@@ -1,0 +1,18 @@
+{# ========================================================================
+   _filters_subjects.html.jinja — popover content for Субъект РФ filter.
+   Loaded via htmx GET /filters/subjects → injected into #filter-subjects-menu.
+   ======================================================================== #}
+<ul class="filter-subjects">
+  {% for subject in subjects %}
+  <li>
+    <label class="check">
+      <input type="checkbox"
+             name="subjects"
+             value="{{ subject }}"
+             form="filters"
+             {% if subject in selected_subjects %}checked{% endif %} />
+      <span class="check__label">{{ subject }}</span>
+    </label>
+  </li>
+  {% endfor %}
+</ul>

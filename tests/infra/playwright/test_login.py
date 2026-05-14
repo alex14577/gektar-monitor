@@ -17,6 +17,10 @@ Test matrix:
 12. ``test_initial_goto_called``           — page.goto() is invoked with the login start URL.
 13. ``test_initial_goto_failure_mapped``   — goto() exceptions are mapped to LoginOutcome.error.
 14. ``test_host_whitelist_suffix_match``   — entries starting with "." match subdomains.
+15. ``test_silent_refresh_headless_true``  — silent_refresh uses headless=True.
+16. ``test_silent_refresh_success``        — silent_refresh returns success when URL matches.
+17. ``test_silent_refresh_needs_manual_login`` — wait_for_url timeout → needs_manual_login.
+18. ``test_silent_refresh_busy_error``     — silent_refresh raises BusyError when login in progress.
 """
 
 from __future__ import annotations
@@ -532,3 +536,117 @@ def test_host_whitelist_suffix_match(tmp_path: Path) -> None:
     # only, so "evil-gosuslugi.ru.attacker.com" would be hostname
     # "evil-gosuslugi.ru.attacker.com" — does NOT end with ".gosuslugi.ru".
     assert _probe("https://evil-gosuslugi.ru.attacker.com/x") == "abort"
+
+
+# ---------------------------------------------------------------------------
+# Test 15: silent_refresh — launched with headless=True
+# ---------------------------------------------------------------------------
+
+
+def test_silent_refresh_headless_true(tmp_path: Path) -> None:
+    """silent_refresh must launch Playwright with headless=True (no visible window)."""
+    page = _make_page_mock()
+    context = _make_context_mock(page)
+
+    pw = MagicMock()
+    pw.chromium.launch_persistent_context.return_value = context
+    cm = MagicMock()
+    cm.__enter__.return_value = pw
+    cm.__exit__.return_value = False
+    factory = MagicMock(return_value=cm)
+
+    session = _make_session(playwright_factory=factory, profile_dir=tmp_path)
+    session.silent_refresh(deadline=100.0)
+
+    pw.chromium.launch_persistent_context.assert_called_once()
+    _, kwargs = pw.chromium.launch_persistent_context.call_args
+    assert kwargs.get("headless") is True, (
+        f"Expected headless=True for silent refresh, got {kwargs.get('headless')!r}"
+    )
+    assert kwargs.get("ignore_https_errors") is True
+
+
+# ---------------------------------------------------------------------------
+# Test 16: silent_refresh — success when URL matches /cabinet/
+# ---------------------------------------------------------------------------
+
+
+def test_silent_refresh_success(tmp_path: Path) -> None:
+    """silent_refresh returns LoginOutcome(success=True) when wait_for_url succeeds."""
+    page = _make_page_mock()  # wait_for_url returns normally → success
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+
+    session = _make_session(clock=clock, playwright_factory=factory, profile_dir=tmp_path)
+    outcome = session.silent_refresh(deadline=100.0)
+
+    assert isinstance(outcome, LoginOutcome)
+    assert outcome.success is True
+    assert outcome.cookies_updated is True
+    assert outcome.error is None
+
+
+# ---------------------------------------------------------------------------
+# Test 17: silent_refresh — wait_for_url timeout → needs_manual_login
+# ---------------------------------------------------------------------------
+
+
+def test_silent_refresh_needs_manual_login(tmp_path: Path) -> None:
+    """silent_refresh returns error='needs_manual_login' when wait_for_url times out."""
+    timeout_exc = RuntimeError("Timeout 10000ms exceeded while waiting for URL pattern")
+
+    page = _make_page_mock(wait_for_url_side_effect=timeout_exc)
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+
+    session = _make_session(clock=clock, playwright_factory=factory, profile_dir=tmp_path)
+    outcome = session.silent_refresh(deadline=100.0)
+
+    assert outcome.success is False
+    assert outcome.cookies_updated is False
+    assert outcome.error == "needs_manual_login"
+
+
+# ---------------------------------------------------------------------------
+# Test 18: silent_refresh — raises BusyError when another job is running
+# ---------------------------------------------------------------------------
+
+
+def test_silent_refresh_busy_error(tmp_path: Path) -> None:
+    """silent_refresh raises BusyError when open_headed_login is already in progress."""
+    ready = threading.Event()
+    unblock = threading.Event()
+
+    def _blocking_wait_for_url(*args, **kwargs):
+        ready.set()
+        unblock.wait(timeout=5.0)
+
+    page = _make_page_mock(wait_for_url_side_effect=_blocking_wait_for_url)
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+
+    session = _make_session(clock=clock, playwright_factory=factory, profile_dir=tmp_path)
+
+    first_exc: list[BaseException] = []
+
+    def _first():
+        try:
+            session.open_headed_login(deadline=60.0)
+        except Exception as exc:
+            first_exc.append(exc)
+
+    t = threading.Thread(target=_first, daemon=True)
+    t.start()
+    assert ready.wait(timeout=5.0), "first thread did not reach wait_for_url"
+
+    # silent_refresh must raise BusyError while headed login is in progress.
+    from fis_monitor.domain.errors import BusyError
+    with pytest.raises(BusyError):
+        session.silent_refresh(deadline=30.0)
+
+    unblock.set()
+    t.join(timeout=5.0)
+    assert not t.is_alive()

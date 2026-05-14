@@ -24,7 +24,12 @@ from fastapi.testclient import TestClient
 from fis_monitor.domain.errors import SmtpHostPolicyError
 from fis_monitor.domain.models import NotifyResult, Settings, SmtpCredentials
 from fis_monitor.services.settings import SettingsService
-from fis_monitor.web.deps import get_config_source, get_settings_service, get_smtp_test
+from fis_monitor.web.deps import (
+    get_config_source,
+    get_settings_service,
+    get_smtp_test,
+    get_templates,
+)
 from fis_monitor.web.routes.settings import router
 
 # ---------------------------------------------------------------------------
@@ -111,6 +116,9 @@ def _make_app(
     app.dependency_overrides[get_config_source] = lambda: fc
     app.dependency_overrides[get_settings_service] = lambda: fs
     app.dependency_overrides[get_smtp_test] = lambda: ft
+    # get_templates is now a dependency of GET /settings (content-negotiation).
+    # Override with a sentinel that should never be called for JSON requests.
+    app.dependency_overrides[get_templates] = lambda: None
     return app, fc, fs, ft
 
 

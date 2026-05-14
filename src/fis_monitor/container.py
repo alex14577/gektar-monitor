@@ -51,11 +51,15 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     from fis_monitor.infra.sse.sse_stream import SseStreamer
+    from fis_monitor.services.backfill import BackfillService
+    from fis_monitor.services.catchup_dismiss import CatchupDismissService
     from fis_monitor.services.diagnostics import DiagnosticsService
+    from fis_monitor.services.dnd import DndService
     from fis_monitor.services.enrichment import EnrichmentService
     from fis_monitor.services.full_scan import FullScanService
     from fis_monitor.services.login import LoginService
     from fis_monitor.services.lot_query import LotQueryService
+    from fis_monitor.services.lot_user_state import LotUserStateService
     from fis_monitor.services.monitor_cycle import MonitorCycleService
     from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
     from fis_monitor.services.onboarding import OnboardingService
@@ -220,6 +224,18 @@ class Services:
 
     lot_query: LotQueryService
     """Read-side for web: recent feed, search, pagination (read-only, no mutations)."""
+
+    lot_user_state: LotUserStateService
+    """Per-lot user-state mutations: toggle star/archive, set note, fetch details."""
+
+    backfill: BackfillService
+    """Paginated catalogue backfill — manual trigger + auto-on-empty."""
+
+    dnd: DndService
+    """Do-Not-Disturb window — used to suppress notifications."""
+
+    catchup_dismiss: CatchupDismissService
+    """Catch-up banner dismissal — state.db key catchup_dismissed_until."""
 
 
 @dataclass(repr=False)

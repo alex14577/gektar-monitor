@@ -44,6 +44,11 @@ _log = logging.getLogger(__name__)
 # Default deadline for a single headed-login flow (5 minutes).
 _DEFAULT_DEADLINE_SECONDS: float = 300.0
 
+# Default deadline for a silent-refresh flow (30 seconds).
+# Kept short because silent refresh either succeeds quickly (valid cookies)
+# or fails fast (redirect to ЕСИА).  A 5-minute cap would be wasted wait time.
+_DEFAULT_REFRESH_DEADLINE_SECONDS: float = 30.0
+
 
 class LoginBusyError(DomainError):
     """Raised by ``LoginService.start_login()`` when a login job is already running.
@@ -154,6 +159,54 @@ class LoginService:
 
         return LoginJobHandle(future=future)
 
+    def start_refresh(self) -> LoginJobHandle:
+        """Start a silent-refresh job in the thread executor.
+
+        Navigates to /cabinet/ headlessly using the persistent-context profile
+        to renew session cookies without opening a visible browser window.
+        If the existing ЕСИА cookies are valid, the cabinet loads and new
+        session cookies are persisted.  If cookies are expired the job resolves
+        with ``error="needs_manual_login"`` — the caller should surface a
+        prompt to use ``/auth/start`` for a full headed login.
+
+        Single-flight: shares ``_lock`` with ``start_login()`` — raises
+        ``LoginBusyError`` if a headed login OR another refresh is already
+        running.
+
+        Returns:
+            ``LoginJobHandle`` wrapping the ``Future[LoginOutcome]``.
+
+        Raises:
+            LoginBusyError: if another login/refresh is already in progress.
+            RuntimeError: if no executor has been bound yet.
+        """
+        acquired = self._lock.acquire(blocking=False)
+        if not acquired:
+            raise LoginBusyError("Login/refresh already in progress")
+
+        if self._executor is None:
+            self._lock.release()
+            raise RuntimeError(
+                "LoginService: no executor bound — call bind_executor() first"
+            )
+
+        try:
+            deadline = self._clock.monotonic() + _DEFAULT_REFRESH_DEADLINE_SECONDS
+            future: Future[LoginOutcome] = self._executor.submit(
+                self._run_refresh, deadline
+            )
+
+            with self._state_lock:
+                self._active_future = future
+
+            future.add_done_callback(self._on_done)
+
+        except Exception:
+            self._lock.release()
+            raise
+
+        return LoginJobHandle(future=future)
+
     def cancel_active_job(self) -> None:
         """Cancel the active login job by closing the browser.
 
@@ -192,6 +245,10 @@ class LoginService:
         error-mapping point (single source of truth for exception → LoginOutcome).
         """
         return self._session.open_headed_login(deadline=deadline)
+
+    def _run_refresh(self, deadline: float) -> LoginOutcome:
+        """Blocking worker for silent refresh submitted to the executor thread pool."""
+        return self._session.silent_refresh(deadline=deadline)
 
     def _on_done(self, future: Future[LoginOutcome]) -> None:
         """Future completion callback — runs on the executor thread.

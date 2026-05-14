@@ -20,8 +20,19 @@ session_expired guard (docs/decisions-log.md):
   pass-through hook — ``SettingsRepository`` injection is out of scope for
   this task (tracked separately).
 
+Pagination (updated):
+  ``_fetch_region_ids`` now delegates to ``PaginatedListFetcher.iterate()``
+  so the full catalogue is covered (not just page 1).  The fetcher's
+  ``sleep_between_pages`` is 0.0 here because full_scan is a background job
+  and the rate-limit concern is covered by the inter-batch sleep between
+  active-lot batches — adding another sleep would double the scan time with
+  no benefit.
+
+  When ``paginated_fetcher`` is not supplied (backward-compat, tests), the
+  service falls back to the old single-page ``_fetch_region_ids_single_page``
+  implementation.
+
 MVP limitations:
-  - Single page per region (full pagination is out of scope, see run_once).
   - L2 active verification (``full_scan_l2_priority_days``) is not implemented.
   - No ``SseFullScanStarted`` event — event type not yet defined; run_once logs
     instead.
@@ -32,6 +43,7 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fis_monitor.domain.errors import ParseBugError, UpstreamError
@@ -46,6 +58,9 @@ from fis_monitor.domain.interfaces import (
 )
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
+
+if TYPE_CHECKING:
+    from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +134,7 @@ class FullScanService:
         url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
         batch_size: int = 50,
         inter_batch_sleep_sec: float = 0.05,
+        paginated_fetcher: PaginatedListFetcher | None = None,
     ) -> None:
         self._http = http
         self._list_parser = list_parser
@@ -131,6 +147,9 @@ class FullScanService:
         self._url_builder = url_builder
         self._batch_size = batch_size
         self._inter_batch_sleep_sec = inter_batch_sleep_sec
+        # Optional paginated fetcher — when supplied, _fetch_region_ids iterates
+        # all pages; when None, falls back to single-page (backward-compat).
+        self._paginated_fetcher: PaginatedListFetcher | None = paginated_fetcher
 
     # ------------------------------------------------------------------
     # Public API
@@ -228,15 +247,51 @@ class FullScanService:
     # ------------------------------------------------------------------
 
     def _fetch_region_ids(self, region: int) -> set[int]:
+        """Fetch all pages for ``region`` and return the set of lot ids.
+
+        When a ``PaginatedListFetcher`` was supplied at construction time,
+        all pages are iterated.  Otherwise falls back to single-page fetch
+        (backward-compat for tests that pre-date the fetcher).
+
+        Returns an empty set on any error so the caller can decide whether
+        to proceed (mass-deactivation guard upstream).
+        """
+        if self._paginated_fetcher is not None:
+            return self._fetch_region_ids_paginated(region)
+        return self._fetch_region_ids_single_page(region)
+
+    def _fetch_region_ids_paginated(self, region: int) -> set[int]:
+        """Fetch all pages via ``PaginatedListFetcher``; collect lot ids."""
+        assert self._paginated_fetcher is not None  # type narrowing
+        # Use a never-set stop event — full_scan doesn't have one at this call
+        # site (run_once passes stop_event to _process_batches, not here).
+        # Using a sentinel avoids changing the _fetch_region_ids signature.
+        stop_sentinel = threading.Event()
+        ids: set[int] = set()
+        try:
+            for row in self._paginated_fetcher.iterate(
+                region,
+                stop_sentinel,
+                sleep_between_pages=0.0,  # full_scan paces via inter_batch_sleep_sec
+            ):
+                ids.add(row.id)
+        except Exception:
+            logger.warning(
+                "full_scan: error during paginated fetch for region=%s — using partial ids",
+                region,
+                exc_info=True,
+            )
+        logger.debug(
+            "full_scan: region=%s paginated fetch collected %d ids", region, len(ids)
+        )
+        return ids
+
+    def _fetch_region_ids_single_page(self, region: int) -> set[int]:
         """Fetch one list page for ``region`` and return the set of lot ids.
 
-        Returns an empty set on any error (HTTP or parse), so the caller can
-        decide whether to proceed.
-
-        MVP: single page; full pagination is out of scope.
+        Backward-compat fallback used when no ``PaginatedListFetcher`` is
+        injected (tests, legacy wiring).
         """
-        # Default sort=-DATE_CREATE is irrelevant for full-scan id-collection
-        # (we read all ids regardless of order); kept for URL uniformity.
         url = self._url_builder.lot_list_url(region=region)
         try:
             response = self._http.get(url, headers=_PJAX_HEADERS)
@@ -273,7 +328,7 @@ class FullScanService:
             return set()
 
         ids = {row.id for row in rows}
-        logger.debug("full_scan: region=%s fetched %d ids", region, len(ids))
+        logger.debug("full_scan: region=%s fetched %d ids (single page)", region, len(ids))
         return ids
 
     def _process_batches(

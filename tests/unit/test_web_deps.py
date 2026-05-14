@@ -76,6 +76,10 @@ def mock_container() -> Container:
             session_monitor=Mock(name="session_monitor"),
             diagnostics=Mock(name="diagnostics"),
             lot_query=Mock(name="lot_query"),
+            lot_user_state=Mock(name="lot_user_state"),
+            backfill=Mock(name="backfill"),
+            dnd=Mock(name="dnd"),
+            catchup_dismiss=Mock(name="catchup_dismiss"),
         )
 
     return Container(infra=_mock_infra(), services=_mock_services())

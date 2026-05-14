@@ -725,6 +725,7 @@ LoginErrorHint = Literal[
     "playwright_missing_binary",
     "playwright_missing_deps",
     "playwright_other",
+    "needs_manual_login",
 ]
 
 

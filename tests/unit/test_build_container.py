@@ -163,6 +163,10 @@ class TestProtocolSubstitution:
             session_monitor=original_services.session_monitor,
             diagnostics=original_services.diagnostics,
             lot_query=original_services.lot_query,
+            lot_user_state=original_services.lot_user_state,
+            backfill=original_services.backfill,
+            dnd=original_services.dnd,
+            catchup_dismiss=original_services.catchup_dismiss,
         )
         container.services = new_services
 

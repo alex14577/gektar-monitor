@@ -1,0 +1,86 @@
+{# ============================================================================
+   _lot_details.html.jinja — HTMX detail card for a single lot.
+   Returned by GET /lots/{lot_id}/details as an HTML fragment (no base.html).
+   Context variables:
+     lot        — Lot domain model (domain/models.py §Lot)
+     user_state — LotUserState | None
+   ============================================================================ #}
+<section class="lot-details" id="lot-details-{{ lot.id }}" aria-label="Детали лота {{ lot.cadastral_no }}">
+
+  <header class="lot-details__header">
+    <h2 class="lot-details__title">{{ lot.cadastral_no }}</h2>
+    <div class="lot-details__actions">
+      <button class="btn btn--ghost btn--sm starbtn"
+              type="button"
+              data-action="star"
+              data-lot-id="{{ lot.id }}"
+              hx-post="/lots/{{ lot.id }}/star"
+              hx-swap="none"
+              aria-pressed="{{ 'true' if user_state and user_state.starred else 'false' }}"
+              aria-label="{{ 'Убрать из избранного' if user_state and user_state.starred else 'В избранное' }}">
+        {% if user_state and user_state.starred %}★ В избранном{% else %}☆ В избранное{% endif %}
+      </button>
+      <button class="btn btn--ghost btn--sm"
+              type="button"
+              data-action="archive"
+              data-lot-id="{{ lot.id }}"
+              hx-post="/lots/{{ lot.id }}/archive"
+              hx-swap="none"
+              aria-pressed="{{ 'true' if user_state and user_state.submitted else 'false' }}"
+              aria-label="{{ 'Восстановить из архива' if user_state and user_state.submitted else 'Скрыть из ленты' }}">
+        {% if user_state and user_state.submitted %}↑ Из архива{% else %}↓ В архив{% endif %}
+      </button>
+    </div>
+  </header>
+
+  <dl class="lot-details__kv">
+    <dt>Регион</dt>
+    <dd>{{ lot.region }}</dd>
+
+    {% if lot.municipality %}
+    <dt>Муниципалитет</dt>
+    <dd>{{ lot.municipality }}</dd>
+    {% endif %}
+
+    {% if lot.area_sqm is not none %}
+    <dt>Площадь</dt>
+    <dd>{{ (lot.area_sqm / 10000) | round(4) }} га ({{ lot.area_sqm }} м²)</dd>
+    {% endif %}
+
+    <dt>Статус</dt>
+    <dd>{{ lot.status }}</dd>
+
+    {% if lot.date_update %}
+    <dt>Дата обновления</dt>
+    <dd>{{ lot.date_update.strftime('%d.%m.%Y') }}</dd>
+    {% endif %}
+
+    {% if lot.land_category %}
+    <dt>Категория земель</dt>
+    <dd>{{ lot.land_category }}</dd>
+    {% endif %}
+
+    {% if lot.permitted_use %}
+    <dt>ВРИ</dt>
+    <dd>{{ lot.permitted_use }}</dd>
+    {% endif %}
+
+    {% if lot.ogv %}
+    <dt>ОГВ</dt>
+    <dd>{{ lot.ogv }}</dd>
+    {% endif %}
+  </dl>
+
+  <div class="lot-details__note">
+    <label class="lot-details__note-label" for="lot-note-{{ lot.id }}">Заметка</label>
+    <textarea class="lot__note-input"
+              id="lot-note-{{ lot.id }}"
+              name="note"
+              aria-label="Заметка к лоту"
+              maxlength="4096"
+              hx-post="/lots/{{ lot.id }}/note"
+              hx-trigger="change delay:400ms"
+              hx-swap="none">{{ user_state.note if user_state and user_state.note else '' }}</textarea>
+  </div>
+
+</section>

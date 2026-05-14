@@ -11,6 +11,9 @@ from dataclasses import dataclass
 _LIST_PATH = "/cabinet/free-lot"
 # Square brackets percent-encoded for safe inclusion as-is in a GET URL.
 _LIST_QUERY = "?FreeLotSearch%5BrfSubjectId%5D%5B%5D={region}&use_filter_pocket=1&sort={sort}"
+# Yii2 pagination parameter.  Page 1 is the default (omit for first page to
+# keep URLs canonical); page 2+ appends "&FreeLotSearch_page={page}".
+_LIST_PAGE_PARAM = "&FreeLotSearch_page={page}"
 _DETAIL_PATH = "/cabinet/free-lot-view?id={lot_id}"
 
 # Default sort: DESC by date_create — newest lots first (research v3 confirmed,
@@ -40,8 +43,14 @@ class TorgiUrlBuilder:
 
     base_url: str
 
-    def lot_list_url(self, *, region: int, sort: str = DEFAULT_LIST_SORT) -> str:
-        """Return the list-page URL for *region* with optional *sort* param.
+    def lot_list_url(
+        self,
+        *,
+        region: int,
+        sort: str = DEFAULT_LIST_SORT,
+        page: int = 1,
+    ) -> str:
+        """Return the list-page URL for *region* with optional *sort* and *page*.
 
         *sort* defaults to ``DEFAULT_LIST_SORT`` ("-DATE_CREATE") so the server
         returns newest lots first — a P1 correctness fix (without DESC sort,
@@ -50,8 +59,16 @@ class TorgiUrlBuilder:
         *sort* is inserted raw — Yii2 sort syntax uses only ASCII unreserved
         chars ("-", "_", letters, digits) which are RFC 3986 safe in a query.
         Callers passing values with ``&``/``=``/space must encode themselves.
+
+        *page* selects the Yii2 pagination page (1-based).  Page 1 is
+        the default; for page >= 2 the ``FreeLotSearch_page`` param is
+        appended.  ``page`` MUST be a positive integer — no validation is
+        performed here; callers enforce the 1..1000 guard.
         """
-        return f"{self.base_url}{_LIST_PATH}{_LIST_QUERY.format(region=region, sort=sort)}"
+        base = f"{self.base_url}{_LIST_PATH}{_LIST_QUERY.format(region=region, sort=sort)}"
+        if page > 1:
+            base += _LIST_PAGE_PARAM.format(page=page)
+        return base
 
     def lot_detail_url(self, *, lot_id: int) -> str:
         return f"{self.base_url}{_DETAIL_PATH.format(lot_id=lot_id)}"

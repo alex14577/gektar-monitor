@@ -342,6 +342,7 @@ def test_login_outcome_error_literal_closed_set():
         "playwright_missing_binary",
         "playwright_missing_deps",
         "playwright_other",
+        "needs_manual_login",
         None,
     ):
         LoginOutcome(success=False, cookies_updated=False, error=err)  # type: ignore[arg-type]
@@ -369,6 +370,7 @@ def test_login_outcome_error_literal_closed_set():
         "playwright_missing_binary",
         "playwright_missing_deps",
         "playwright_other",
+        "needs_manual_login",
     }
     # The unresolved-source annotation must also not contain the legacy
     # `playwright:<...>` open-form marker.

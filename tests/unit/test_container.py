@@ -73,6 +73,10 @@ class TestServicesFrozen:
             session_monitor=Mock(),
             diagnostics=Mock(),
             lot_query=Mock(),
+            lot_user_state=Mock(),
+            backfill=Mock(),
+            dnd=Mock(),
+            catchup_dismiss=Mock(),
         )
 
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -119,6 +123,10 @@ class TestContainerNotFrozen:
             session_monitor=Mock(),
             diagnostics=Mock(),
             lot_query=Mock(),
+            lot_user_state=Mock(),
+            backfill=Mock(),
+            dnd=Mock(),
+            catchup_dismiss=Mock(),
         )
 
         container = Container(infra=infra, services=services)
@@ -136,6 +144,10 @@ class TestContainerNotFrozen:
             session_monitor=Mock(),
             diagnostics=Mock(),
             lot_query=Mock(),
+            lot_user_state=Mock(),
+            backfill=Mock(),
+            dnd=Mock(),
+            catchup_dismiss=Mock(),
         )
         container.services = new_services  # type: ignore
         assert container.services is new_services
@@ -192,6 +204,10 @@ class TestReprNoPII:
             session_monitor=Mock(),
             diagnostics=Mock(),
             lot_query=Mock(),
+            lot_user_state=Mock(),
+            backfill=Mock(),
+            dnd=Mock(),
+            catchup_dismiss=Mock(),
         )
 
         repr_str = repr(services)
@@ -238,6 +254,10 @@ class TestReprNoPII:
             session_monitor=Mock(),
             diagnostics=Mock(),
             lot_query=Mock(),
+            lot_user_state=Mock(),
+            backfill=Mock(),
+            dnd=Mock(),
+            catchup_dismiss=Mock(),
         )
 
         container = Container(infra=infra, services=services)
@@ -289,6 +309,10 @@ class TestContainerConstruction:
             session_monitor=Mock(),
             diagnostics=Mock(),
             lot_query=Mock(),
+            lot_user_state=Mock(),
+            backfill=Mock(),
+            dnd=Mock(),
+            catchup_dismiss=Mock(),
         )
 
         container = Container(infra=infra, services=services)

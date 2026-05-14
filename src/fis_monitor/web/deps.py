@@ -18,15 +18,21 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, Request
 from fastapi.templating import Jinja2Templates
 
+from fis_monitor.services.view_filters import ViewFiltersService
+
 if TYPE_CHECKING:
     from fis_monitor.container import Container
-    from fis_monitor.domain.interfaces import ConfigSource, NotificationsRepository
+    from fis_monitor.domain.interfaces import Clock, ConfigSource, NotificationsRepository
     from fis_monitor.infra.sse.sse_stream import SseStreamer
+    from fis_monitor.services.backfill import BackfillService
+    from fis_monitor.services.catchup_dismiss import CatchupDismissService
     from fis_monitor.services.diagnostics import DiagnosticsService
+    from fis_monitor.services.dnd import DndService
     from fis_monitor.services.enrichment import EnrichmentService
     from fis_monitor.services.full_scan import FullScanService
     from fis_monitor.services.login import LoginService
     from fis_monitor.services.lot_query import LotQueryService
+    from fis_monitor.services.lot_user_state import LotUserStateService
     from fis_monitor.services.monitor_cycle import MonitorCycleService
     from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
     from fis_monitor.services.onboarding import OnboardingService
@@ -99,6 +105,17 @@ def get_lot_query(c: Container = Depends(get_container)) -> LotQueryService:
     return c.services.lot_query
 
 
+def get_lot_user_state_service(
+    c: Container = Depends(get_container),
+) -> LotUserStateService:
+    """Return LotUserStateService from the composition root.
+
+    Composition wires this in build_container(); route tests override via
+    ``app.dependency_overrides[get_lot_user_state_service]``.
+    """
+    return c.services.lot_user_state
+
+
 def get_notifications_repo(
     c: Container = Depends(get_container),
 ) -> NotificationsRepository:
@@ -132,6 +149,53 @@ def get_session_probe(c: Container = Depends(get_container)) -> object:
     Route tests override via ``app.dependency_overrides[get_session_probe]``.
     """
     return c.infra.session_probe
+
+
+def get_backfill(c: Container = Depends(get_container)) -> BackfillService:
+    """Return BackfillService from the composition root.
+
+    Composition wires this in build_container() as ``c.services.backfill``.
+    Route tests override via ``app.dependency_overrides[get_backfill]``.
+    """
+    return c.services.backfill  # type: ignore[return-value]
+
+
+def get_dnd_service(c: Container = Depends(get_container)) -> DndService:
+    """Return DndService from the composition root.
+
+    Composition wires this in build_container() as ``c.services.dnd``.
+    Route tests override via ``app.dependency_overrides[get_dnd_service]``.
+    """
+    return c.services.dnd  # type: ignore[return-value]
+
+
+def get_clock(request: Request) -> Clock:
+    """Return the Clock from the composition root.
+
+    Stored at ``app.state.container.infra.clock`` by ``build_container``.
+    Route tests override this via ``app.dependency_overrides[get_clock]``.
+    """
+    return request.app.state.container.infra.clock  # type: ignore[return-value]
+
+
+def get_catchup_dismiss(
+    c: Container = Depends(get_container),
+) -> CatchupDismissService:
+    """Return CatchupDismissService from the composition root.
+
+    Composition wires this in build_container() as ``c.services.catchup_dismiss``.
+    Route tests override via ``app.dependency_overrides[get_catchup_dismiss]``.
+    """
+    return c.services.catchup_dismiss  # type: ignore[return-value]
+
+
+def get_view_filters_service() -> ViewFiltersService:
+    """Return a stateless ViewFiltersService instance.
+
+    The service has no external dependencies and is constructed fresh per-request.
+    The function identity is the stable DI key for dependency_overrides in tests.
+    """
+    return ViewFiltersService()
 
 
 def get_templates(request: Request) -> Jinja2Templates:

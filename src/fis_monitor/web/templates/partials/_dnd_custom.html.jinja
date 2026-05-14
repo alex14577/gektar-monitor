@@ -1,0 +1,35 @@
+{# ========================================================================
+   _dnd_custom.html.jinja — HTMX partial: custom DnD duration form.
+   Loaded via GET /dnd/custom; appended to <body> via hx-swap="beforeend".
+   On submit: hx-post="/dnd" sends {"minutes": <value>} as JSON → 204.
+   ======================================================================== #}
+<dialog id="dnd-custom-dialog" open
+        style="position:fixed;inset:0;margin:auto;padding:1.5rem 2rem;border:1px solid var(--border,#ddd);border-radius:8px;background:var(--surface,#fff);z-index:200;min-width:260px;">
+  <form method="dialog">
+    <h3 style="margin:0 0 1rem;font-size:1rem;">Своё время DnD</h3>
+    <label style="display:block;margin-bottom:0.5rem;font-size:0.875rem;">
+      Минут:
+      <input
+        id="dnd-custom-minutes"
+        name="minutes"
+        type="number"
+        min="1"
+        max="10080"
+        value="30"
+        required
+        style="margin-left:0.5rem;width:80px;padding:0.25rem 0.5rem;border:1px solid var(--border,#ccc);border-radius:4px;"
+      >
+    </label>
+    <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem;">
+      <button type="button" class="btn btn--ghost btn--sm"
+              onclick="document.getElementById('dnd-custom-dialog').remove()">Отмена</button>
+      <button
+        type="button"
+        class="btn btn--primary btn--sm"
+        hx-post="/dnd"
+        hx-vals="js:{minutes: parseInt(document.getElementById('dnd-custom-minutes').value, 10)}"
+        hx-on::after-request="document.getElementById('dnd-custom-dialog').remove()"
+      >Включить</button>
+    </div>
+  </form>
+</dialog>

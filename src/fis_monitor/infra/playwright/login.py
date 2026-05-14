@@ -60,6 +60,11 @@ _LOGIN_START_URL = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/"
 # wait_for_url(_LOGIN_SUCCESS_URL_GLOB) bounded by ``deadline``.
 _INITIAL_GOTO_TIMEOUT_MS = 30_000
 
+# Timeout for the silent-refresh wait_for_url check.  Kept short because
+# a session with valid cookies reaches /cabinet/ in ≤2-3 s; a redirect to
+# ЕСИА means we need manual login anyway so waiting longer wastes time.
+_SILENT_REFRESH_WAIT_TIMEOUT_MS = 10_000
+
 
 class PlaywrightLoginSession:
     """Headed-login via Playwright — ``LoginSession`` Protocol implementation.
@@ -122,6 +127,29 @@ class PlaywrightLoginSession:
         finally:
             self._lock.release()
 
+    def silent_refresh(self, *, deadline: float) -> LoginOutcome:
+        """Navigate to /cabinet/ headlessly to renew session cookies.
+
+        If the persistent-context profile holds valid ЕСИА cookies the
+        cabinet loads without an OAuth redirect and new session cookies are
+        persisted automatically by Playwright.  If the cookies are expired
+        the server redirects to ЕСИА — we detect this by ``wait_for_url``
+        timing out — and return ``error="needs_manual_login"``.
+
+        Raises:
+            BusyError: if another login/refresh is already in progress
+                (shares the same ``_lock`` as ``open_headed_login``).
+        """
+        acquired = self._lock.acquire(blocking=False)
+        if not acquired:
+            raise BusyError(
+                "PlaywrightLoginSession: a login/refresh is already in progress"
+            )
+        try:
+            return self._run_silent_refresh(deadline=deadline)
+        finally:
+            self._lock.release()
+
     def cancel(self) -> None:
         """Thread-safe external stop.
 
@@ -142,6 +170,129 @@ class PlaywrightLoginSession:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _run_silent_refresh(self, *, deadline: float) -> LoginOutcome:
+        """Core silent-refresh flow — called with ``_lock`` already held.
+
+        Identical to ``_run_login`` except:
+        - ``headless=True`` (no visible window).
+        - ``wait_for_url`` uses a short fixed timeout (``_SILENT_REFRESH_WAIT_TIMEOUT_MS``)
+          instead of the full user-controlled deadline.
+        - A timeout/redirect-to-ЕСИА is mapped to ``error="needs_manual_login"``
+          instead of ``error="timeout"``.
+        """
+        start = self._clock.monotonic()
+        remaining_ms = int((deadline - start) * 1000)
+
+        try:
+            with self._playwright_factory() as pw:
+                browser = pw.chromium.launch_persistent_context(
+                    str(self._profile_dir),
+                    headless=True,
+                    ignore_https_errors=True,
+                )
+                with self._state_lock:
+                    self._active_browser = browser
+
+                try:
+                    return self._wait_for_silent_refresh(
+                        context=browser,
+                        remaining_ms=remaining_ms,
+                        start=start,
+                        deadline=deadline,
+                    )
+                finally:
+                    with self._state_lock:
+                        self._active_browser = None
+                    try:
+                        browser.close()
+                    except Exception:  # pragma: no cover
+                        _log.debug("_run_silent_refresh: browser.close() raised", exc_info=True)
+
+        except Exception as exc:
+            outcome, unmapped = self._map_exception(exc)
+            if unmapped:
+                _log.error(
+                    "PlaywrightLoginSession._run_silent_refresh: unexpected exception type=%s",
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+            else:
+                _log.debug(
+                    "PlaywrightLoginSession._run_silent_refresh: mapped exception type=%s hint=%s",
+                    type(exc).__name__,
+                    outcome.error,
+                )
+            return outcome
+
+    def _wait_for_silent_refresh(
+        self,
+        *,
+        context: BrowserContext,
+        remaining_ms: int,
+        start: float,
+        deadline: float,
+    ) -> LoginOutcome:
+        """Navigate to /cabinet/ and wait for the URL to confirm cookie validity."""
+        context.route("**/*", self._make_route_handler())
+
+        pages = context.pages
+        page: Page = pages[0] if pages else context.new_page()
+
+        try:
+            page.goto(
+                _LOGIN_START_URL,
+                wait_until="domcontentloaded",
+                timeout=_INITIAL_GOTO_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            outcome, unmapped = self._map_exception(exc)
+            if unmapped:
+                _log.error(
+                    "PlaywrightLoginSession._wait_for_silent_refresh: goto failed type=%s url=%s",
+                    type(exc).__name__,
+                    _LOGIN_START_URL,
+                    exc_info=exc,
+                )
+            else:
+                _log.debug(
+                    "PlaywrightLoginSession._wait_for_silent_refresh: goto failed type=%s hint=%s",
+                    type(exc).__name__,
+                    outcome.error,
+                )
+            return outcome
+
+        # Check overall deadline hasn't elapsed before we start waiting.
+        elapsed_ms = int((self._clock.monotonic() - start) * 1000)
+        if remaining_ms - elapsed_ms <= 0:
+            return LoginOutcome(
+                success=False, cookies_updated=False, error="needs_manual_login"
+            )
+
+        # Short fixed timeout — either we land on /cabinet/ quickly or cookies
+        # are expired.  We do NOT use the full deadline here so that a stale
+        # session fails fast rather than hanging for 30 s.
+        try:
+            page.wait_for_url(_LOGIN_SUCCESS_URL_GLOB, timeout=_SILENT_REFRESH_WAIT_TIMEOUT_MS)
+        except Exception as exc:
+            # Any failure (timeout, redirect away from /cabinet/) means the
+            # server didn't keep us on the cabinet page → manual login needed.
+            exc_str = str(exc).lower()
+            exc_type = type(exc).__name__
+            if "targetclosed" in exc_type.lower() or "targetclosed" in exc_str:
+                # Browser was cancelled externally.
+                return LoginOutcome(success=False, cookies_updated=False, error="cancelled")
+            _log.info(
+                "PlaywrightLoginSession.silent_refresh: not on cabinet URL — needs manual login "
+                "(exc_type=%s)",
+                type(exc).__name__,
+            )
+            return LoginOutcome(
+                success=False, cookies_updated=False, error="needs_manual_login"
+            )
+
+        _log.info("PlaywrightLoginSession: silent refresh succeeded")
+        return LoginOutcome(success=True, cookies_updated=True, error=None)
 
     def _run_login(self, *, deadline: float) -> LoginOutcome:
         """Core login flow — called with ``_lock`` already held."""

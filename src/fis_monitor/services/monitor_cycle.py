@@ -214,6 +214,11 @@ class MonitorCycleService:
         # pending sentinel exists; a second put_nowait raises queue.Full which is
         # suppressed in request_run_now(), giving idempotent coalescing semantics.
         self._trigger_q: queue.Queue[None] = queue.Queue(maxsize=1)
+        # Backfill skip-set: regions currently being backfilled by BackfillService.
+        # run_forever skips any region present in this set to prevent concurrent
+        # catalogue writes.  Guarded by _backfill_lock.
+        self._regions_in_backfill: set[int] = set()
+        self._backfill_lock = threading.Lock()
 
     # Default poll interval used when ``interval_minutes`` is 0 (continuous mode).
     _DEFAULT_POLL_INTERVAL_SEC: float = 60.0
@@ -223,6 +228,25 @@ class MonitorCycleService:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def mark_region_in_backfill(self, region: int) -> None:
+        """Register ``region`` as currently being backfilled.
+
+        Called by ``BackfillService`` before iterating pages for a region.
+        Thread-safe: acquires ``_backfill_lock``.
+        """
+        with self._backfill_lock:
+            self._regions_in_backfill.add(region)
+
+    def clear_region_in_backfill(self, region: int) -> None:
+        """Deregister ``region`` from the backfill skip-set.
+
+        Called by ``BackfillService`` in a ``finally`` block after finishing
+        (or aborting) a region's backfill.  Idempotent — safe if ``region``
+        was never added.  Thread-safe: acquires ``_backfill_lock``.
+        """
+        with self._backfill_lock:
+            self._regions_in_backfill.discard(region)
 
     def request_run_now(self) -> None:
         """Wake the scheduler for an immediate pass (non-blocking, idempotent).
@@ -277,6 +301,15 @@ class MonitorCycleService:
                         region,
                     )
                     break
+
+                with self._backfill_lock:
+                    in_backfill = region in self._regions_in_backfill
+                if in_backfill:
+                    logger.debug(
+                        "monitor_cycle: region=%s is being backfilled — skipping cycle",
+                        region,
+                    )
+                    continue
 
                 try:
                     self.run_cycle(region)

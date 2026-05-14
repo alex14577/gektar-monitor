@@ -289,12 +289,22 @@ class LotRepository(Protocol):
     docs/architecture/03-protocols.md §3.1.
     """
 
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
+    def upsert(
+        self,
+        lot: Lot,
+        *,
+        tracked: Sequence[TrackedField],
+        notify: bool = True,
+    ) -> LotUpsertResult:
         """Atomically insert-or-update ``lot`` and record field-level history.
 
         The implementation calls ``compute_changes(old, lot, tracked)``
         inside the same ``BEGIN IMMEDIATE`` transaction — callers MUST NOT
         compute the diff themselves beforehand (R3-C2).
+
+        ``notify=False`` suppresses SSE publication for this upsert — used
+        by ``BackfillService`` to avoid flooding the event bus during bulk
+        catalogue import.
         """
         ...
 
@@ -311,6 +321,16 @@ class LotRepository(Protocol):
 
         The implementation MUST fetch into a list and close the cursor
         before returning (never exposes an open cursor to callers).
+        """
+        ...
+
+    def count_active(self) -> int:
+        """Return the total number of active lots (``is_active = 1``).
+
+        Used by lifespan auto-trigger: if ``count_active() == 0`` on startup
+        a backfill is started automatically to populate the initial catalogue.
+        Implementations MUST be a single ``SELECT COUNT(*) FROM lots WHERE
+        is_active = 1`` with no locking — read-only, no BEGIN IMMEDIATE.
         """
         ...
 
@@ -484,6 +504,20 @@ class LoginSession(Protocol):
         """Blocking call: open a browser window, wait for the ФИС redirect.
 
         ``deadline`` — wall-clock seconds until a hard timeout.
+        Returns ``LoginOutcome``.
+        """
+        ...
+
+    def silent_refresh(self, *, deadline: float) -> Any:
+        """Blocking call: navigate to /cabinet/ headlessly to renew session cookies.
+
+        Uses the same persistent-context profile as ``open_headed_login``.
+        If the existing ЕСИА cookies are still valid, the cabinet loads
+        without a redirect and new session cookies are persisted.
+        If cookies are expired, the server redirects to ЕСИА login — the
+        method returns ``LoginOutcome(success=False, error="needs_manual_login")``.
+
+        ``deadline`` — wall-clock seconds until a hard timeout (default 30 s).
         Returns ``LoginOutcome``.
         """
         ...

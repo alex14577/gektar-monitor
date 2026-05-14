@@ -89,7 +89,19 @@ from fis_monitor.utils.log import setup_logging
 from fis_monitor.utils.log_filters import StackPIIFilter
 from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
-from fis_monitor.web.routes import auth, cycle, diagnostics, events, lots, notifications, onboarding
+from fis_monitor.web.routes import (
+    auth,
+    backfill,
+    catchup,
+    cycle,
+    diagnostics,
+    dnd,
+    events,
+    filters,
+    lots,
+    notifications,
+    onboarding,
+)
 from fis_monitor.web.routes import main as main_routes
 from fis_monitor.web.routes import settings as settings_routes
 from fis_monitor.web.templates import STATIC_DIR, build_templates
@@ -222,6 +234,21 @@ async def _lifespan_impl(
         )
         app.state.supervisor = supervisor
         logger.info("lifespan: supervisor started (full-scan, monitor-cycle, notifier)")
+
+        # Auto-trigger backfill on empty catalogue (gektar_monitor-4pn).
+        # First post-onboarding run: lots table is empty → fetch all pages of
+        # the listing for every configured region so the user sees the full
+        # catalogue immediately. notify=False is set inside BackfillService so
+        # this does not spam the user with hundreds of "new lot" notifications.
+        # Guarded with getattr so minimal FakeInfra used in lifespan tests
+        # (no lot_repo / no backfill service) does not crash.
+        _lot_repo = getattr(container.infra, "lot_repo", None)
+        _backfill = getattr(container.services, "backfill", None)
+        if _lot_repo is not None and _backfill is not None and _lot_repo.count_active() == 0:
+            def _auto_backfill(_stop: threading.Event) -> None:
+                _backfill.start(_stop)
+            supervisor.start("backfill-auto", _auto_backfill)
+            logger.info("lifespan: lots table empty — auto-backfill scheduled")
 
         yield
 
@@ -391,6 +418,10 @@ def create_app(
         onboarding.router,
         diagnostics.router,
         events.router,
+        dnd.router,
+        filters.router,
+        catchup.router,
+        backfill.router,
     ):
         app.include_router(r)
 
