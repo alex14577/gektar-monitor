@@ -52,7 +52,8 @@
                     hx-post="/onboarding/save?step={{ step }}"
                     hx-include="closest form"
                     hx-target=".wiz__inner"
-                    hx-swap="innerHTML">Настроить позже</button>
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="this">Настроить позже</button>
           {% elif step == 3 %}
             <button class="btn btn--ghost"
                     type="button"
@@ -60,7 +61,8 @@
                     hx-post="/onboarding/save?step={{ step }}"
                     hx-include="closest form"
                     hx-target=".wiz__inner"
-                    hx-swap="innerHTML">Пропустить — только браузерные</button>
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="this">Пропустить — только браузерные</button>
           {% endif %}
           <button class="btn btn--primary btn--lg"
                   type="button"
@@ -68,7 +70,8 @@
                   hx-post="/onboarding/save?step={{ step }}"
                   hx-include="closest form"
                   hx-target=".wiz__inner"
-                  hx-swap="innerHTML">
+                  hx-swap="innerHTML"
+                  hx-disabled-elt="this">
             {{ 'Открыть панель →' if step == 4 else 'Дальше →' }}
           </button>
         </div>
