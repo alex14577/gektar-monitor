@@ -319,6 +319,10 @@ def test_headless_false(tmp_path: Path) -> None:
     assert kwargs.get("headless") is False, (
         f"Expected headless=False, got headless={kwargs.get('headless')!r}"
     )
+    assert kwargs.get("ignore_https_errors") is True, (
+        "ignore_https_errors must be True — Russian gov sites use Минцифры root CA "
+        f"not in Chromium trust store; got {kwargs.get('ignore_https_errors')!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

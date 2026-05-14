@@ -150,9 +150,18 @@ class PlaywrightLoginSession:
 
         try:
             with self._playwright_factory() as pw:
+                # ignore_https_errors=True: Russian government sites
+                # (zakupki.gov.ru cyrillic punycode, gosuslugi.ru) are served
+                # with certificates from the Russian Trusted Root CA (Минцифры),
+                # which is NOT in Chromium's default trust store. Without this
+                # flag goto() fails instantly with ERR_CERT_AUTHORITY_INVALID
+                # and the browser window opens then immediately closes.
+                # Risk is bounded by the host whitelist in _make_route_handler:
+                # all non-whitelisted hosts are aborted before any TLS happens.
                 browser = pw.chromium.launch_persistent_context(
                     str(self._profile_dir),
                     headless=False,
+                    ignore_https_errors=True,
                 )
                 # Register the active browser so cancel() can reach it.
                 with self._state_lock:
