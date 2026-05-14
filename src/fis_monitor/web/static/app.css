@@ -265,6 +265,29 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .chip--ok    { background: var(--ok-soft); color: var(--ok); border-color: color-mix(in oklab, var(--ok) 30%, var(--line)); }
 .chip--star  { padding: 2px 6px; }
 
+/* ---------- htmx loading indicator ---------- */
+/* Hidden by default; visible only while the triggering element has .htmx-request */
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Spinner dots — three pulsing circles */
+.spinner-dots {
+  display: inline-flex; gap: 3px; align-items: center;
+}
+.spinner-dots__dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor; opacity: 0.6;
+  animation: spinner-pulse 1.2s ease-in-out infinite;
+}
+.spinner-dots__dot:nth-child(2) { animation-delay: 0.2s; }
+.spinner-dots__dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes spinner-pulse {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40%           { transform: scale(1);   opacity: 1;   }
+}
+
 /* ---------- region (zone) container ---------- */
 .zone {
   background: var(--surface);
