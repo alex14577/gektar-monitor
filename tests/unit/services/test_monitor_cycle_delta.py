@@ -355,29 +355,50 @@ class TestParseMissCounter:
             svc.run_cycle(_REGION)
         assert svc._parse_miss_counter.get(_REGION) == 3
 
+    def test_warning_log_below_threshold(self, caplog: pytest.LogCaptureFixture) -> None:
+        svc, _, _, stop_event = _make_service(total_count=None)
+        svc._stop_event = stop_event
+        with caplog.at_level(logging.WARNING):
+            svc.run_cycle(_REGION)  # miss=1, below threshold
+        warn_recs = [
+            r for r in caplog.records
+            if r.message == "delta_check.parse_failure" and r.levelno == logging.WARNING
+        ]
+        assert warn_recs, "Expected delta_check.parse_failure WARNING for miss=1"
+        rec = warn_recs[0]
+        assert rec.region_id == _REGION  # type: ignore[attr-defined]
+        assert rec.consecutive_miss_count == 1  # type: ignore[attr-defined]
+
     def test_error_log_at_threshold(self, caplog: pytest.LogCaptureFixture) -> None:
         svc, _, _, stop_event = _make_service(total_count=None)
         svc._stop_event = stop_event
-        with caplog.at_level(logging.ERROR):
+        with caplog.at_level(logging.WARNING):
             for _ in range(5):
                 svc.run_cycle(_REGION)
-        error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
-        assert any("delta_check.parse_failure" in r.message for r in error_records)
+        error_recs = [
+            r for r in caplog.records
+            if r.message == "delta_check.parse_failure" and r.levelno == logging.ERROR
+        ]
+        assert error_recs, "Expected delta_check.parse_failure ERROR at miss=5"
+        rec = error_recs[0]
+        assert rec.region_id == _REGION  # type: ignore[attr-defined]
+        assert rec.consecutive_miss_count == 5  # type: ignore[attr-defined]
 
     def test_error_log_contains_region_and_miss_count(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         svc, _, _, stop_event = _make_service(total_count=None)
         svc._stop_event = stop_event
-        with caplog.at_level(logging.ERROR):
+        with caplog.at_level(logging.WARNING):
             for _ in range(5):
                 svc.run_cycle(_REGION)
-        error_msgs = [
-            r.message for r in caplog.records if "delta_check.parse_failure" in r.message
+        parse_fail_recs = [
+            r for r in caplog.records if r.message == "delta_check.parse_failure"
         ]
-        assert error_msgs, "Expected at least one delta_check.parse_failure ERROR"
-        last = error_msgs[-1]
-        assert str(_REGION) in last
+        assert parse_fail_recs, "Expected delta_check.parse_failure records"
+        last = parse_fail_recs[-1]
+        assert last.region_id == _REGION  # type: ignore[attr-defined]
+        assert last.consecutive_miss_count == 5  # type: ignore[attr-defined]
 
     def test_counter_resets_after_restore(self) -> None:
         # 3 misses, then total_count restores → counter cleared.
@@ -446,7 +467,7 @@ class TestStopEventPassThrough:
 
 
 class TestDeltaCheckFiredLog:
-    """Invariant 6: delta_check.fired INFO log — region_id, total_count, db_count, len_hint, decision."""  # noqa: E501
+    """Invariant 6: delta_check.fired INFO log — structured extra fields."""
 
     def test_fired_log_fields(self, caplog: pytest.LogCaptureFixture) -> None:
         rows = [_make_parsed_row(i) for i in range(5)]
@@ -461,14 +482,32 @@ class TestDeltaCheckFiredLog:
         with caplog.at_level(logging.INFO):
             svc.run_cycle(_REGION)
 
-        fired = [r for r in caplog.records if "delta_check.fired" in r.message]
+        fired = [r for r in caplog.records if r.message == "delta_check.fired"]
         assert fired, "Expected delta_check.fired INFO log"
-        msg = fired[0].message
-        assert str(_REGION) in msg
-        assert "200" in msg   # total_count
-        assert "10" in msg    # db_count
-        assert "5" in msg     # len_hint
-        assert "True" in msg  # decision
+        rec = fired[0]
+        assert rec.levelno == logging.INFO
+        assert rec.region_id == _REGION  # type: ignore[attr-defined]
+        assert rec.total_upstream == 200  # type: ignore[attr-defined]
+        assert rec.count_active == 10  # type: ignore[attr-defined]
+        assert rec.delta == 190  # 200 - 10  # type: ignore[attr-defined]
+        assert rec.decision == "trigger"  # type: ignore[attr-defined]
+
+    def test_fired_decision_skip_when_no_trigger(self, caplog: pytest.LogCaptureFixture) -> None:
+        rows = [_make_parsed_row(i) for i in range(5)]
+        svc, _, _, stop_event = _make_service(
+            rows=rows,
+            total_count=200,
+            count_active_value=10,
+            backfill_returns=False,
+        )
+        svc._stop_event = stop_event
+
+        with caplog.at_level(logging.INFO):
+            svc.run_cycle(_REGION)
+
+        fired = [r for r in caplog.records if r.message == "delta_check.fired"]
+        assert fired
+        assert fired[0].decision == "skip"  # type: ignore[attr-defined]
 
 
 class TestPerRegionMissCounter:

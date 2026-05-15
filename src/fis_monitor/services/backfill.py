@@ -258,6 +258,14 @@ class BackfillService:
             # Trigger: acquire the flight lock for real start.
             self._running = True
             self._stop_event = threading.Event()
+            logger.info(
+                "backfill.delta_triggered",
+                extra={
+                    "region_id": region_id,
+                    "delta": delta,
+                    "threshold": len_parsed_hint + _DELTA_THRESHOLD,
+                },
+            )
 
         def _worker() -> None:
             try:

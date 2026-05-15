@@ -194,6 +194,10 @@ class MonitorCycleService:
         self._stop_event: threading.Event | None = None
         # Per-region count of consecutive total_count=None parse misses.
         self._parse_miss_counter: dict[int, int] = {}
+        # Per-region last delta-check outcome: 'skip_none' when total_count absent,
+        # otherwise the decision string returned by BackfillHandle.maybe_start.
+        # Written only by _run_cycle_inner; read by last_delta_decision().
+        self._last_delta_decision: dict[int, str] = {}
 
     # Default poll interval used when ``interval_minutes`` is 0 (continuous mode).
     _DEFAULT_POLL_INTERVAL_SEC: float = 60.0
@@ -226,6 +230,14 @@ class MonitorCycleService:
     def set_backfill(self, backfill: BackfillHandle) -> None:
         """Late-bind BackfillService after both services are constructed (breaks circular dep)."""
         self._backfill = backfill
+
+    def last_delta_decision(self, region_id: int) -> str | None:
+        """Return last delta-check outcome for region_id, or None if no cycle has run yet.
+
+        'skip_none' means total_count was absent from DOM (primary signal for secondary
+        fallback in on_login_success).  CPython dict read is GIL-safe for single-key access.
+        """
+        return self._last_delta_decision.get(region_id)
 
     def request_run_now(self) -> None:
         """Wake the scheduler for an immediate pass (non-blocking, idempotent).
@@ -474,32 +486,40 @@ class MonitorCycleService:
         if parsed_page.total_count is None:
             miss = self._parse_miss_counter.get(region, 0) + 1
             self._parse_miss_counter[region] = miss
-            if miss >= _PARSE_MISS_THRESHOLD:
-                logger.error(
-                    "delta_check.parse_failure: region=%s consecutive_misses=%d "
-                    "(total_count absent from DOM)",
-                    region,
-                    miss,
-                )
+            self._last_delta_decision[region] = "skip_none"
+            level = logging.ERROR if miss >= _PARSE_MISS_THRESHOLD else logging.WARNING
+            logger.log(
+                level,
+                "delta_check.parse_failure",
+                extra={
+                    "region_id": region,
+                    "cycle_id": cycle_id,
+                    "consecutive_miss_count": miss,
+                },
+            )
         else:
             self._parse_miss_counter.pop(region, None)
             if self._backfill is not None and self._stop_event is not None:
                 db_count = self._lot_repo.count_active(region_id=region)
-                decision = self._backfill.maybe_start(
+                triggered = self._backfill.maybe_start(
                     region,
                     parsed_page.total_count,
                     db_count,
                     self._stop_event,
                     len_parsed_hint=len(parsed_rows),
                 )
+                delta = parsed_page.total_count - db_count
+                decision = "trigger" if triggered else "skip"
+                self._last_delta_decision[region] = decision
                 logger.info(
-                    "delta_check.fired: region=%s total_count=%d db_count=%d "
-                    "len_hint=%d decision=%s",
-                    region,
-                    parsed_page.total_count,
-                    db_count,
-                    len(parsed_rows),
-                    decision,
+                    "delta_check.fired",
+                    extra={
+                        "region_id": region,
+                        "total_upstream": parsed_page.total_count,
+                        "count_active": db_count,
+                        "delta": delta,
+                        "decision": decision,
+                    },
                 )
 
         # ---------- Step 3: convert ParsedListRow → Lot -------------------

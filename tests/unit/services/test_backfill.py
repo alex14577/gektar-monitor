@@ -7,15 +7,19 @@ Coverage:
   4. Lots are upserted with notify=False.
   5. MonitorCycleService.mark/clear_region_in_backfill called correctly.
   6. Regions are processed in order.
+  7. backfill.delta_triggered INFO log emitted with correct payload when maybe_start returns True.
 """
 
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from typing import Any
+
+import pytest
 
 from fis_monitor.domain.models import (
     LotUpsertResult,
@@ -760,3 +764,60 @@ class TestRequestRunNow:
         cancel_issued.set()
         _wait_until_done(svc)
         assert mc.run_now_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: backfill.delta_triggered structured log (hf77)
+# ---------------------------------------------------------------------------
+
+
+class TestDeltaTriggeredLog:
+    """Invariant: backfill.delta_triggered INFO log on trigger with correct payload."""
+
+    def test_delta_triggered_log_emitted(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # delta=10, hint=0, threshold=3 → delta(10) > hint(0)+3 → True → log emitted.
+        svc, _lot_repo, _mc, _fetcher = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+            regions=[_REGION_A],
+        )
+        stop = threading.Event()
+
+        with caplog.at_level(logging.INFO):
+            result = svc.maybe_start(
+                _REGION_A, site_total=110, db_count=100, stop_event=stop,
+                len_parsed_hint=0,
+            )
+
+        _wait_until_done(svc)
+        assert result is True
+
+        triggered = [
+            r for r in caplog.records if r.message == "backfill.delta_triggered"
+        ]
+        assert triggered, "Expected backfill.delta_triggered INFO log"
+        rec = triggered[0]
+        assert rec.levelno == logging.INFO
+        assert rec.region_id == _REGION_A  # type: ignore[attr-defined]
+        assert rec.delta == 10  # site_total(110) - db_count(100)  # type: ignore[attr-defined]
+        assert rec.threshold == 3  # hint(0) + _DELTA_THRESHOLD(3)  # type: ignore[attr-defined]
+
+    def test_delta_triggered_log_not_emitted_when_below_threshold(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # delta=2, hint=0, threshold=3 → not triggered → no log.
+        svc, *_ = _make_service()
+        stop = threading.Event()
+
+        with caplog.at_level(logging.INFO):
+            result = svc.maybe_start(
+                _REGION_A, site_total=102, db_count=100, stop_event=stop,
+                len_parsed_hint=0,
+            )
+
+        assert result is False
+        triggered = [
+            r for r in caplog.records if r.message == "backfill.delta_triggered"
+        ]
+        assert not triggered, "backfill.delta_triggered must not be logged when not triggered"
