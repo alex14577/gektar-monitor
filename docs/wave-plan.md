@@ -696,6 +696,22 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 
 **Запуск:** `./run.sh` или `run.bat` → `http://127.0.0.1:8000/`.
 
+### Session (2026-05-16) — W1 Epic ugqt+9b9d: parser + schema leaf-nodes (parallel)
+
+**Цель:** W1 эпика `ul07` (delta-trigger связка) — параллельные таски `3nwv` (parser) + `nvx2` (schema + repo), disjoint по файлам.
+
+**Сделано:**
+- `gektar_monitor-3nwv` (`894a77f`) — `ParsedListPage` DTO (`rows + total_count: int | None`) в `domain/models.py`. `ListParser.parse()` Protocol → `ParsedListPage`. `SelectolaxListParser.parse()` извлекает `total_count` regex'ом `r"Найдено записей:\s*(\d+)\s*из\s*\d+"` из `.table-paginate__info`; fallback None (no raise). Все callers обновлены (`monitor_cycle`, `full_scan`, `paginated_list_fetcher`). `fake-torgi list.html` — динамический `{{ lots|length }}`. Fixture `list_region_empty.html` (0-lot edge case). 6 новых total_count тестов + обновлены все FakeListParser fakes. 36/36 parser tests + 1435 total passed.
+- `gektar_monitor-nvx2` (`30c379d`) — `region_subscriptions` таблица + `lots.region_id` колонка + migration v3→v4 + `SqliteRegionSubscriptionRepository` + `LotRepository.count_active(region_id)` + `region_name()` helper. (Деталь — см. commit message nvx2.)
+
+**Suite:** 1435 passed / 3 skipped (не считая pre-existing failures от nvx2 в test_init_db + test_migrations_v1_to_v2 — параллельная таска обновила user_version 3→4, тест ожидал 2). Ruff clean.
+
+**Vault:** no-op — `ParsedListPage` термин был добавлен в W0 (ADR-036 обновлён 2026-05-15). Regex-паттерн зафиксирован в ADR-036 §"Updated 2026-05-15". Нет новых архитектурных решений.
+
+**Итог W1:** 2/2 closed. Разблокирован `gektar_monitor-69n5` (MonitorCycleService delta-check + consecutive-miss counter).
+
+**Следующая сессия:** W2 — `gektar_monitor-69n5` (delta-check integration). W3 — `subscribed_at` cutoff.
+
 ---
 
 ### Шаблон для будущих сессий
