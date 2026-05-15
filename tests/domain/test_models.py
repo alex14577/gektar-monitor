@@ -81,7 +81,10 @@ def test_smtp_credentials_get_secret_value():
 # T5b — SmtpCredentials canon shape: no from_addr / use_starttls
 # ---------------------------------------------------------------------------
 def test_smtp_credentials_canon_fields():
-    """Canon shape per docs/data-model.md:101-108. No from_addr, no use_starttls."""
+    """Canon shape per docs/data-model/settings.md §SmtpCredentials.
+
+    No from_addr, no use_starttls.
+    """
     fields = SmtpCredentials.model_fields
     assert set(fields.keys()) == {
         "smtp_user",
@@ -89,6 +92,7 @@ def test_smtp_credentials_canon_fields():
         "smtp_host",
         "smtp_port",
         "use_default",
+        "from_name",  # RFC 5322 display name (bd ljp)
     }
 
 

@@ -527,15 +527,7 @@ def _handle_step2_next(
     smtp_host = (form.get("smtp_host") or "").strip()
     smtp_login = (form.get("smtp_login") or "").strip()
     smtp_pass = form.get("smtp_pass") or ""
-    # TODO(bd ljp): smtp_from_name parsed but NOT persisted — SmtpCredentials
-    # domain model has no from_name field. Either add to model (+ migration) or
-    # remove field from _step2.html.jinja. Tracked separately.
-    smtp_from_name = (form.get("smtp_from_name") or "").strip()
-    if smtp_from_name:
-        _log.debug(
-            "onboarding step 2: smtp_from_name=%r submitted but not persisted (bd ljp)",
-            smtp_from_name,
-        )
+    smtp_from_name = (form.get("smtp_from_name") or "").strip() or None
 
     try:
         smtp_port = int(form.get("smtp_port") or 0)
@@ -557,6 +549,7 @@ def _handle_step2_next(
             smtp_password=smtp_pass,
             smtp_host=smtp_host,
             smtp_port=smtp_port,
+            from_name=smtp_from_name,
         )
         settings_svc.set_smtp_credentials(creds)
     except SmtpHostPolicyError:

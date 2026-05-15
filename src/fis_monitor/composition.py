@@ -33,7 +33,6 @@ import threading
 from pathlib import Path
 
 import requests
-import urllib3
 
 from fis_monitor.container import Container, Infra, Services
 from fis_monitor.domain.models import Settings
@@ -81,15 +80,11 @@ from fis_monitor.services.monitor_cycle import MonitorCycleService
 from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
 from fis_monitor.services.onboarding import OnboardingService
 from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
+from fis_monitor.services.session_expired_email import SessionExpiredEmailService
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 
 _log = logging.getLogger(__name__)
-
-# ADR-024: upstream (надальнийвосток.рф) uses self-signed cert in chain.
-# Suppress InsecureRequestWarning at module level — this service exclusively
-# talks to one upstream; the warning is noise rather than signal.
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ---------------------------------------------------------------------------
 # Schema SQL — loaded once at module level (no repeated I/O on build_container
@@ -217,12 +212,12 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     cycle_progress_signal = threading.Event()
 
     # Initialise the schema (fresh DB → apply DDL; existing → verify version).
-    # Migration runner handles the v1→v2 upgrade path.
+    # Migration runner handles the v1→v2 and v2→v3 upgrade paths.
     schema_sql = _load_schema_sql()
     init_db(
         conn_provider,
         schema_sql=schema_sql,
-        latest_version=2,
+        latest_version=3,
         migration_runner=default_migration_runner(),
     )
 
@@ -432,10 +427,28 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         _log.info("on_login_success: guards passed → auto-backfill scheduled")
         sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
 
+    # Build SessionExpiredEmailService before login so the reset callback can
+    # capture it via closure without circular reference.
+    session_expired_email_stop = threading.Event()
+    session_expired_email_svc = SessionExpiredEmailService(
+        email_notifier=email_notifier,
+        state_repo=state_repo,
+        config_source=config_source,
+        event_bus=event_bus,
+        clock=clock,
+        dnd_service=dnd,
+        stop_event=session_expired_email_stop,
+    )
+
+    def _reset_session_expired_flag(_outcome: object) -> None:
+        """Reset idempotency flag on any successful login or refresh."""
+        session_expired_email_svc.on_login_or_refresh_success()
+
     login = LoginService(
         login_session=login_session,
         clock=clock,
         on_login_success=_backfill_on_login_success,
+        on_any_success=_reset_session_expired_flag,
     )
     # Expose the supervisor cell so app.py lifespan can fill it after building
     # the supervisor. Stored on the login service instance for easy access.
@@ -490,6 +503,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         backfill=backfill,
         dnd=dnd,
         catchup_dismiss=catchup_dismiss,
+        session_expired_email=session_expired_email_svc,
     )
 
     return Container(infra=infra, services=services)

@@ -37,7 +37,7 @@ def init_db(
     provider: ConnectionProvider,
     *,
     schema_sql: str,
-    latest_version: int = 2,
+    latest_version: int = 3,
     migration_runner: MigrationRunner | None = None,
 ) -> None:
     """Initialise or verify the SQLite database schema.
@@ -67,7 +67,7 @@ def init_db(
         schema_sql:       Full DDL script (contents of ``docs/db/schema.sql``).
                           Ignored when no schema application is needed.
         latest_version:   Expected ``PRAGMA user_version`` after initialisation.
-                          Defaults to 2 (current schema version per schema.sql).
+                          Defaults to 3 (current schema version per schema.sql).
         migration_runner: Optional callable that performs in-place schema upgrade.
                           Receives ``(conn, from_version, to_version)``.
                           If *None* and migration is needed, raises

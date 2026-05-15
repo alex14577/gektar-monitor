@@ -59,10 +59,9 @@ Out-of-scope follow-ups (tracked as bd-issues)
 -----------------------------------------------
 - ``SessionMonitor`` is stubbed (``_NotImplementedSessionMonitor``); supervised
   loop deferred to ``a4t.9``.  NOT started here.
-- ``EnrichmentService.bind_executor`` does not exist; it uses a per-call
-  cycle-scoped executor inside ``enrich_lots()``.  ``enrichment_pool`` is
-  created in lifespan for future use and stored in ``app.state`` but not bound
-  to the service.  Follow-up required.
+- ``EnrichmentService.bind_executor`` is called in lifespan startup to inject
+  the ``enrichment_pool`` (max_workers=10).  Executor lifecycle is owned by
+  lifespan; shutdown happens in phase 2.
 
 See: docs/architecture/04-composition-root.md §4.4, ADR-014.
 """
@@ -218,11 +217,12 @@ async def _lifespan_impl(
             make_html_sse_encoder(app.state.templates.env)
         )
 
-        # enrichment_pool: for future bind_executor on EnrichmentService (follow-up).
-        # EnrichmentService.bind_executor does not exist yet; stored on app.state for
-        # future use. TODO: bind once EnrichmentService.bind_executor is implemented.
+        # enrichment_pool: injected into EnrichmentService via constructor seam.
+        # EnrichmentService does NOT own this pool's lifecycle — lifespan shuts it
+        # down in phase 2 (see shutdown below).
         enrichment_pool = ThreadPoolExecutor(max_workers=10, thread_name_prefix="enrich")
         app.state.enrichment_pool = enrichment_pool
+        container.services.enrichment.bind_executor(enrichment_pool)  # DI seam (ADR-014)
         logger.info("lifespan: executor pools created (pw=1, sse=64, enrich=10)")
 
         # Supervised background threads.
@@ -239,8 +239,16 @@ async def _lifespan_impl(
             "notifier",
             lambda _stop_event: container.services.notifier_dispatcher.consumer_loop(),
         )
+        # session-expired-email: uses its own stop_event (same pattern as notifier).
+        supervisor.start(
+            "session-expired-email",
+            lambda _stop_event: container.services.session_expired_email.consumer_loop(),
+        )
         app.state.supervisor = supervisor
-        logger.info("lifespan: supervisor started (full-scan, monitor-cycle, notifier)")
+        logger.info(
+            "lifespan: supervisor started "
+            "(full-scan, monitor-cycle, notifier, session-expired-email)"
+        )
 
         # Wire supervisor into the on_login_success backfill-trigger closure (f5u fix).
         # The cell was created in build_container() before the supervisor existed;
@@ -266,6 +274,12 @@ async def _lifespan_impl(
                     container.services.notifier_dispatcher.stop_event.set()
                 except Exception:
                     logger.exception("phase 1: dispatcher stop_event.set() failed")
+                try:
+                    # Signal session-expired-email consumer to exit (same pattern
+                    # as notifier_dispatcher.stop_event — mirrors public .stop_event).
+                    container.services.session_expired_email.stop_event.set()
+                except Exception:
+                    logger.exception("phase 1: session_expired_email stop_event.set() failed")
 
             # Cancel any running backfill before supervisor.shutdown() so the
             # backfill thread exits cleanly rather than being abandoned (P0-4).
@@ -280,9 +294,7 @@ async def _lifespan_impl(
                 try:
                     report = supervisor.shutdown(grace_timeout=35.0)
                     if not report.clean:
-                        logger.warning(
-                            "lifespan: dangling threads at shutdown: %s", report.pending
-                        )
+                        logger.warning("lifespan: dangling threads at shutdown: %s", report.pending)
                 except Exception:
                     logger.exception("lifespan: phase 1 shutdown failed")
 
@@ -350,9 +362,7 @@ async def _lifespan_impl(
                 locker.release(lock_handle)
                 logger.info("lifespan: lock released")
             except Exception:
-                logger.exception(
-                    "lifespan: lock release failed — manual cleanup may be required"
-                )
+                logger.exception("lifespan: lock release failed — manual cleanup may be required")
             # Flush and close all logging handlers (SLO-L2: zero loss on shutdown).
             with contextlib.suppress(Exception):
                 logging.shutdown()

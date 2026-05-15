@@ -219,10 +219,23 @@ class SmtpCredentials(BaseModel):
     `smtp_password` is `SecretStr` — never leaks via `__repr__` / `__str__` /
     `model_dump` (ADR-017).
 
-    WARNING: do NOT pickle / `multiprocessing.Queue` / `faulthandler`-dump
-    instances of this model. Pydantic `SecretStr.__reduce__` preserves the
-    plaintext password for round-trip — this is by design. See bd issue
-    `gektar_monitor-ctz` for `__reduce__` hardening follow-up.
+    `from_name` — optional RFC 5322 display name for the ``From:`` header.
+    When set, the notifier produces ``"Display Name" <user@host>``.
+    When ``None``, the bare email address is used.
+
+    Security invariants (gektar_monitor-ctz):
+    - Pickle is HARD-BLOCKED: `__reduce__` / `__getstate__` / `__setstate__`
+      each raise `TypeError`. Pydantic's `SecretStr.__reduce__` would otherwise
+      preserve the plaintext password in the pickle stream for round-trip.
+    - `copy.deepcopy` is HARD-BLOCKED for the same reason: `deepcopy` falls
+      back to `__reduce__` when no `__deepcopy__` hook is present, so the ban
+      applies to both paths.
+    - `multiprocessing` (Queue / Pipe / shared-memory) relies on pickle
+      internally — blocked transitively by the pickle ban.
+    - `faulthandler.dump_traceback`: cannot be blocked at the Python level;
+      OS-level process isolation (seccomp / AppArmor / SELinux) is required
+      if crash-dump confidentiality is a hard requirement. The ADR-017
+      diagnostic-zip exclude-list (*.dmp, core.*) is the current mitigation.
     """
 
     model_config = _DOMAIN_MODEL_CONFIG
@@ -232,6 +245,29 @@ class SmtpCredentials(BaseModel):
     smtp_host: str
     smtp_port: Annotated[StrictInt, Field(ge=1, le=65535)] = 587
     use_default: bool = True
+    from_name: str | None = None
+
+    # ------------------------------------------------------------------
+    # Pickle / deepcopy hard-block (ADR-017, gektar_monitor-ctz)
+    # ------------------------------------------------------------------
+
+    _PICKLE_MSG: ClassVar[str] = (
+        "SmtpCredentials cannot be pickled — security policy (ADR-017, "
+        "gektar_monitor-ctz). Use SmtpCredentialsRepository to persist and "
+        "reload credentials via the DB layer."
+    )
+
+    def __reduce__(self) -> object:  # type: ignore[override]
+        raise TypeError(self._PICKLE_MSG)
+
+    def __getstate__(self) -> object:
+        raise TypeError(self._PICKLE_MSG)
+
+    def __setstate__(self, state: object) -> None:
+        raise TypeError(self._PICKLE_MSG)
+
+    def __deepcopy__(self, memo: dict | None = None) -> object:  # type: ignore[override]
+        raise TypeError(self._PICKLE_MSG)
 
 
 # ---------------------------------------------------------------------------

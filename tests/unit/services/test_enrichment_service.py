@@ -12,6 +12,8 @@ Coverage targets (per task spec):
 - test_url_builder_used: http.get called with correct URL per lot.id.
 - test_returned_order_matches_input: output order equals input order.
 - test_parser_version_mismatch_propagates: ParserVersionMismatch escapes.
+- test_injected_executor_used: injected executor is used instead of per-call pool.
+- test_bind_executor_late_binding: bind_executor() switches to injected executor.
 
 Fake implementation rule (from project orchestrator-playbook): fakes MUST
 have a test that calls ALL their methods, not just isinstance().
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -103,6 +106,7 @@ class FakeHttpClient:
     def called_lot_ids(self) -> list[int]:
         """Extract lot_id from the detail-page URLs that were called."""
         import re
+
         ids = []
         for url in self.calls:
             m = re.search(r"[?&]id=(\d+)", url)
@@ -151,6 +155,7 @@ class FakeDetailParser:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_html(lot_id: int) -> str:
     """Generate HTML that encodes the lot_id so FakeDetailParser can dispatch."""
     return f"<html><body data-lot-id='{lot_id}'>detail for {lot_id}</body></html>"
@@ -159,6 +164,7 @@ def _make_html(lot_id: int) -> str:
 def _extract_lot_id_from_html(html: str) -> int:
     """Extract lot_id embedded by _make_html. Returns -1 if not found."""
     import re
+
     m = re.search(r"data-lot-id='(\d+)'", html)
     return int(m.group(1)) if m else -1
 
@@ -373,3 +379,56 @@ def test_fake_detail_parser_all_methods_exercised() -> None:
     detail = parser.parse(_make_html(42))
     assert detail.lat == _FAKE_DETAIL.lat
     assert parser.parse_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Injected-executor path (DI seam — gektar_monitor-dmu)
+# ---------------------------------------------------------------------------
+
+
+def test_injected_executor_used() -> None:
+    """When executor is injected at construction, it is used instead of per-call pool."""
+    lot_ids = [801, 802, 803]
+    lots = [make_lot(id=lid, enrichment_status="pending") for lid in lot_ids]
+    http = _make_http_with_html(lot_ids)
+    parser = FakeDetailParser()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        svc = EnrichmentService(http=http, parser=parser, executor=executor)
+        results = svc.enrich_lots(lots, max_workers=99)  # max_workers ignored
+
+    assert len(results) == 3
+    assert all(r.enrichment_status == "done" for r in results)
+    assert sorted(http.called_lot_ids()) == lot_ids
+    assert parser.parse_count == 3
+
+
+def test_bind_executor_late_binding() -> None:
+    """bind_executor() installs an executor after construction (mirrors LoginService)."""
+    lot_ids = [901, 902]
+    lots = [make_lot(id=lid, enrichment_status="pending") for lid in lot_ids]
+    http = _make_http_with_html(lot_ids)
+    parser = FakeDetailParser()
+
+    svc = EnrichmentService(http=http, parser=parser)  # no executor yet
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        svc.bind_executor(executor)
+        results = svc.enrich_lots(lots, max_workers=99)  # max_workers ignored
+
+    assert len(results) == 2
+    assert all(r.enrichment_status == "done" for r in results)
+
+
+def test_no_executor_fallback_still_works() -> None:
+    """Without injected executor enrich_lots creates a per-call pool (backward compat)."""
+    lot_ids = [1001, 1002]
+    lots = [make_lot(id=lid, enrichment_status="pending") for lid in lot_ids]
+    http = _make_http_with_html(lot_ids)
+    parser = FakeDetailParser()
+
+    svc = EnrichmentService(http=http, parser=parser)  # no executor
+    results = svc.enrich_lots(lots, max_workers=2)
+
+    assert len(results) == 2
+    assert all(r.enrichment_status == "done" for r in results)

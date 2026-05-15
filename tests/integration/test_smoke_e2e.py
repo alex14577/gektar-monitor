@@ -169,6 +169,21 @@ class _StubService:
     def cancel(self) -> None:
         """No-op for BackfillService.cancel() called in lifespan shutdown."""
 
+    def bind_executor(self, executor: object) -> None:
+        """No-op for EnrichmentService.bind_executor() called in lifespan (dmu)."""
+
+    # SessionExpiredEmailService (dzm) — exposes stop_event + thread for lifespan
+    stop_event = threading.Event()
+
+    def start(self) -> None:
+        """No-op for SessionExpiredEmailService.start() in lifespan."""
+
+    def join(self, timeout: float | None = None) -> None:
+        """No-op for SessionExpiredEmailService.join() in lifespan shutdown."""
+
+    def consumer_loop(self) -> None:
+        """No-op for SessionExpiredEmailService.consumer_loop() in supervised thread."""
+
 
 class _StubLotRepo:
     """Minimal lot_repo for smoke: count_active() returns 1 so the lifespan
@@ -296,6 +311,7 @@ def _build_smoke_container(
         backfill=_StubService(),
         dnd=_StubService(),
         catchup_dismiss=_StubService(),
+        session_expired_email=_StubService(),  # type: ignore[arg-type]
     )
 
     return Container(infra=infra, services=services)

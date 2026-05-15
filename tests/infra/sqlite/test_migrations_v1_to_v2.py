@@ -24,6 +24,9 @@ from fis_monitor.infra.sqlite.migrations import (
 from fis_monitor.infra.sqlite.migrations_v1_to_v2 import (
     v1_to_v2,
 )
+from fis_monitor.infra.sqlite.migrations_v2_to_v3 import (
+    v2_to_v3,
+)
 
 # ---------------------------------------------------------------------------
 # V1 schema helper
@@ -275,14 +278,20 @@ class TestMigrationAtomicOnMiddleFailure:
 
 
 class TestDefaultMigrationRunnerFactory:
-    """`default_migration_runner()` returns a runner with exactly one migration."""
+    """`default_migration_runner()` returns a runner with all registered migrations."""
 
     def test_default_migration_runner_factory(self) -> None:
         runner = default_migration_runner()
         migrations = list(runner.list_migrations())
 
-        assert len(migrations) == 1
-        m = migrations[0]
-        assert m.from_version == 1
-        assert m.to_version == 2
-        assert m.apply is v1_to_v2
+        # v1→v2 and v2→v3 (smtp_from_name column, bd ljp) are both registered
+        assert len(migrations) == 2
+        m1 = migrations[0]
+        assert m1.from_version == 1
+        assert m1.to_version == 2
+        assert m1.apply is v1_to_v2
+
+        m2 = migrations[1]
+        assert m2.from_version == 2
+        assert m2.to_version == 3
+        assert m2.apply is v2_to_v3

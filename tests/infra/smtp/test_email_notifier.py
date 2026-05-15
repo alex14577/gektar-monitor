@@ -771,3 +771,106 @@ def test_quit_failure_calls_close():
     assert result.ok is True
     mock_smtp_instance.quit.assert_called()
     mock_smtp_instance.close.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# T19 — From: header — RFC 5322 display name (bd ljp)
+# ---------------------------------------------------------------------------
+
+
+def _send_and_capture_message(
+    creds: SmtpCredentials,
+) -> EmailMessage:
+    """Helper: run notifier.send() and return the captured EmailMessage."""
+    lot = _make_lot(id=1)
+    repo = FakeSmtpCredentialsRepository(creds=creds)
+    hp = FakeSmtpHostPolicy()
+    notifier = SmtpEmailNotifier(
+        smtp_creds_repo=repo,
+        config_source=FakeConfigSource(),
+        clock=FakeClock(),
+        host_policy=hp,
+    )
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_instance.docmd.return_value = (220, b"Go ahead")
+    mock_smtp_instance.sock = MagicMock()
+
+    captured: list[EmailMessage] = []
+    mock_smtp_instance.send_message.side_effect = captured.append
+
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance), \
+         patch("ssl.create_default_context") as mock_ssl_ctx:
+        mock_ctx = MagicMock()
+        mock_ssl_ctx.return_value = mock_ctx
+        mock_ctx.wrap_socket.return_value = MagicMock()
+        notifier.send(lot, _RECIPIENT)
+
+    assert captured, "send_message was not called"
+    return captured[0]
+
+
+def test_from_header_without_display_name() -> None:
+    """T19a — from_name=None → From: header is the bare smtp_user email."""
+    creds = _make_creds(from_name=None)
+    msg = _send_and_capture_message(creds)
+
+    from_header = msg["From"]
+    # Bare email — no quoted display name, no angle brackets from notifier
+    assert "bot@example.com" in from_header
+    # No display name introduced by the notifier
+    assert "<" not in from_header or from_header.strip() == "bot@example.com"
+
+
+def test_from_header_with_display_name() -> None:
+    """T19b — from_name set → From: header is RFC 5322 "Display Name" <email>.
+
+    Layer 3 invariant (bd ljp): SmtpEmailNotifier._from_address() must produce
+    a properly quoted display-name + angle-bracket address when creds.from_name
+    is non-empty so that MUAs render a human-readable sender name.
+    """
+    creds = _make_creds(from_name="Монитор гектара")
+    msg = _send_and_capture_message(creds)
+
+    from_header = str(msg["From"])
+    # Must contain the email address inside angle brackets
+    assert "bot@example.com" in from_header
+    assert "<bot@example.com>" in from_header or "bot@example.com>" in from_header
+    # Must contain the display name (may be quoted by email.headerregistry)
+    assert "Монитор" in from_header
+
+
+def test_from_header_display_name_no_pii_leak_in_detail() -> None:
+    """T19c — display name in From: header must not appear in NotifyResult.detail.
+
+    Detail codes are PII-free (ADR-012). The display name is operator-supplied
+    metadata, not user PII, but we verify it does not accidentally end up in
+    the structured error detail field.
+    """
+    creds = _make_creds(from_name="SensitiveName")
+    lot = _make_lot(id=1)
+    repo = FakeSmtpCredentialsRepository(creds=creds)
+    hp = FakeSmtpHostPolicy()
+    notifier = SmtpEmailNotifier(
+        smtp_creds_repo=repo,
+        config_source=FakeConfigSource(),
+        clock=FakeClock(),
+        host_policy=hp,
+    )
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_instance.docmd.return_value = (220, b"Go ahead")
+    mock_smtp_instance.sock = MagicMock()
+    mock_smtp_instance.send_message.side_effect = smtplib.SMTPAuthenticationError(
+        535, b"bad creds"
+    )
+
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance), \
+         patch("ssl.create_default_context") as mock_ssl_ctx:
+        mock_ctx = MagicMock()
+        mock_ssl_ctx.return_value = mock_ctx
+        mock_ctx.wrap_socket.return_value = MagicMock()
+        result = notifier.send(lot, _RECIPIENT)
+
+    assert result.ok is False
+    assert "SensitiveName" not in result.detail

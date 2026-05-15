@@ -114,11 +114,13 @@ class LoginService:
         clock: Clock,
         executor: ThreadPoolExecutor | None = None,
         on_login_success: Callable[[LoginOutcome], None] | None = None,
+        on_any_success: Callable[[LoginOutcome], None] | None = None,
     ) -> None:
         self._session = login_session
         self._clock = clock
         self._executor: ThreadPoolExecutor | None = executor
         self._on_login_success = on_login_success
+        self._on_any_success = on_any_success
 
         # Single-flight lock: held for the duration of the login job.
         self._lock = threading.Lock()
@@ -272,6 +274,10 @@ class LoginService:
         """Future completion callback — runs on the executor thread.
 
         Single source of truth for mapping exceptions to LoginOutcome.
+        Fires ``on_any_success`` when ``outcome.success is True`` — covers
+        both headed login and silent refresh (used to reset idempotency flags
+        that should clear on ANY successful authentication, e.g.
+        ``session_expired_email_sent``).
         """
         try:
             outcome = future.result()
@@ -289,6 +295,17 @@ class LoginService:
         except RuntimeError:
             # Lock was not held — shouldn't happen, but guard defensively.
             _log.warning("LoginService._on_done: lock.release() raised RuntimeError")
+
+        # Fire on_any_success for both headed login and silent refresh.
+        if outcome.success:
+            cb = self._on_any_success
+            if cb is not None:
+                try:
+                    cb(outcome)
+                except Exception:
+                    _log.exception(
+                        "LoginService._on_done: on_any_success hook raised"
+                    )
 
     def _on_login_done(self, future: Future[LoginOutcome]) -> None:
         """Future completion callback for headed logins only.

@@ -62,6 +62,7 @@ from fis_monitor.domain.models import (
     ErrorCategory,
     Lot,
     SseCycleError,
+    SseSessionExpired,
 )
 from fis_monitor.domain.models import (
     lot_to_public_dto as _lot_to_public_dto,
@@ -414,6 +415,11 @@ class MonitorCycleService:
                 "monitor_cycle: session expired for region=%s "
                 "(ESIA login page detected) — closing cycle with session_expired",
                 region,
+            )
+            # Publish SseSessionExpired so subscribers (UI modal + email notifier)
+            # react to the transition (first publication per expiry epoch).
+            self._event_bus.publish(
+                SseSessionExpired(timestamp=self._clock.now())
             )
             finished_at = self._clock.now()
             result = CycleResult(

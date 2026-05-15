@@ -174,18 +174,20 @@ class SqliteMigrationRunner:
 # ---------------------------------------------------------------------------
 
 from fis_monitor.infra.sqlite.migrations_v1_to_v2 import v1_to_v2  # noqa: E402
+from fis_monitor.infra.sqlite.migrations_v2_to_v3 import v2_to_v3  # noqa: E402
 
 MIGRATION_V1_TO_V2 = Migration(from_version=1, to_version=2, apply=v1_to_v2)
+MIGRATION_V2_TO_V3 = Migration(from_version=2, to_version=3, apply=v2_to_v3)
 
 
 def default_migration_runner() -> SqliteMigrationRunner:
-    """Factory: runner with the registered v1→v2 migration chain.
+    """Factory: runner with the registered v1→v2 and v2→v3 migration chains.
 
     Usage (composition root / init_db):
         runner = default_migration_runner()
         init_db(provider, schema_sql=schema, migration_runner=runner)
 
     Returns:
-        SqliteMigrationRunner with MIGRATION_V1_TO_V2 registered.
+        SqliteMigrationRunner with MIGRATION_V1_TO_V2 + MIGRATION_V2_TO_V3 registered.
     """
-    return SqliteMigrationRunner(migrations=[MIGRATION_V1_TO_V2])
+    return SqliteMigrationRunner(migrations=[MIGRATION_V1_TO_V2, MIGRATION_V2_TO_V3])

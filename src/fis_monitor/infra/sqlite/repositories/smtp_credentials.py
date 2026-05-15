@@ -63,7 +63,8 @@ class SqliteSmtpCredentialsRepository:
                    smtp_password,
                    smtp_host,
                    smtp_port,
-                   use_default
+                   use_default,
+                   smtp_from_name
             FROM smtp_credentials
             WHERE id = ?
             """,
@@ -77,6 +78,7 @@ class SqliteSmtpCredentialsRepository:
             smtp_host=row["smtp_host"],
             smtp_port=row["smtp_port"],
             use_default=bool(row["use_default"]),
+            from_name=row["smtp_from_name"] or None,
         )
 
     def save(self, creds: SmtpCredentials) -> None:
@@ -97,8 +99,8 @@ class SqliteSmtpCredentialsRepository:
                 """
                 INSERT OR REPLACE INTO smtp_credentials
                     (id, smtp_user, smtp_password, smtp_host, smtp_port,
-                     use_default, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     use_default, smtp_from_name, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _SINGLETON_ID,
@@ -107,6 +109,7 @@ class SqliteSmtpCredentialsRepository:
                     creds.smtp_host,
                     creds.smtp_port,
                     int(creds.use_default),
+                    creds.from_name or None,
                     now,
                 ),
             )

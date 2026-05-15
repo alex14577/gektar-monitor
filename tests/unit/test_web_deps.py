@@ -81,6 +81,7 @@ def mock_container() -> Container:
             backfill=Mock(name="backfill"),
             dnd=Mock(name="dnd"),
             catchup_dismiss=Mock(name="catchup_dismiss"),
+            session_expired_email=Mock(name="session_expired_email"),
         )
 
     return Container(infra=_mock_infra(), services=_mock_services())

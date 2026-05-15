@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from fis_monitor.services.monitor_cycle import MonitorCycleService
     from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
     from fis_monitor.services.onboarding import OnboardingService
+    from fis_monitor.services.session_expired_email import SessionExpiredEmailService
     from fis_monitor.services.session_monitor import SessionMonitor
     from fis_monitor.services.settings import SettingsService
     from fis_monitor.services.smtp_test import SmtpTestService
@@ -242,6 +243,9 @@ class Services:
 
     catchup_dismiss: CatchupDismissService
     """Catch-up banner dismissal — state.db key catchup_dismissed_until."""
+
+    session_expired_email: SessionExpiredEmailService
+    """Sends one email per session-expiry epoch; idempotency via state_repo key."""
 
 
 @dataclass(repr=False)

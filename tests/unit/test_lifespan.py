@@ -130,6 +130,26 @@ class FakeSseStreamer:
         self.bound_encoder = encoder
 
 
+class FakeEnrichmentService:
+    """Minimal fake for EnrichmentService — records bind_executor calls."""
+
+    def __init__(self) -> None:
+        self.bound_executor: object = None
+
+    def bind_executor(self, executor: object) -> None:
+        self.bound_executor = executor
+
+
+class FakeSessionExpiredEmailService:
+    """Minimal fake for SessionExpiredEmailService — satisfies lifespan duck-type."""
+
+    def __init__(self) -> None:
+        self.stop_event = threading.Event()
+
+    def consumer_loop(self) -> None:
+        self.stop_event.wait()
+
+
 @dataclass
 class FakeInfra:
     conn_provider: FakeConnProvider
@@ -147,10 +167,16 @@ class FakeServices:
     monitor_cycle: FakeMonitorCycle
     login: FakeLoginService
     backfill: FakeBackfillService = None  # type: ignore[assignment]
+    enrichment: FakeEnrichmentService = None  # type: ignore[assignment]
+    session_expired_email: FakeSessionExpiredEmailService = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.backfill is None:
             self.backfill = FakeBackfillService()
+        if self.enrichment is None:
+            self.enrichment = FakeEnrichmentService()
+        if self.session_expired_email is None:
+            self.session_expired_email = FakeSessionExpiredEmailService()
 
 
 @dataclass
@@ -161,6 +187,7 @@ class FakeContainer:
 
 class FakeLockHandle:
     """Minimal stand-in for domain LockHandle."""
+
     fd: int = -1
     pid: int = 0
     path: str = "/fake/app.lock"
@@ -213,6 +240,7 @@ def _make_fake_container() -> tuple[
 def _make_locker_factory(locker: FakeLocker):
     def locker_factory(data_dir: Path) -> FakeLocker:
         return locker
+
     return locker_factory
 
 
@@ -336,6 +364,7 @@ def test_hung_pw_executor_warns_and_releases_lock(caplog):
     )
 
     import time
+
     t_start = time.monotonic()
 
     with caplog.at_level(logging.WARNING, logger="fis_monitor"):
@@ -350,9 +379,7 @@ def test_hung_pw_executor_warns_and_releases_lock(caplog):
     assert elapsed < 7.0, f"lifespan took {elapsed:.2f}s — expected <7s"
 
     # Warning must have been logged.
-    timeout_warnings = [
-        r for r in caplog.records if "pw_executor.shutdown timed out" in r.message
-    ]
+    timeout_warnings = [r for r in caplog.records if "pw_executor.shutdown timed out" in r.message]
     assert timeout_warnings, "Expected pw_executor timeout warning not logged"
 
     # Lock must still be released.
@@ -445,7 +472,8 @@ def test_phase1_raises_later_phases_still_run(caplog):
 
     # The exception should have been logged.
     error_logs = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if "phase 1.5" in r.message.lower() or "cancel" in r.message.lower()
     ]
     assert error_logs, (
@@ -548,6 +576,33 @@ def test_sse_executor_bound_to_sse_streamer():
 
 
 # ---------------------------------------------------------------------------
+# Test 5c (dmu): enrichment_pool bound to EnrichmentService.bind_executor at startup
+# ---------------------------------------------------------------------------
+
+
+def test_enrichment_executor_bound_to_enrichment_service():
+    """dmu: enrichment.bind_executor called with the enrichment_pool at startup."""
+    container, _login, _dispatcher, _full_scan, _conn_provider, _backfill = _make_fake_container()
+    locker = FakeLocker()
+
+    def container_factory(settings, data_dir):
+        return container
+
+    app = create_app(
+        data_dir=Path("/tmp/fake"),
+        container_factory=container_factory,
+        locker_factory=_make_locker_factory(locker),
+    )
+
+    asyncio.run(_run_lifespan(app))
+
+    assert container.services.enrichment.bound_executor is not None, (
+        "EnrichmentService.bind_executor was never called in lifespan"
+    )
+    assert isinstance(container.services.enrichment.bound_executor, ThreadPoolExecutor)
+
+
+# ---------------------------------------------------------------------------
 # Test 6: Lock acquired before container, released exactly once at end
 # ---------------------------------------------------------------------------
 
@@ -645,8 +700,7 @@ def test_backfill_cancel_called_on_shutdown():
     asyncio.run(_run_lifespan(app))
 
     assert backfill.cancel_calls == 1, (
-        f"Expected backfill.cancel() to be called once during shutdown, "
-        f"got {backfill.cancel_calls}"
+        f"Expected backfill.cancel() to be called once during shutdown, got {backfill.cancel_calls}"
     )
 
 

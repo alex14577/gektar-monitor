@@ -452,6 +452,7 @@ def test_step2_next_valid_credentials_redirects() -> None:
     assert creds.smtp_host == "smtp.example.com"
     assert creds.smtp_port == 587
     assert creds.smtp_user == "bot@example.com"
+    assert creds.from_name == "Bot"  # smtp_from_name must now be persisted (bd ljp)
     assert len(f_svc.advance_calls) == 1
     assert f_svc.advance_calls[0] == (OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
 

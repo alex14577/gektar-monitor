@@ -32,10 +32,12 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
+-- user_version bumped 2→3 (bd ljp): добавлена колонка smtp_credentials.smtp_from_name
+--   (RFC 5322 display name). NULL = голый email. MigrationRunner v2→v3.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
@@ -302,13 +304,14 @@ CREATE INDEX IF NOT EXISTS idx_notifications_pending  ON notifications(last_atte
 -- В config.json остаются только дефолтные значения для прешитого бот-ящика как
 -- литералы в коде (smtp.yandex.ru:587). Любой override пишется в state.db.
 CREATE TABLE IF NOT EXISTS smtp_credentials (
-    id            INTEGER PRIMARY KEY CHECK (id = 1),
-    smtp_user     TEXT    NOT NULL,
-    smtp_password TEXT    NOT NULL,                                       -- plain, ACL %LOCALAPPDATA%
-    smtp_host     TEXT    NOT NULL,                                       -- R4-C1, ADR-020
-    smtp_port     INTEGER NOT NULL DEFAULT 587 CHECK (smtp_port BETWEEN 1 AND 65535),  -- R4-C1, ADR-020
-    use_default   INTEGER NOT NULL DEFAULT 1 CHECK (use_default IN (0, 1)),
-    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    smtp_user       TEXT    NOT NULL,
+    smtp_password   TEXT    NOT NULL,                                       -- plain, ACL %LOCALAPPDATA%
+    smtp_host       TEXT    NOT NULL,                                       -- R4-C1, ADR-020
+    smtp_port       INTEGER NOT NULL DEFAULT 587 CHECK (smtp_port BETWEEN 1 AND 65535),  -- R4-C1, ADR-020
+    use_default     INTEGER NOT NULL DEFAULT 1 CHECK (use_default IN (0, 1)),
+    smtp_from_name  TEXT,                                                   -- RFC 5322 display name; NULL = bare email
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Key-value state. Известные ключи (key namespace, R4-M14):

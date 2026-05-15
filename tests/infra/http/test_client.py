@@ -453,7 +453,7 @@ def test_user_agent_with_other_headers() -> None:
 
 
 def test_verify_false_passed_to_session_get() -> None:
-    """verify=False is forwarded to session.get (ADR-024: self-signed cert upstream)."""
+    """verify=False is forwarded to session.get (test-double use only — never in prod)."""
     session = Mock(spec=requests.Session)
     response = _mock_response(200, "OK")
     session.get.return_value = response
@@ -478,6 +478,21 @@ def test_verify_true_default_passed_to_session_get() -> None:
     call_args = session.get.call_args
     assert call_args is not None
     assert call_args.kwargs["verify"] is True
+
+
+def test_verify_path_str_passed_to_session_get() -> None:
+    """verify=<path> (Russian Trusted CA bundle) is forwarded verbatim to session.get (ADR-037)."""
+    session = Mock(spec=requests.Session)
+    response = _mock_response(200, "OK")
+    session.get.return_value = response
+
+    bundle_path = "/some/path/russian_trusted_ca.pem"
+    client = RequestsHttpClient(session=session, verify=bundle_path)
+    client.get("https://torgi.gov.ru/")
+
+    call_args = session.get.call_args
+    assert call_args is not None
+    assert call_args.kwargs["verify"] == bundle_path
 
 
 # ---------------------------------------------------------------------------

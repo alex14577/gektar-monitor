@@ -29,6 +29,7 @@ import hashlib
 import logging
 import smtplib
 import ssl
+from email.headerregistry import Address
 from email.message import EmailMessage
 from typing import ClassVar
 
@@ -168,6 +169,22 @@ class SmtpEmailNotifier:
         msg = self._build_test_message(recipient=recipient, creds=creds)
         return self._deliver(msg=msg, recipient=recipient, creds=creds)
 
+    def send_session_expired(self, recipient: str) -> NotifyResult:
+        """Send a session-expired notification to *recipient*.
+
+        Subject: «Сессия FIS истекла, мониторинг приостановлен».
+        Message-ID uses a dedicated ``session_expired`` slot (no lot context).
+        Never raises for expected failures — returns :class:`~NotifyResult`.
+        """
+        creds = self._load_creds()
+        if creds is None:
+            return NotifyResult(
+                ok=False, detail="no_smtp_credentials", retryable=False
+            )
+
+        msg = self._build_session_expired_message(recipient=recipient, creds=creds)
+        return self._deliver(msg=msg, recipient=recipient, creds=creds)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -188,8 +205,21 @@ class SmtpEmailNotifier:
         rh = self._recipient_hash(recipient)
         return f"<{lot_id}.{self.channel_id}.{rh}@fis-monitor.local>"
 
-    def _from_address(self, creds: SmtpCredentials) -> str:
-        return creds.smtp_user
+    @staticmethod
+    def _from_address(creds: SmtpCredentials) -> str | Address:
+        """Build the RFC 5322 ``From:`` value.
+
+        When ``creds.from_name`` is set, returns an :class:`email.headerregistry.Address`
+        with a display name so that MUAs render ``"Display Name" <user@host>``.
+        When ``from_name`` is ``None`` or empty, returns the bare ``smtp_user`` string.
+
+        The returned value is assigned directly to ``msg["From"]`` — both ``str``
+        and ``Address`` are accepted by :class:`email.message.EmailMessage`.
+        """
+        if not creds.from_name:
+            return creds.smtp_user
+        # email.headerregistry.Address handles RFC 5322 quoting of the display name.
+        return Address(display_name=creds.from_name, addr_spec=creds.smtp_user)
 
     def _build_lot_message(
         self,
@@ -207,6 +237,26 @@ class SmtpEmailNotifier:
             f"Лот #{lot.id} изменил статус.\n\n"
             f"Регион: {lot.region}\n"
             f"Статус: {lot.status}\n"
+        )
+        return msg
+
+    def _build_session_expired_message(
+        self,
+        *,
+        recipient: str,
+        creds: SmtpCredentials,
+    ) -> EmailMessage:
+        msg = EmailMessage()
+        msg["From"] = self._from_address(creds)
+        msg["To"] = recipient
+        msg["Subject"] = "Сессия FIS истекла, мониторинг приостановлен"
+        # Message-ID: use lot_id=−1 as a sentinel for session-expired messages
+        # so deduplication logic in MTA treats these as distinct from lot notifications.
+        rh = self._recipient_hash(recipient)
+        msg["Message-ID"] = f"<session_expired.{self.channel_id}.{rh}@fis-monitor.local>"
+        msg.set_content(
+            "Сессия ФИС истекла. Мониторинг лотов приостановлен до повторного входа.\n\n"
+            "Войдите заново по ссылке: http://127.0.0.1:8080/\n"
         )
         return msg
 

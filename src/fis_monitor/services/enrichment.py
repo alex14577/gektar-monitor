@@ -1,19 +1,21 @@
-"""EnrichmentService — parallel detail-page enrichment via ThreadPoolExecutor.
+"""EnrichmentService — parallel detail-page enrichment via Executor.
 
 Enriches a list of lots (produced by the list-stage) by fetching each
 lot's detail page and merging the parsed result into the lot.
 
 Design invariants:
-- Cycle-scoped ThreadPoolExecutor: created inside ``enrich_lots`` and
-  closed via context-manager — no persistent pool state.
+- Executor DI: an ``Executor`` is injected via constructor.  The caller
+  (composition root / lifespan) owns the executor lifecycle — EnrichmentService
+  does NOT shut it down.  When no executor is provided a per-call scoped
+  ``ThreadPoolExecutor(max_workers=max_workers)`` is created as a fallback for
+  backward compatibility and tests that do not care about executor lifecycle.
 - Per-lot exception isolation: any Exception (except ParserVersionMismatch)
   is caught, logged at WARNING, and the original lot is returned with
   ``enrichment_status='failed'``.
 - ParserVersionMismatch propagates unmodified — caller (MonitorCycleService)
   decides whether to reparse or drop.
-- max_workers is a mandatory keyword passed by the caller from ConfigSource —
-  EnrichmentService does not know a default (rate-limits on the target site make
-  the right value domain-specific / operator-configurable).
+- max_workers is ignored when an executor is provided via constructor; it is
+  honoured when no executor was injected (per-call fallback creation).
 - Order of returned lots matches input order.
 
 See docs/architecture/03-protocols.md §3.2 for HttpClient / DetailParser
@@ -24,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from fis_monitor.domain.errors import ParserVersionMismatch
@@ -44,6 +46,10 @@ class EnrichmentService:
     - ``http``: ``HttpClient`` — synchronous HTTP GET seam.
     - ``parser``: ``DetailParser`` — parses detail-card HTML into ``ParsedDetail``.
     - ``url_builder``: ``TorgiUrlBuilder`` — composes detail-page URLs from lot_id.
+    - ``executor``: ``concurrent.futures.Executor`` — thread pool for parallel
+      enrichment.  Lifecycle (shutdown) is the **caller's** responsibility.
+      When ``None``, a per-call scoped ``ThreadPoolExecutor`` is created inside
+      ``enrich_lots`` (backward-compat / test convenience).
     """
 
     def __init__(
@@ -52,10 +58,30 @@ class EnrichmentService:
         parser: DetailParser,
         *,
         url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
+        executor: Executor | None = None,
     ) -> None:
         self._http = http
         self._parser = parser
         self._url_builder = url_builder
+        self._executor: Executor | None = executor
+
+    # ------------------------------------------------------------------
+    # Lifecycle seam
+    # ------------------------------------------------------------------
+
+    def bind_executor(self, executor: Executor) -> None:
+        """Late-bind an external executor (DI seam, mirrors LoginService pattern).
+
+        Called by the lifespan startup after the ``ThreadPoolExecutor`` is
+        created.  EnrichmentService does NOT own the executor lifecycle —
+        the caller (lifespan) is responsible for ``shutdown()``.
+
+        Args:
+            executor: The executor to use for parallel enrichment from this
+                point forward.  Replaces any executor provided at construction
+                time or the per-call fallback.
+        """
+        self._executor = executor
 
     # ------------------------------------------------------------------
     # Public API
@@ -71,7 +97,9 @@ class EnrichmentService:
 
         Args:
             lots: Lots from the list-stage. May be empty.
-            max_workers: Thread-pool size - MANDATORY kwarg. Caller reads
+            max_workers: Thread-pool size used only when no executor was
+                injected at construction time (per-call fallback).  When an
+                executor is provided this argument is ignored.  Callers read
                 this from ``ConfigSource`` (4-8 per target-site rate limits).
 
         Returns:
@@ -93,15 +121,23 @@ class EnrichmentService:
         # submit/result boundaries as a Future exception and is re-raised
         # when we call future.result().
         futures: list[Future[Lot]] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        if self._executor is not None:
+            # Injected executor — lifecycle is caller's responsibility.
+            # Do NOT use a with-block; just submit and collect.
             for lot in lots:
-                futures.append(pool.submit(self._enrich_one, lot))
-            # Results are collected OUTSIDE the submit loop but INSIDE the
-            # with-block so the pool is still alive during result collection
-            # (futures may raise ParserVersionMismatch which must propagate).
+                futures.append(self._executor.submit(self._enrich_one, lot))
             results: list[Lot] = []
             for future in futures:
                 results.append(future.result())
+        else:
+            # Fallback: per-call scoped pool (backward compat / tests without DI).
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for lot in lots:
+                    futures.append(pool.submit(self._enrich_one, lot))
+                # Results collected inside with-block so pool lives during result().
+                results = []
+                for future in futures:
+                    results.append(future.result())
 
         return results
 

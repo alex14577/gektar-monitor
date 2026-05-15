@@ -79,10 +79,6 @@ class TestBuildContainerLayerTopology:
         assert container.infra.detail_parser is not None
         assert container.infra.login_session is not None
 
-    def test_http_client_verify_false(self, container: Container) -> None:
-        """ADR-024: composition wires verify=False for self-signed-cert upstream."""
-        assert container.infra.http_client._verify is False  # type: ignore[union-attr]
-
     def test_http_client_default_timeout_uses_target_config(
         self, container: Container
     ) -> None:
@@ -167,6 +163,7 @@ class TestProtocolSubstitution:
             backfill=original_services.backfill,
             dnd=original_services.dnd,
             catchup_dismiss=original_services.catchup_dismiss,
+            session_expired_email=original_services.session_expired_email,
         )
         container.services = new_services
 

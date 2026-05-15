@@ -102,9 +102,12 @@ class SmtpCredentials(BaseModel):
     smtp_host: str              # формат-валидатор (см. ADR-015); policy — infra/smtp/host_policy.py
     smtp_port: int = Field(587, ge=1, le=65535)   # R4-C1, ADR-020: SSOT = state.db
     use_default: bool = True    # True = использовать дефолтный бот-ящик (`smtp.yandex.ru:587` из infra/smtp/constants.py)
+    from_name: str | None = None  # RFC 5322 display name → From: "Имя" <user@host>; None = bare email (bd ljp)
 
     model_config = ConfigDict(frozen=True)
 ```
+
+Поле `from_name` хранится в `state.db` как `smtp_from_name TEXT` (nullable). Добавлено миграцией v2→v3 (`infra/sqlite/migrations_v2_to_v3.py`). Если `None` — `SmtpEmailNotifier` использует bare `smtp_user` в заголовке `From:`; если задано — `"Display Name" <smtp_user>` (RFC 5322 format, кодирование через `email.headerregistry.Address`).
 
 Дефолтные значения (`DEFAULT_SMTP_HOST = "smtp.yandex.ru"`, `DEFAULT_SMTP_PORT = 587`) живут в коде — fallback на случай пустой таблицы при первой установке.
 

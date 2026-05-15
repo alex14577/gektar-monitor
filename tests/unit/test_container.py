@@ -78,6 +78,7 @@ class TestServicesFrozen:
             backfill=Mock(),
             dnd=Mock(),
             catchup_dismiss=Mock(),
+            session_expired_email=Mock(),
         )
 
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -129,6 +130,7 @@ class TestContainerNotFrozen:
             backfill=Mock(),
             dnd=Mock(),
             catchup_dismiss=Mock(),
+            session_expired_email=Mock(),
         )
 
         container = Container(infra=infra, services=services)
@@ -150,6 +152,7 @@ class TestContainerNotFrozen:
             backfill=Mock(),
             dnd=Mock(),
             catchup_dismiss=Mock(),
+            session_expired_email=Mock(),
         )
         container.services = new_services  # type: ignore
         assert container.services is new_services
@@ -211,6 +214,7 @@ class TestReprNoPII:
             backfill=Mock(),
             dnd=Mock(),
             catchup_dismiss=Mock(),
+            session_expired_email=Mock(),
         )
 
         repr_str = repr(services)
@@ -262,6 +266,7 @@ class TestReprNoPII:
             backfill=Mock(),
             dnd=Mock(),
             catchup_dismiss=Mock(),
+            session_expired_email=Mock(),
         )
 
         container = Container(infra=infra, services=services)
@@ -318,6 +323,7 @@ class TestContainerConstruction:
             backfill=Mock(),
             dnd=Mock(),
             catchup_dismiss=Mock(),
+            session_expired_email=Mock(),
         )
 
         container = Container(infra=infra, services=services)

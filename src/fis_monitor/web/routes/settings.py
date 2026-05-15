@@ -66,6 +66,7 @@ class SmtpCredentialsBody(BaseModel):
     smtp_host: str
     smtp_port: int = 587
     use_default: bool = True
+    from_name: str | None = None
 
 
 class SmtpTestBody(BaseModel):
@@ -229,6 +230,7 @@ def post_smtp(
             smtp_host=body.smtp_host,
             smtp_port=body.smtp_port,
             use_default=body.use_default,
+            from_name=body.from_name,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

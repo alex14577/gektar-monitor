@@ -56,6 +56,7 @@ def _make_creds(
     smtp_host: str = "smtp.example.com",
     smtp_port: int = 587,
     use_default: bool = True,
+    from_name: str | None = None,
 ) -> SmtpCredentials:
     return SmtpCredentials(
         smtp_user=smtp_user,
@@ -63,6 +64,7 @@ def _make_creds(
         smtp_host=smtp_host,
         smtp_port=smtp_port,
         use_default=use_default,
+        from_name=from_name,
     )
 
 
@@ -216,3 +218,53 @@ def test_smtp_password_secret_str_repr_is_redacted(tmp_db: ConnectionProvider) -
     assert "super_secret" not in repr(loaded.smtp_password)
     # Only get_secret_value() reveals it
     assert loaded.smtp_password.get_secret_value() == "super_secret"
+
+
+def test_from_name_set_round_trip(tmp_db: ConnectionProvider) -> None:
+    """from_name with a Cyrillic string survives save/load unchanged."""
+    repo = make_repo(tmp_db)
+    repo.save(_make_creds(from_name="Монитор"))
+    loaded = repo.load()
+    assert loaded is not None
+    assert loaded.from_name == "Монитор"
+
+
+def test_from_name_none_round_trip(tmp_db: ConnectionProvider) -> None:
+    """from_name=None is stored as NULL and loaded back as None.
+
+    Guards the ``creds.from_name or None`` normalisation in save() and
+    ``row["smtp_from_name"] or None`` in load() — removing either ``or None``
+    would cause a falsy empty-string to survive as "" instead of None.
+    """
+    repo = make_repo(tmp_db)
+    repo.save(_make_creds(from_name=None))
+    loaded = repo.load()
+    assert loaded is not None
+    assert loaded.from_name is None
+
+
+def test_pre_migration_row_loads_as_none(tmp_db: ConnectionProvider) -> None:
+    """A row written with smtp_from_name=NULL (pre-v3 migration semantics) loads as None.
+
+    Simulates the state of an existing row after v2→v3 migration: ALTER TABLE
+    ADD COLUMN smtp_from_name TEXT sets existing rows to NULL. Verifies that
+    load() maps NULL → None correctly — the ``or None`` guard in load() line 81.
+    """
+    conn: sqlite3.Connection = tmp_db.get()
+    # Insert a row that has smtp_from_name explicitly NULL, mimicking what
+    # ALTER TABLE ADD COLUMN produces for pre-existing rows.
+    conn.execute(
+        """
+        INSERT INTO smtp_credentials
+            (id, smtp_user, smtp_password, smtp_host, smtp_port,
+             use_default, smtp_from_name, updated_at)
+        VALUES (1, 'legacy@smtp.test', 'pass', 'smtp.test', 587, 1, NULL,
+                '2024-01-01T00:00:00')
+        """
+    )
+    conn.commit()
+
+    repo = make_repo(tmp_db)
+    loaded = repo.load()
+    assert loaded is not None
+    assert loaded.from_name is None
