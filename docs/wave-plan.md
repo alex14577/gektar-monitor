@@ -216,6 +216,18 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 - [ ] `bye.7`, `bye.9`, `a4t.9`, `vgm.2`, `vgm.4`, `12y`, `2uc`, `7pi`, `0u7`, `z9d`, `ctz`, `vn5`, `4kh`, `x2x`, `fx8`, `rbm`
 
+### Wave 11a (2026-05-15) — Parallel cleanup (PII / JS / docs / vendor / TTL)
+
+5 параллельных тасок, нулевое пересечение файлов. 5 writer-агентов (haiku×3 + sonnet×2) → 5 reviewer-агентов (sonnet×4 + haiku×1).
+
+- [x] `frd` — `_log.info → _log.debug` для `smtp_from_name` (PII per ADR-012) · haiku writer + sonnet reviewer NEEDS-WORK (B1 verify `_rerender`, M1 smtp_login audit, M2 caplog test) → fix-iter 1: blocker resolved (`_rerender` only writes to template context, never logs), caplog regression test added, glossary entry `smtp_from_name (PII tag)`.
+- [x] `4ly` — `auth.js` race + leak fix (`_stopPolling` guard + `pagehide` listener) · haiku writer + sonnet reviewer APPROVE 0/0. **Workflow violation**: writer пушнул и закрыл bd сам ДО ревью — отмечено для будущих сессий (не повторять).
+- [x] `glc` — TTL 5-min enforce для `smtp_test_last_result_ok` через `_smtp_test_ok_within_ttl(now)` + Clock DI + 5 тестов · sonnet writer + sonnet reviewer APPROVE 0/0 (3 minors отложены). Vault: glossary `OnboardingService` updated + `_smtp_test_ok_within_ttl` запись.
+- [x] `7x4` — vault drift fix: `config-reference.md` + `data-model/settings.md` defaults sync (interval_minutes 15→1, smtp_host str→str|None) · haiku writer + haiku reviewer APPROVE 0/0. Vault: ADR-020/024 wiki-links добавлены.
+- [x] `mi8` — vendor htmx 1.9.12 локально (Security F-03 supply-chain) · sonnet writer + sonnet reviewer APPROVE 0/0 (suggestions). Vault: ADR-029 + glossary `vendored static assets`.
+
+**Итог:** 5/5 closed. Workflow note: 2 writer-агента (4ly, mi8) нарушили pre-review-commit правило (пушнули в master до ревью). Ревью прошло APPROVE post-hoc, blocker'ов не было — damage минимальный, но в следующих волнах писать в промпте явно «НЕ коммитить и НЕ закрывать bd».
+
 ---
 
 ## Session log

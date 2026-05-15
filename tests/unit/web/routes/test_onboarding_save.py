@@ -13,8 +13,10 @@ Coverage:
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
+import pytest
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -378,6 +380,27 @@ def test_step2_next_valid_credentials_redirects() -> None:
     assert creds.smtp_user == "bot@example.com"
     assert len(f_svc.advance_calls) == 1
     assert f_svc.advance_calls[0] == (OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+
+
+def test_step2_smtp_from_name_not_logged_at_info(caplog: pytest.LogCaptureFixture) -> None:
+    """Regression guard: smtp_from_name (PII per ADR-012) must not appear in INFO logs.
+
+    Если кто-то поднимет уровень логирования в onboarding step 2 обратно на INFO,
+    PII попадёт в app.jsonl → diagnostic.zip. Этот тест ловит регрессию.
+    """
+    app, _, _, _, _ = _make_app(onboarding_state=OnboardingState.REGIONS_SET)
+    client = _client(app)
+    data = _step2_form_data()
+    data["smtp_from_name"] = "Sensitive Display Name"
+
+    with caplog.at_level(logging.INFO, logger="fis_monitor"):
+        resp = client.post("/onboarding/save?step=2", data=data)
+
+    assert resp.status_code == 200
+    info_messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert not any("Sensitive Display Name" in m for m in info_messages), (
+        "smtp_from_name must not appear in INFO+ logs — see ADR-012 (bd frd)"
+    )
 
 
 def test_step2_next_smtp_policy_error_rerenders() -> None:

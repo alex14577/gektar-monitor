@@ -520,7 +520,7 @@ def _handle_step2_next(
     # remove field from _step2.html.jinja. Tracked separately.
     smtp_from_name = (form.get("smtp_from_name") or "").strip()
     if smtp_from_name:
-        _log.info(
+        _log.debug(
             "onboarding step 2: smtp_from_name=%r submitted but not persisted (bd ljp)",
             smtp_from_name,
         )
