@@ -26,6 +26,7 @@ from fis_monitor.web.deps import (
     get_config_source,
     get_dnd_service,
     get_login,
+    get_lot_query,
     get_lot_repo,
     get_session_probe,
     get_templates,
@@ -111,6 +112,12 @@ def _make_app(
         def count_active(self) -> int:
             return 0
 
+    class _StubLotQuery:
+        def search(self, filters: object, *, page_size: int = 50, cursor: object = None) -> object:
+            from fis_monitor.services.lot_query import Page
+
+            return Page(items=(), next_cursor=None, has_more=False)
+
     class _StubClock:
         def now(self) -> datetime:
             return datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
@@ -122,6 +129,7 @@ def _make_app(
     app.dependency_overrides[get_catchup_dismiss] = lambda: _StubCatchup()
     app.dependency_overrides[get_user_state_repo] = lambda: _StubUserStateRepo()
     app.dependency_overrides[get_lot_repo] = lambda: _StubLotRepo()
+    app.dependency_overrides[get_lot_query] = lambda: _StubLotQuery()
     app.dependency_overrides[get_clock] = lambda: _StubClock()
     return app
 

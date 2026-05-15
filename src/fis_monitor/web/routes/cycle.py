@@ -59,8 +59,13 @@ router = APIRouter(prefix="/cycle", tags=["cycle"])
 
 _HTML_OK = (
     '<span class="cycle-result cycle-result--ok">'
-    "Запуск проверки запланирован"
-    "</span>"
+    'Идёт проверка'
+    '<span class="spinner-dots" aria-hidden="true" style="margin-left:6px;">'
+    '<span class="spinner-dots__dot"></span>'
+    '<span class="spinner-dots__dot"></span>'
+    '<span class="spinner-dots__dot"></span>'
+    '</span>'
+    '</span>'
 )
 
 _HTML_RATE_LIMITED = (

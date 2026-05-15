@@ -730,3 +730,10 @@ body[data-density="poster"] .lot--list .lot__age   { font-size: 1.5rem; font-wei
   border: 0; border-top: 1px solid var(--line);
   margin: 4px 2px;
 }
+
+/* Feed loading state — скрыть когда в #feed появилась хотя бы одна .zone с лотами. */
+#feed:has(.zone:not(.zone--archive):not(#feed-loading)) #feed-loading,
+#feed:has(article.lot) #feed-loading {
+  display: none;
+}
+

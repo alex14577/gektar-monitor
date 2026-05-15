@@ -111,7 +111,22 @@
       </section>
     {% endif %}
 
-    {# ARCHIVE (older + reveal-on-demand) #}
+    {# Loading state: в БД ещё нет лотов и нет активных фильтров — сервис ещё качает первую партию. #}
+    {# Скрывается через CSS как только в #feed появляется первый ребёнок-лот (через :has). #}
+    {% if not zones.hot and not zones.today and not filters_active and health.total_lots == 0 %}
+    <div id="feed-loading" class="zone" style="text-align:center; padding:48px 24px;">
+      <span class="spinner-dots" aria-label="Загружаем первую партию лотов" style="margin: 0 auto 12px;">
+        <span class="spinner-dots__dot"></span>
+        <span class="spinner-dots__dot"></span>
+        <span class="spinner-dots__dot"></span>
+      </span>
+      <p style="margin:0; color: var(--ink-2);">Загружаем первую партию лотов…</p>
+      <p style="margin:6px 0 0; color: var(--muted); font-size:0.875rem;">Сервис обращается к сайту, это может занять до минуты.</p>
+    </div>
+    {% endif %}
+
+    {# ARCHIVE (older + reveal-on-demand) — скрыто пока нечего показывать (archive_count stub=0). #}
+    {% if archive_count and archive_count > 0 %}
     <section class="zone zone--archive" aria-label="Архив">
       <button class="btn btn--ghost btn--full" type="button"
               hx-get="/lots?page=2"
@@ -124,6 +139,7 @@
         <span style="color: var(--muted); font-size: 0.8125rem;">пагинация по 50</span>
       </button>
     </section>
+    {% endif %}
 
   </div>{# /#feed #}
 

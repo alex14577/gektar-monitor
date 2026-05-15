@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment
 
-from fis_monitor.domain.models import LotPublicDTO, SseEvent, SseLotNew
+from fis_monitor.domain.models import LotPublicDTO, LotUserDTO, SseEvent, SseLotNew
 from fis_monitor.infra.sse.sse_stream import encode_sse_event
 
 if TYPE_CHECKING:
@@ -201,6 +201,32 @@ class LotViewModel:
         """Lot lifecycle event for data-event attribute (None for new lots)."""
         return None  # new lots have no lifecycle event
 
+    @property
+    def category_short(self) -> str:
+        """Short category label for the dense list card (falls back to «с/х»)."""
+        cat = self._dto.land_category
+        if not cat:
+            return ""
+        return cat.split(",")[0].strip()
+
+    @property
+    def vri_short(self) -> str | None:
+        """Short permitted-use label for the dense list card."""
+        vri = self._dto.permitted_use
+        if not vri:
+            return None
+        return vri.split(",")[0].strip()
+
+    @property
+    def gone_at_human(self) -> str:
+        """Time since the lot left "Свободен" — empty for active lots."""
+        return ""
+
+    @property
+    def new_status_human(self) -> str:
+        """New status label for gone-event lots — empty for active lots."""
+        return ""
+
     # --- User-state fields (defaults for SSE fan-out path) -----------------
 
     @property
@@ -219,6 +245,48 @@ class LotViewModel:
     @property
     def note(self) -> str | None:
         return None
+
+
+class LotUserViewModel(LotViewModel):
+    """``LotViewModel`` variant that surfaces per-user state from a ``LotUserDTO``.
+
+    Used by the server-rendered feed (``GET /``) where ``starred`` / ``seen_at``
+    / ``note`` are loaded from ``UserStateRepository``.  The SSE fan-out path
+    keeps using the base ``LotViewModel`` (no per-user state available).
+    """
+
+    __slots__ = ("_subscribed_regions",)
+
+    def __init__(
+        self,
+        dto: LotUserDTO,
+        *,
+        subscribed_regions: frozenset[str] = frozenset(),
+    ) -> None:
+        super().__init__(dto)
+        self._subscribed_regions = subscribed_regions
+
+    @property
+    def _user_dto(self) -> LotUserDTO:
+        return self._dto  # type: ignore[return-value]
+
+    @property
+    def is_seen(self) -> bool:
+        return self._user_dto.seen_at is not None
+
+    @property
+    def is_starred(self) -> bool:
+        return self._user_dto.starred
+
+    @property
+    def in_subscribed_subjects(self) -> bool:
+        if not self._subscribed_regions:
+            return False
+        return self._user_dto.region in self._subscribed_regions
+
+    @property
+    def note(self) -> str | None:
+        return self._user_dto.note
 
 
 def _decimal_to_dms(degrees: float, pos_suffix: str, neg_suffix: str) -> str:

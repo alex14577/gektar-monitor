@@ -10,23 +10,23 @@ get_view_filters_service, get_user_state_repo, get_clock и т.д.
 Container в роуте не виден.
 
 MVP-stub, переезжающие в follow-up bd:
-  * ``zones.hot`` / ``zones.today`` — заполняются когда LotUserDTO ↔ template-
-    маппинг будет полным (партиал ``_lot_poster.html.jinja`` сейчас требует
-    кучу полей которых на DTO нет: ``temp``, ``district``, ``url_pkk``,
-    ``coords_decimal`` …).  Отдельная bd на это.
   * ``last_cycle`` / ``health`` — отдельная задача (зависит от CyclesRepository
     + HealthService).
   * ``catchup.new_count`` — текущий MVP-показатель: число активных лотов в
     БД (``LotRepository.count_active``).  Точный «сколько появилось с момента
     последнего визита» = отдельный bd когда LotRepository обзаведётся
     ``count_first_seen_since(at)``.
-  * ``archive_count`` — нужен ``UserStateRepository.count_archived()``,
-    отдельный bd.
+
+``zones.hot`` / ``zones.today`` / ``archive_count`` рендерятся через
+``LotQueryService.search`` + ``_assemble_feed_zones``: фильтры из cookie
+сайдбара (``ViewFilters``) транслируются в ``LotFilters`` для SQL и
+``only_new``/``only_stars`` применяются post-filter.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, Request
@@ -34,10 +34,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from fis_monitor.domain.interfaces import Clock, LotRepository, UserStateRepository
-from fis_monitor.domain.models import SessionStatus, Settings
+from fis_monitor.domain.models import LotUserDTO, SessionStatus, Settings
 from fis_monitor.services.catchup_dismiss import CatchupDismissService
 from fis_monitor.services.dnd import DndService
 from fis_monitor.services.login import LoginService
+from fis_monitor.services.lot_query import LotFilters, LotQueryService
 from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
 from fis_monitor.web.deps import (
     get_catchup_dismiss,
@@ -45,18 +46,28 @@ from fis_monitor.web.deps import (
     get_config_source,
     get_dnd_service,
     get_login,
+    get_lot_query,
     get_lot_repo,
     get_session_probe,
     get_templates,
     get_user_state_repo,
     get_view_filters_service,
 )
+from fis_monitor.web.sse_encoder import LotUserViewModel
 
 router = APIRouter(prefix="", tags=["main"])
 
 # Cookie key produced by ``ViewFiltersService.serialize()`` — kept in sync with
 # the constant used by the /filters/* routes.
 _VIEW_FILTERS_COOKIE = "view_filters"
+
+# Feed zone age thresholds — must match _lot_poster vs _lot_list visual split.
+_AGE_HOT_SECS = 3_600          # < 1 hour  → hot zone (poster card)
+_AGE_TODAY_SECS = 86_400       # 1 h – 24 h → today zone (list card)
+
+# Single-page feed cap: at most this many active lots are loaded into the
+# initial HTML.  Lots beyond this fall into the archive count only.
+_FEED_PAGE_SIZE = 200
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +198,70 @@ def _build_catchup_context(
     )
 
 
+def _view_filters_to_lot_filters(vf: ViewFilters) -> LotFilters:
+    """Adapt the sidebar ``ViewFilters`` to the storage-level ``LotFilters``.
+
+    ``ViewFilters.subjects`` are RF subject codes serialised as strings (the
+    sidebar form sends them as ``<input value="77">``).  ``LotFilters.regions``
+    is ``tuple[int, ...]`` and matches against the TEXT ``lots.region`` column
+    via ``str(r)`` inside ``LotQueryService``.  Non-numeric / corrupted entries
+    are silently dropped — defensive against a stale cookie surviving a schema
+    bump.
+
+    ``only_new`` / ``only_stars`` are user-state predicates not available at
+    the SQL layer and are applied as an in-memory post-filter in
+    ``_assemble_feed_zones``.
+    """
+    regions: list[int] = []
+    for s in vf.subjects:
+        try:
+            regions.append(int(s))
+        except (TypeError, ValueError):
+            continue
+    return LotFilters(
+        regions=tuple(regions),
+        area_sqm_min=Decimal(vf.area_min) if vf.area_min is not None else None,
+        area_sqm_max=Decimal(vf.area_max) if vf.area_max is not None else None,
+    )
+
+
+def _assemble_feed_zones(
+    items: tuple[LotUserDTO, ...],
+    *,
+    view_filters: ViewFilters,
+    subscribed_regions: frozenset[str],
+) -> tuple[SimpleNamespace, int]:
+    """Group ``LotUserDTO`` items into the template's feed zones.
+
+    Splits by ``age_seconds`` into hot (≤ 1 h) and today (1 h – 24 h);
+    everything older counts towards ``archive_count`` but is not rendered
+    inline (revealed on demand via the "Показать ещё" button).
+
+    Applies the user-state post-filters (``only_new``, ``only_stars``) that
+    the SQL layer cannot express.  Each surfaced lot is wrapped in
+    ``LotUserViewModel`` so it can be consumed by the existing partials
+    (``_lot_poster.html.jinja`` / ``_lot_list.html.jinja``).
+    """
+    hot: list[LotUserViewModel] = []
+    today: list[LotUserViewModel] = []
+    archive_count = 0
+
+    for dto in items:
+        if view_filters.only_new and dto.seen_at is not None:
+            continue
+        if view_filters.only_stars and not dto.starred:
+            continue
+
+        if dto.age_seconds < _AGE_HOT_SECS:
+            hot.append(LotUserViewModel(dto, subscribed_regions=subscribed_regions))
+        elif dto.age_seconds < _AGE_TODAY_SECS:
+            today.append(LotUserViewModel(dto, subscribed_regions=subscribed_regions))
+        else:
+            archive_count += 1
+
+    return SimpleNamespace(hot=tuple(hot), today=tuple(today)), archive_count
+
+
 def _build_scope_context(settings: Settings) -> SimpleNamespace:
     """Derive sidebar scope chips from configured regions.
 
@@ -218,6 +293,7 @@ async def feed_page(
     filters_svc: ViewFiltersService = Depends(get_view_filters_service),
     user_state_repo: UserStateRepository = Depends(get_user_state_repo),
     lot_repo: LotRepository = Depends(get_lot_repo),
+    lot_query: LotQueryService = Depends(get_lot_query),
     clock: Clock = Depends(get_clock),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
@@ -257,6 +333,20 @@ async def feed_page(
     # lots table — separate bd (see module docstring).
     last_visit = user_state_repo.last_visit()
     active_count = lot_repo.count_active()
+
+    # ── Feed zones (server-rendered initial paint) ──────────────────────
+    # Query active lots applying sidebar filters; group by age into hot /
+    # today / archive.  At most _FEED_PAGE_SIZE lots are surfaced inline; if
+    # active_count exceeds this, the archive count under-reports — separate
+    # bd would add a dedicated COUNT(*) by age range.
+    lot_filters = _view_filters_to_lot_filters(parsed_filters)
+    page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE)
+    subscribed_regions = frozenset(str(r) for r in settings.regions)
+    zones, archive_count = _assemble_feed_zones(
+        page.items,
+        view_filters=parsed_filters,
+        subscribed_regions=subscribed_regions,
+    )
     catchup_ctx = _build_catchup_context(
         is_dismissed=catchup_svc.is_dismissed(now),
         last_visit=last_visit,
@@ -283,14 +373,12 @@ async def feed_page(
             total_lots=active_count,
             last_new_human="—",
         ),
-        # MVP-stub: feed zones — gated on LotUserDTO ↔ template mapping bd
-        "zones": SimpleNamespace(hot=[], today=[]),
+        "zones": zones,
         "catchup": catchup_ctx,
         "scope": _build_scope_context(settings),
         "filters": _build_filters_context(parsed_filters),
         "dnd": _build_dnd_context(dnd_svc, now),
-        # MVP-stub: needs UserStateRepository.count_archived() — separate bd
-        "archive_count": 0,
+        "archive_count": archive_count,
         "filters_active": _filters_are_active(parsed_filters),
         # MVP-stub: browser tab title — separate bd (lot counter from SSE)
         "title_format": "(0) Монитор гектара",

@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from fis_monitor.domain.interfaces import ConfigSubscription
 from fis_monitor.domain.models import LotUserState, SessionStatus, Settings
 from fis_monitor.services.login import LoginStatus
+from fis_monitor.services.lot_query import LotFilters, Page
 from fis_monitor.services.view_filters import ViewFilters, serialize
 from fis_monitor.web.deps import (
     get_catchup_dismiss,
@@ -33,6 +34,7 @@ from fis_monitor.web.deps import (
     get_config_source,
     get_dnd_service,
     get_login,
+    get_lot_query,
     get_lot_repo,
     get_session_probe,
     get_templates,
@@ -181,6 +183,27 @@ class FakeClock:
         return 0.0
 
 
+class FakeLotQuery:
+    """Fake LotQueryService — only ``search()`` is exercised by the feed route.
+
+    Returns the items configured at construction time (already a tuple of
+    ``LotUserDTO``), wrapped in a ``Page`` with ``next_cursor=None``.
+    """
+
+    def __init__(self, items: tuple[Any, ...] = ()) -> None:
+        self._items = items
+        self.search_calls: list[LotFilters] = []
+
+    def search(
+        self, filters: LotFilters, *, page_size: int = 50, cursor: str | None = None
+    ) -> Page[Any]:
+        self.search_calls.append(filters)
+        return Page(items=self._items, next_cursor=None, has_more=False)
+
+    def get_by_id(self, lot_id: int) -> Any:
+        raise NotImplementedError
+
+
 class FakeSessionProbe:
     """Fake SessionProbe — implements check() protocol method.
 
@@ -209,6 +232,7 @@ def _make_app(
     catchup: FakeCatchupDismiss | None = None,
     user_state: FakeUserStateRepo | None = None,
     lot_repo: FakeLotRepo | None = None,
+    lot_query: FakeLotQuery | None = None,
     clock: FakeClock | None = None,
 ) -> tuple[FastAPI, FakeConfigSource, FakeSessionProbe]:
     """Build a minimal FastAPI app with main router + injected fakes."""
@@ -218,6 +242,7 @@ def _make_app(
     fake_catchup = catchup if catchup is not None else FakeCatchupDismiss()
     fake_user_state = user_state if user_state is not None else FakeUserStateRepo()
     fake_lot_repo = lot_repo if lot_repo is not None else FakeLotRepo()
+    fake_lot_query = lot_query if lot_query is not None else FakeLotQuery()
     fake_clock = clock if clock is not None else FakeClock()
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -239,6 +264,7 @@ def _make_app(
     app.dependency_overrides[get_catchup_dismiss] = lambda: fake_catchup
     app.dependency_overrides[get_user_state_repo] = lambda: fake_user_state
     app.dependency_overrides[get_lot_repo] = lambda: fake_lot_repo
+    app.dependency_overrides[get_lot_query] = lambda: fake_lot_query
     app.dependency_overrides[get_clock] = lambda: fake_clock
     return app, fake_cfg, fake_probe
 
@@ -433,6 +459,91 @@ def test_catchup_banner_visible_when_state_present() -> None:
     assert "42" in html
     # The relative-time formatter renders "3 ч назад" for the 3h delta.
     assert "3 ч назад" in html
+
+
+def _make_user_dto(
+    *,
+    lot_id: int,
+    age_seconds: int,
+    starred: bool = False,
+    seen_at: datetime | None = None,
+    region: str = "Хабаровский край",
+) -> Any:
+    """Build a ``LotUserDTO`` for the feed-zone tests.
+
+    Builds a Lot via the factory then upgrades it to LotUserDTO with the
+    presentation hints + per-user state the feed assembly inspects.
+    """
+    from fis_monitor.domain.models import LotUserDTO
+    from tests.factories import make_lot
+
+    lot = make_lot(id=lot_id, region=region)
+    payload = lot.model_dump()
+    payload["age_seconds"] = age_seconds
+    payload["tier"] = "match"
+    # freshness is derived from age in production but is independent here —
+    # the feed assembly only inspects age_seconds, so any valid value works.
+    payload["freshness"] = "hot" if age_seconds < 3600 else (
+        "warm" if age_seconds < 86_400 else "cold"
+    )
+    payload["starred"] = starred
+    payload["seen_at"] = seen_at
+    return LotUserDTO(**payload)
+
+
+def test_feed_zones_split_by_age() -> None:
+    """zones.hot ≤ 1h, zones.today 1-24h, archive_count > 24h."""
+    items = (
+        _make_user_dto(lot_id=1, age_seconds=600),          # hot
+        _make_user_dto(lot_id=2, age_seconds=10_000),       # today (~2.7h)
+        _make_user_dto(lot_id=3, age_seconds=200_000),      # archive (>24h)
+        _make_user_dto(lot_id=4, age_seconds=300_000),      # archive
+    )
+    fake_lot_query = FakeLotQuery(items=items)
+    app, _, _ = _make_app(lot_query=fake_lot_query)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+    # All non-archive lots present in HTML
+    assert 'id="lot-1"' in html
+    assert 'id="lot-2"' in html
+    # Archive lots not rendered inline
+    assert 'id="lot-3"' not in html
+    assert 'id="lot-4"' not in html
+    # Archive reveal button shows 2 (= number of >24h lots)
+    assert "<b style=\"margin-left: 4px;\">2</b>" in html
+    # LotQueryService was actually consulted
+    assert len(fake_lot_query.search_calls) == 1
+
+
+def test_feed_only_stars_filter_hides_unstarred() -> None:
+    """ViewFilters.only_stars removes lots whose ``starred`` is False."""
+    items = (
+        _make_user_dto(lot_id=10, age_seconds=600, starred=False),
+        _make_user_dto(lot_id=11, age_seconds=600, starred=True),
+    )
+    cookie = serialize(ViewFilters(only_stars=True))
+    app, _, _ = _make_app(lot_query=FakeLotQuery(items=items))
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/", cookies={"view_filters": cookie})
+    html = resp.text
+    assert 'id="lot-10"' not in html
+    assert 'id="lot-11"' in html
+
+
+def test_feed_subjects_filter_passed_to_lot_query() -> None:
+    """ViewFilters.subjects (numeric strings) flow through to LotFilters.regions."""
+    cookie = serialize(ViewFilters(subjects=["77", "16", "garbage"]))
+    fake_lot_query = FakeLotQuery(items=())
+    app, _, _ = _make_app(lot_query=fake_lot_query)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/", cookies={"view_filters": cookie})
+    assert resp.status_code == 200
+    assert len(fake_lot_query.search_calls) == 1
+    used = fake_lot_query.search_calls[0]
+    # Numeric strings parsed; "garbage" silently dropped
+    assert used.regions == (77, 16)
 
 
 def test_scope_subjects_count_reflects_configured_regions() -> None:
