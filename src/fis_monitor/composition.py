@@ -418,7 +418,8 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     _supervisor_cell: list[object] = [None]  # mutable cell; filled by app.py lifespan
 
     def _backfill_on_login_success(_outcome: object) -> None:
-        """Auto-backfill trigger callback — called on Playwright executor thread."""
+        # Secondary fallback only. Primary backfill trigger is delta-check in
+        # MonitorCycleService. Activate when total_count=None ≥ N cycles AND db is empty.
         onboarding_state = onboarding.current()
         from fis_monitor.domain.models import OnboardingState  # local to avoid circular
         if onboarding_state != OnboardingState.COMPLETED:
@@ -438,13 +439,22 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         if not current_settings.regions:
             _log.debug("on_login_success: regions empty — skip backfill")
             return
+        region_ids = list(current_settings.regions)
+        all_skip_none = all(
+            monitor_cycle.last_delta_decision(rid) == "skip_none" for rid in region_ids
+        )
+        if not all_skip_none:
+            _log.debug(
+                "on_login_success: delta-trigger operative for ≥1 region — skip secondary fallback"
+            )
+            return
         sup = _supervisor_cell[0]
         if sup is None:
             _log.warning(
                 "on_login_success: supervisor not yet bound — backfill NOT started"
             )
             return
-        _log.info("on_login_success: guards passed → auto-backfill scheduled")
+        _log.info("on_login_success: secondary fallback guards passed → auto-backfill scheduled")
         sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
 
     # Build SessionExpiredEmailService before login so the reset callback can
