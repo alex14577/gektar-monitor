@@ -3,10 +3,12 @@
 Coverage:
   1. POST /settings/subjects happy path → 200 + partial HTML, config saved.
   2. POST /settings/subjects empty list → 200, saved as [] (notify-all per ADR-035 I4).
-  3. POST /settings/subjects unknown catalog id → 422.
+  3. POST /settings/subjects unknown catalog id → 200 + scope_error in HTML (v7ar).
   4. POST /settings/subjects does not clobber other Settings fields.
   5. GET /settings HTML includes subject chip-picker with all catalog subjects.
   6. GET /settings HTML shows correct checked state from filters.rf_subjects.
+  7. POST /settings/subjects persistence error → 200 + scope_error in HTML (v7ar).
+  8. POST /settings/subjects success → scope_saved=subjects in HTML (triggers toast, v7ar).
 """
 
 from __future__ import annotations
@@ -38,9 +40,12 @@ from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 class FakeConfigSource:
     """Fake ConfigSource — all public methods implemented (anti-mock §6)."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, save_raises: Exception | None = None
+    ) -> None:
         self._settings = settings or Settings()
         self.save_calls: list[Settings] = []
+        self._save_raises = save_raises
 
     def current(self) -> Settings:
         return self._settings
@@ -49,6 +54,8 @@ class FakeConfigSource:
         return object()
 
     def save(self, settings: Settings) -> None:
+        if self._save_raises is not None:
+            raise self._save_raises
         self._settings = settings
         self.save_calls.append(settings)
 
@@ -164,8 +171,8 @@ class TestPostSubjectsHappyPath:
 
 
 class TestPostSubjectsValidation:
-    def test_unknown_catalog_id_returns_422(self) -> None:
-        """site-id not in SUBJECT_TITLE_BY_ID → 422."""
+    def test_unknown_catalog_id_returns_200_with_error(self) -> None:
+        """site-id not in SUBJECT_TITLE_BY_ID → 200 + scope_error in partial (v7ar)."""
         fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
         with TestClient(app) as client:
@@ -174,10 +181,11 @@ class TestPostSubjectsValidation:
                 data="rf_subjects=99999",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
-        assert resp.status_code == 422, resp.text
+        assert resp.status_code == 200, resp.text
+        assert 'id="scope-and-subjects"' in resp.text
 
     def test_unknown_id_error_mentions_id(self) -> None:
-        """422 detail must mention the offending id."""
+        """scope_error must mention the offending id."""
         fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
         with TestClient(app) as client:
@@ -187,6 +195,49 @@ class TestPostSubjectsValidation:
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
         assert "99999" in resp.text
+
+    def test_unknown_id_does_not_save(self) -> None:
+        """Validation error must not call config_source.save()."""
+        fc = FakeConfigSource(Settings())
+        app, _ = _make_app(fc)
+        with TestClient(app) as client:
+            client.post(
+                "/settings/subjects",
+                data="rf_subjects=99999",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+        assert fc.save_calls == []
+
+
+class TestPostSubjectsPersistenceError:
+    def test_save_exception_returns_200_with_error(self) -> None:
+        """config_source.save() raises → 200 + scope_error in partial (v7ar)."""
+        fc = FakeConfigSource(Settings(), save_raises=RuntimeError("disk full"))
+        app, _ = _make_app(fc)
+        with TestClient(app) as client:
+            resp = client.post(
+                "/settings/subjects",
+                data="rf_subjects=87",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+        assert resp.status_code == 200, resp.text
+        assert "disk full" in resp.text
+        assert 'id="scope-and-subjects"' in resp.text
+
+
+class TestPostSubjectsSuccessFeedback:
+    def test_success_includes_scope_saved_subjects(self) -> None:
+        """Successful POST /settings/subjects → HTML has scope_saved toast trigger (v7ar)."""
+        fc = FakeConfigSource(Settings())
+        app, _ = _make_app(fc)
+        with TestClient(app) as client:
+            resp = client.post(
+                "/settings/subjects",
+                data="rf_subjects=87",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+        assert resp.status_code == 200, resp.text
+        assert "subjects" in resp.text  # scope_saved='subjects' rendered in toast script
 
 
 # ---------------------------------------------------------------------------

@@ -10,9 +10,11 @@ Coverage (POST /settings/regions — htmx form, ≥1 macro-region required):
   1. Happy path with form-encoded region_ids → 200 + partial HTML.
   2. Saved Settings.regions matches submission (deduplicated).
   3. Other Settings fields preserved.
-  4. Empty selection → 422.
-  5. Unknown macro id (e.g. 99) → 422.
+  4. Empty selection → 200 + scope_error (v7ar).
+  5. Unknown macro id (e.g. 99) → 200 + scope_error (v7ar).
   6. Duplicates collapsed.
+  7. Persistence error → 200 + scope_error (v7ar).
+  8. Success → scope_saved=districts in HTML for toast trigger (v7ar).
 
 Coverage (POST /settings/recipients): unchanged JSON contract.
 """
@@ -39,11 +41,14 @@ from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 class FakeConfigSource:
     """Fake ConfigSource — implements ALL public methods including save() (ADR-023)."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, save_raises: Exception | None = None
+    ) -> None:
         self._settings = settings or Settings()
         self.current_calls: int = 0
         self.subscribe_calls: int = 0
         self.save_calls: list[Settings] = []
+        self._save_raises = save_raises
 
     def current(self) -> Settings:
         self.current_calls += 1
@@ -54,6 +59,8 @@ class FakeConfigSource:
         return object()
 
     def save(self, settings: Settings) -> None:
+        if self._save_raises is not None:
+            raise self._save_raises
         self._settings = settings
         self.save_calls.append(settings)
 
@@ -158,30 +165,53 @@ def test_post_regions_preserves_other_settings_fields() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_post_regions_empty_selection_422() -> None:
-    """POST /settings/regions with zero region_ids → 422."""
+def test_post_regions_empty_selection_returns_200_with_error() -> None:
+    """POST /settings/regions with zero region_ids → 200 + scope_error in partial (v7ar)."""
     app, _ = _make_app()
     with TestClient(app, raise_server_exceptions=False) as client:
         resp = client.post("/settings/regions", data={})
-    assert resp.status_code == 422
-    assert "At least one" in resp.text
+    assert resp.status_code == 200
+    assert 'id="scope-and-subjects"' in resp.text
+    assert "хотя бы один" in resp.text
 
 
-def test_post_regions_unknown_macro_422() -> None:
-    """POST /settings/regions with unknown macro id (e.g. 99) → 422."""
+def test_post_regions_unknown_macro_returns_200_with_error() -> None:
+    """POST /settings/regions with unknown macro id (e.g. 99) → 200 + scope_error (v7ar)."""
     app, _ = _make_app()
     with TestClient(app, raise_server_exceptions=False) as client:
         resp = client.post("/settings/regions", data={"region_ids": ["99"]})
-    assert resp.status_code == 422
-    assert "Unknown macro-region" in resp.text
+    assert resp.status_code == 200
+    assert 'id="scope-and-subjects"' in resp.text
+    assert "99" in resp.text
 
 
-def test_post_regions_zero_macro_422() -> None:
-    """POST /settings/regions with region_ids=0 → 422 (0 is not a valid macro)."""
+def test_post_regions_zero_macro_returns_200_with_error() -> None:
+    """POST /settings/regions with region_ids=0 → 200 + scope_error (v7ar)."""
     app, _ = _make_app()
     with TestClient(app, raise_server_exceptions=False) as client:
         resp = client.post("/settings/regions", data={"region_ids": ["0"]})
-    assert resp.status_code == 422
+    assert resp.status_code == 200
+    assert 'id="scope-and-subjects"' in resp.text
+
+
+def test_post_regions_persistence_error_returns_200_with_error() -> None:
+    """config_source.save() raises → 200 + scope_error in partial (v7ar)."""
+    fc = FakeConfigSource(save_raises=OSError("db locked"))
+    app, _ = _make_app(fc)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/settings/regions", data={"region_ids": ["1"]})
+    assert resp.status_code == 200
+    assert "db locked" in resp.text
+    assert 'id="scope-and-subjects"' in resp.text
+
+
+def test_post_regions_success_includes_scope_saved_districts() -> None:
+    """Successful POST /settings/regions → HTML contains scope_saved toast trigger (v7ar)."""
+    app, _ = _make_app()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.post("/settings/regions", data={"region_ids": ["1"]})
+    assert resp.status_code == 200
+    assert "districts" in resp.text  # scope_saved='districts' rendered in toast script
 
 
 # ---------------------------------------------------------------------------

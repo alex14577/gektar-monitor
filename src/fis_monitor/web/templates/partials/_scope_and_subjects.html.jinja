@@ -9,7 +9,7 @@
      available_subjects    — list[(site_id, name)] — full SUBJECT_TITLE_BY_ID
                              catalog (ADR-035: notify scope is region-independent).
      all_macro_regions     — list[(macro_id, title_nominative)] for chip render.
-     scope_error           — optional str shown above forms on validation 422.
+     scope_error           — optional str shown above forms on validation/persistence error.
    ======================================================================== #}
 <div id="scope-and-subjects">
 
@@ -89,6 +89,17 @@
       </button>
     </form>
   </section>
+
+  {% if scope_saved %}
+  <script>
+    (function () {
+      var label = '{{ scope_saved }}' === 'subjects' ? 'Субъекты сохранены' : 'Округа сохранены';
+      if (window.Monitor && window.Monitor.toast) {
+        window.Monitor.toast(label, { timeout: 3000 });
+      }
+    })();
+  </script>
+  {% endif %}
 
   <script>
     (function () {

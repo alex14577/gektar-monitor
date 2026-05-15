@@ -338,30 +338,60 @@ def post_regions(
         200 with _scope_and_subjects.html.jinja partial; htmx swaps the whole
         ``#scope-and-subjects`` container so the subject chips reflect the
         new macro selection immediately.
-        422 if the selection is empty or contains unknown macro ids.
+        On validation or persistence error: 200 with the same partial and
+        ``scope_error`` set so the inline error message is rendered.
     """
+    current = config_source.current()
+    scope_ctx = _scope_template_context(current)
+
     unknown = [rid for rid in region_ids if rid not in _VALID_MACRO_IDS]
     if unknown:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown macro-region ids: {unknown}. Allowed: {sorted(_VALID_MACRO_IDS)}",
+        return templates.TemplateResponse(
+            request,
+            "partials/_scope_and_subjects.html.jinja",
+            {
+                "settings": current,
+                **scope_ctx,
+                "scope_error": (
+                    f"Неизвестные id округов: {unknown}."
+                    f" Допустимые: {sorted(_VALID_MACRO_IDS)}"
+                ),
+            },
         )
     if not region_ids:
-        raise HTTPException(
-            status_code=422,
-            detail="At least one macro-region must be selected.",
+        return templates.TemplateResponse(
+            request,
+            "partials/_scope_and_subjects.html.jinja",
+            {
+                "settings": current,
+                **scope_ctx,
+                "scope_error": "Необходимо выбрать хотя бы один округ.",
+            },
         )
 
     # Deduplicate while preserving submission order.
     unique_regions = list(dict.fromkeys(region_ids))
-    current = config_source.current()
-
     new_settings = current.model_copy(update={"regions": unique_regions})
-    config_source.save(new_settings)
+    try:
+        config_source.save(new_settings)
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/_scope_and_subjects.html.jinja",
+            {
+                "settings": current,
+                **scope_ctx,
+                "scope_error": f"Ошибка сохранения: {exc}",
+            },
+        )
     return templates.TemplateResponse(
         request,
         "partials/_scope_and_subjects.html.jinja",
-        {"settings": new_settings, **_scope_template_context(new_settings)},
+        {
+            "settings": new_settings,
+            **_scope_template_context(new_settings),
+            "scope_saved": "districts",
+        },
     )
 
 
@@ -407,25 +437,48 @@ def post_subjects(
     Returns:
         200 with _scope_and_subjects.html.jinja partial; htmx swaps the
         ``#scope-and-subjects`` container.
-        422 if any id is not in the known catalog.
+        On validation or persistence error: 200 with the same partial and
+        ``scope_error`` set so the inline error message is rendered.
     """
+    current = config_source.current()
+    scope_ctx = _scope_template_context(current)
+
     valid_ids = frozenset(SUBJECT_TITLE_BY_ID)
     unknown = [sid for sid in rf_subjects if sid not in valid_ids]
     if unknown:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown subject ids (not in catalog): {unknown}",
+        return templates.TemplateResponse(
+            request,
+            "partials/_scope_and_subjects.html.jinja",
+            {
+                "settings": current,
+                **scope_ctx,
+                "scope_error": f"Неизвестные id субъектов (не в каталоге): {unknown}",
+            },
         )
 
     unique_subjects = list(dict.fromkeys(rf_subjects))
-    current = config_source.current()
     new_filters = current.filters.model_copy(update={"rf_subjects": unique_subjects})
     new_settings = current.model_copy(update={"filters": new_filters})
-    config_source.save(new_settings)
+    try:
+        config_source.save(new_settings)
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/_scope_and_subjects.html.jinja",
+            {
+                "settings": current,
+                **scope_ctx,
+                "scope_error": f"Ошибка сохранения: {exc}",
+            },
+        )
     return templates.TemplateResponse(
         request,
         "partials/_scope_and_subjects.html.jinja",
-        {"settings": new_settings, **_scope_template_context(new_settings)},
+        {
+            "settings": new_settings,
+            **_scope_template_context(new_settings),
+            "scope_saved": "subjects",
+        },
     )
 
 
