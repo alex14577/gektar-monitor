@@ -912,7 +912,8 @@ DEFAULT_TRACKED_FIELDS: tuple[TrackedField, ...] = (
     "area_sqm",
     "date_update",
     "is_active",
-    "list_presence",
+    # "list_presence" removed: forward-compat, not yet implemented
+    # (see diff._UNIMPLEMENTED_FIELDS). Regression: gektar_monitor-cr4.
 )
 
 

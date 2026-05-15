@@ -233,3 +233,22 @@ def test_result_elements_are_frozen(make_lot):
     assert len(result) == 1
     with pytest.raises((ValidationError, TypeError)):
         result[0].field = "area_sqm"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# 13. Invariant: DEFAULT_TRACKED_FIELDS must not overlap _UNIMPLEMENTED_FIELDS
+# ---------------------------------------------------------------------------
+def test_default_tracked_fields_disjoint_from_unimplemented() -> None:
+    """DEFAULT_TRACKED_FIELDS must NOT include any field from _UNIMPLEMENTED_FIELDS.
+
+    Regression: gektar_monitor-cr4 — 'list_presence' was in both sets,
+    causing NotImplementedError on every upsert → 0 lots in prod.
+    """
+    from fis_monitor.domain.diff import _UNIMPLEMENTED_FIELDS
+    from fis_monitor.domain.models import DEFAULT_TRACKED_FIELDS
+
+    overlap = set(DEFAULT_TRACKED_FIELDS) & _UNIMPLEMENTED_FIELDS
+    assert overlap == set(), (
+        f"DEFAULT_TRACKED_FIELDS overlaps with _UNIMPLEMENTED_FIELDS: {overlap}. "
+        f"Forward-compat fields must NOT be in defaults."
+    )
