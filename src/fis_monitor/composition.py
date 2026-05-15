@@ -57,6 +57,9 @@ from fis_monitor.infra.sqlite.repositories.lots import SqliteLotRepository
 from fis_monitor.infra.sqlite.repositories.notifications import (
     SqliteNotificationsRepository,
 )
+from fis_monitor.infra.sqlite.repositories.region_subscriptions import (
+    SqliteRegionSubscriptionRepository,
+)
 from fis_monitor.infra.sqlite.repositories.settings import SqliteSettingsRepository
 from fis_monitor.infra.sqlite.repositories.smtp_credentials import (
     SqliteSmtpCredentialsRepository,
@@ -218,7 +221,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     init_db(
         conn_provider,
         schema_sql=schema_sql,
-        latest_version=3,
+        latest_version=4,
         migration_runner=default_migration_runner(),
     )
 
@@ -232,6 +235,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     smtp_creds_repo = SqliteSmtpCredentialsRepository(
         conn_provider=conn_provider, clock=clock
     )
+    region_sub_repo = SqliteRegionSubscriptionRepository(conn_provider=conn_provider)
 
     # Build TorgiUrlBuilder from current settings (ADR-024).
     # base_url trailing slash is stripped by TargetConfig validator at construction;
@@ -282,6 +286,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         notif_repo=notif_repo,
         cycles_repo=cycles_repo,
         smtp_creds_repo=smtp_creds_repo,
+        region_sub_repo=region_sub_repo,
         http_client=http_client,
         list_parser=list_parser,
         detail_parser=detail_parser,

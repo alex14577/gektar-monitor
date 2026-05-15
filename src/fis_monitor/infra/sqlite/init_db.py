@@ -37,7 +37,7 @@ def init_db(
     provider: ConnectionProvider,
     *,
     schema_sql: str,
-    latest_version: int = 3,
+    latest_version: int = 4,
     migration_runner: MigrationRunner | None = None,
 ) -> None:
     """Initialise or verify the SQLite database schema.

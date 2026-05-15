@@ -52,7 +52,7 @@ from fis_monitor.domain.models import (
     NotifyResult,
     OnboardingState,
     ParsedDetail,
-    ParsedListRow,
+    ParsedListPage,
     ProviderSuggestion,
     ResolvedSmtpEndpoint,
     Settings,
@@ -92,6 +92,7 @@ __all__ = [
     "MigrationRunner",
     "NotificationsRepository",
     "Notifier",
+    "RegionSubscriptionRepository",
     "SettingsRepository",
     "SmtpCredentialsRepository",
     "SmtpHostPolicy",
@@ -328,14 +329,42 @@ class LotRepository(Protocol):
         """
         ...
 
-    def count_active(self) -> int:
-        """Return the total number of active lots (``is_active = 1``).
+    def count_active(self, region_id: int | None = None) -> int:
+        """Return the number of active lots (``is_active = 1``).
 
-        Used by lifespan auto-trigger: if ``count_active() == 0`` on startup
-        a backfill is started automatically to populate the initial catalogue.
-        Implementations MUST be a single ``SELECT COUNT(*) FROM lots WHERE
-        is_active = 1`` with no locking — read-only, no BEGIN IMMEDIATE.
+        When ``region_id`` is given, filters ``WHERE region_id = ?`` additionally.
+        Used by lifespan auto-trigger (``region_id=None``) and by
+        ``BackfillService.maybe_start`` (``region_id=<specific>``).
+        Implementations MUST be a single ``SELECT COUNT(*)`` — read-only, no
+        BEGIN IMMEDIATE.
         """
+        ...
+
+
+class RegionSubscriptionRepository(Protocol):
+    """Stores the timestamp when a region was first subscribed (ADR-039).
+
+    Used by ``notifier_dispatcher`` to suppress notifications for lots older
+    than the subscription cutoff, and by ``WatchdogConfigSource`` to record
+    new regions on config reload.
+    """
+
+    def get_subscribed_at(self, region_id: int) -> datetime | None:
+        """Return the ``subscribed_at`` timestamp, or ``None`` if not present."""
+        ...
+
+    def set_if_absent(self, region_id: int, subscribed_at: datetime) -> bool:
+        """Insert ``(region_id, subscribed_at)`` only if no row exists yet.
+
+        Idempotent: a second call with the same ``region_id`` is a no-op.
+
+        Returns:
+            ``True`` if a new row was inserted, ``False`` if it already existed.
+        """
+        ...
+
+    def delete(self, region_id: int) -> None:
+        """Remove the subscription record for ``region_id`` (idempotent)."""
         ...
 
 
@@ -552,7 +581,7 @@ class HttpClient(Protocol):
 class ListParser(Protocol):
     """Parse the lot-list HTML page into structured rows."""
 
-    def parse(self, html: str) -> list[ParsedListRow]: ...
+    def parse(self, html: str) -> ParsedListPage: ...
 
 
 class DetailParser(Protocol):

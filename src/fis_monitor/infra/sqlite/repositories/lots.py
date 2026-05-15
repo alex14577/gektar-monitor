@@ -539,14 +539,20 @@ class SqliteLotRepository:
     # count_active
     # ------------------------------------------------------------------
 
-    def count_active(self) -> int:
-        """Return the total number of active lots.
+    def count_active(self, region_id: int | None = None) -> int:
+        """Return the number of active lots.
 
+        When ``region_id`` is given, filters by ``lots.region_id`` too.
         Single read-only ``SELECT COUNT(*)`` — no BEGIN IMMEDIATE needed.
-        Used by lifespan auto-trigger to decide whether to start a backfill.
         """
         conn = self._conn_provider.get()
-        cur = conn.execute("SELECT COUNT(*) FROM lots WHERE is_active = 1")
+        if region_id is None:
+            cur = conn.execute("SELECT COUNT(*) FROM lots WHERE is_active = 1")
+        else:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM lots WHERE is_active = 1 AND region_id = ?",
+                (region_id,),
+            )
         row = cur.fetchone()
         cur.close()
         return int(row[0]) if row else 0

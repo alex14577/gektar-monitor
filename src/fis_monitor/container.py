@@ -38,6 +38,7 @@ from fis_monitor.domain.interfaces import (
     LoginSession,
     LotRepository,
     NotificationsRepository,
+    RegionSubscriptionRepository,
     SettingsRepository,
     SmtpCredentialsRepository,
     SmtpHostPolicy,
@@ -144,6 +145,10 @@ class Infra:
 
     smtp_creds_repo: SmtpCredentialsRepository
     """Read/write SMTP credentials (encrypted, ADR-020: stored in state.db)."""
+
+    region_sub_repo: RegionSubscriptionRepository
+    """Read/write per-region subscription timestamps (ADR-039).
+    Used by notifier_dispatcher to suppress lots older than subscribed_at."""
 
     # ── Layer 2: external-system adapters ──────────────────────────────────
     http_client: HttpClient

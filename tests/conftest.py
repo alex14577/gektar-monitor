@@ -94,7 +94,7 @@ def tmp_db(
     """
     provider = ConnectionProvider(db_path=tmp_db_path)
     try:
-        init_db(provider, schema_sql=schema_sql)
+        init_db(provider, schema_sql=schema_sql, latest_version=4)
         yield provider
     finally:
         provider.close_all()

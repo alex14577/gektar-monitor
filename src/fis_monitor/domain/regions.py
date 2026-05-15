@@ -31,6 +31,7 @@ __all__ = [
     "SUBJECT_TITLE_BY_ID",
     "id_to_slug",
     "ids_to_slugs",
+    "region_name",
     "slug_to_id",
     "slugs_to_ids",
     "subjects_for_macros",
@@ -73,6 +74,14 @@ REGION_TITLE_NOMINATIVE_BY_SLUG: Mapping[str, str] = MappingProxyType(
         "arctic": "Арктическая зона",
     }
 )
+
+def region_name(region_id: int) -> str | None:
+    """Return the nominative display name for a macro-region ID, or None if unknown."""
+    slug = id_to_slug(region_id)
+    if slug is None:
+        return None
+    return REGION_TITLE_NOMINATIVE_BY_SLUG.get(slug)
+
 
 def slug_to_id(slug: str) -> int:
     """Convert a region slug to its domain integer ID.

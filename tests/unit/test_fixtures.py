@@ -18,7 +18,7 @@ def test_tmp_db_yields_connection_provider(tmp_db: ConnectionProvider) -> None:
 def test_tmp_db_applies_schema_user_version(tmp_db: ConnectionProvider) -> None:
     conn = tmp_db.get()
     user_version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert user_version == 3  # bumped 2→3 (bd ljp): smtp_from_name column added
+    assert user_version == 4  # bumped 3→4 (nvx2): region_subscriptions + lots.region_id
 
 
 def test_tmp_db_uses_wal_journal_mode(tmp_db: ConnectionProvider) -> None:

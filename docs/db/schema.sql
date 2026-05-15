@@ -32,12 +32,15 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
 -- user_version bumped 2→3 (bd ljp): добавлена колонка smtp_credentials.smtp_from_name
 --   (RFC 5322 display name). NULL = голый email. MigrationRunner v2→v3.
+-- user_version bumped 3→4 (nvx2): новая таблица region_subscriptions(region_id PK,
+--   subscribed_at) + колонка lots.region_id INTEGER + индекс idx_lots_region_id_active.
+--   ADR-039: subscribed_at per-region cutoff. MigrationRunner v3→v4.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
@@ -57,6 +60,7 @@ CREATE TABLE IF NOT EXISTS lots (
     cadastral_no         TEXT    NOT NULL,
     area_sqm             INTEGER,
     region               TEXT    NOT NULL,
+    region_id            INTEGER,                    -- macro-region FK (1=ДФО, 2=Арктика); ADR-039
     municipality         TEXT,
     land_category        TEXT,
     permitted_use        TEXT,                       -- ВРИ
@@ -93,6 +97,7 @@ CREATE TABLE IF NOT EXISTS lots (
 
 CREATE INDEX IF NOT EXISTS idx_lots_cadastral_no ON lots(cadastral_no);
 CREATE INDEX IF NOT EXISTS idx_lots_region       ON lots(region);
+CREATE INDEX IF NOT EXISTS idx_lots_region_id_active ON lots(region_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_lots_status       ON lots(status);
 CREATE INDEX IF NOT EXISTS idx_lots_date_create  ON lots(date_create);
 CREATE INDEX IF NOT EXISTS idx_lots_municipality ON lots(municipality);
@@ -291,6 +296,14 @@ CREATE INDEX IF NOT EXISTS idx_notifications_pending  ON notifications(last_atte
     WHERE status = 'pending';
 -- Retention: permanent_fail старше 90 дней удаляются в maintenance
 -- (chunked DELETE, см. architecture.md §7.2.bis).
+
+-- Per-region subscription timestamps (ADR-039).
+-- Set by WatchdogConfigSource when a new region appears in config.json.
+-- Read by notifier_dispatcher to suppress lots older than subscribed_at.
+CREATE TABLE IF NOT EXISTS region_subscriptions (
+    region_id     INTEGER PRIMARY KEY,
+    subscribed_at TEXT    NOT NULL          -- ISO-8601 UTC timestamp
+);
 
 -- SMTP-логин/пароль/host/port (decisions-log → «SMTP-пароль хранится в state.db», ADR-020).
 -- ОДНА строка: id=1 enforced CHECK-ом.

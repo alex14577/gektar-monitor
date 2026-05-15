@@ -284,8 +284,8 @@ class TestDefaultMigrationRunnerFactory:
         runner = default_migration_runner()
         migrations = list(runner.list_migrations())
 
-        # v1→v2 and v2→v3 (smtp_from_name column, bd ljp) are both registered
-        assert len(migrations) == 2
+        # v1→v2, v2→v3 (smtp_from_name, bd ljp), v3→v4 (region_subscriptions, nvx2)
+        assert len(migrations) == 3
         m1 = migrations[0]
         assert m1.from_version == 1
         assert m1.to_version == 2

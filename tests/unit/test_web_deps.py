@@ -54,6 +54,7 @@ def mock_container() -> Container:
             notif_repo=Mock(),
             cycles_repo=Mock(),
             smtp_creds_repo=Mock(),
+            region_sub_repo=Mock(),
             http_client=Mock(),
             list_parser=Mock(),
             detail_parser=Mock(),
