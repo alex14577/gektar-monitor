@@ -29,38 +29,6 @@
   </div>
 
   <div class="sidebar__group">
-    <p class="sidebar__h">Площадь, га</p>
-    <input class="range" type="range" name="area_min" min="0" max="100" step="1"
-           value="{{ filters.area_min }}" aria-label="Минимум площади" />
-    <input class="range" type="range" name="area_max" min="0" max="100" step="1"
-           value="{{ filters.area_max }}" aria-label="Максимум площади" />
-    <div style="display:flex; justify-content:space-between; font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted);">
-      <span>{{ filters.area_min_label }}</span>
-      <span>{{ filters.area_max_label }}</span>
-    </div>
-  </div>
-
-  <div class="sidebar__group">
-    <label class="check">
-      <input type="checkbox" name="only_new"      {% if filters.only_new %}checked{% endif %} />
-      <span class="check__label">Только новые с визита</span>
-    </label>
-    <label class="check">
-      <input type="checkbox" name="only_stars"     {% if filters.only_stars %}checked{% endif %} />
-      <span class="check__label">Только избранные ★</span>
-    </label>
-  </div>
-
-  <div class="sidebar__group">
-    <p class="sidebar__h">Плотность</p>
-    <div class="density-toggle" role="group" aria-label="Плотность ленты">
-      <button type="button" data-density-option="auto"    aria-pressed="true">авто</button>
-      <button type="button" data-density-option="compact" aria-pressed="false">плотно</button>
-      <button type="button" data-density-option="poster"  aria-pressed="false">постер</button>
-    </div>
-  </div>
-
-  <div class="sidebar__group">
     <button class="btn btn--ghost btn--sm btn--full" type="button"
             hx-post="/filters/clear" hx-target="body">
       Очистить фильтры

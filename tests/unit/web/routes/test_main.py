@@ -395,15 +395,17 @@ def test_dnd_inactive_does_not_call_until() -> None:
 
 
 def test_view_filters_cookie_parsed_and_applied() -> None:
-    """AC#2: a valid view_filters cookie populates filters.* + filters_active."""
+    """AC#2: a valid view_filters cookie populates filters.* + filters_active.
+
+    Sidebar UI surfaces only the subject filter; area/only_new/only_stars
+    are still honoured at the backend layer but no longer have UI affordances.
+    """
     payload = ViewFilters(subjects=["Москва", "Татарстан"], area_min=10, only_new=True)
     cookie = serialize(payload)
     app, _, _ = _make_app()
     with TestClient(app, raise_server_exceptions=True) as client:
         resp = client.get("/", cookies={"view_filters": cookie})
     html = resp.text
-    # only_new checkbox should be rendered with `checked`
-    assert 'name="only_new"' in html
     # The subject count appears in the sidebar header («2 выбрано»)
     assert "2 выбран" in html
 
