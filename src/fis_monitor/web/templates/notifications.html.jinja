@@ -1,0 +1,92 @@
+{# ========================================================================
+   notifications.html.jinja — Recent notifications history page.
+
+   Context:
+     rows  — list of dicts:
+               lot_id, channel, status, attempt_no, timestamp, recipient_masked
+     limit — int, current limit query param
+
+   PII: recipient is never shown in plain. recipient_masked is pre-computed
+   in the route handler (a***@example.com for email, 'local' for browser).
+   ======================================================================== #}
+{% extends "base.html.jinja" %}
+
+{% block main %}
+<div class="settings-page" style="max-width: 900px; margin: 0 auto; padding: 24px 16px;">
+
+  <h1 style="margin: 0 0 24px; font-size: 1.5rem; font-weight: 600;">История уведомлений</h1>
+
+  {% if rows %}
+    <div style="overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+        <thead>
+          <tr style="border-bottom: 2px solid var(--line); text-align: left;">
+            <th style="padding: 8px 12px; font-weight: 600; color: var(--ink-2);">Время</th>
+            <th style="padding: 8px 12px; font-weight: 600; color: var(--ink-2);">Лот</th>
+            <th style="padding: 8px 12px; font-weight: 600; color: var(--ink-2);">Канал</th>
+            <th style="padding: 8px 12px; font-weight: 600; color: var(--ink-2);">Получатель</th>
+            <th style="padding: 8px 12px; font-weight: 600; color: var(--ink-2);">Статус</th>
+            <th style="padding: 8px 12px; font-weight: 600; color: var(--ink-2); text-align: right;">Попытка</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr style="border-bottom: 1px solid var(--line);">
+            <td style="padding: 10px 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap;">
+              {{ row.timestamp }}
+            </td>
+            <td style="padding: 10px 12px;">
+              {{ row.lot_id }}
+            </td>
+            <td style="padding: 10px 12px; color: var(--ink-2);">
+              {{ row.channel }}
+            </td>
+            <td style="padding: 10px 12px; color: var(--ink-2); font-family: 'JetBrains Mono', monospace; font-size: 0.8125rem;">
+              {{ row.recipient_masked }}
+            </td>
+            <td style="padding: 10px 12px;">
+              {% if row.status == "sent" %}
+                <span style="display: inline-flex; align-items: center; gap: 4px; color: #16a34a; font-weight: 500;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                  отправлено
+                </span>
+              {% elif row.status == "permanent_fail" %}
+                <span style="display: inline-flex; align-items: center; gap: 4px; color: #dc2626; font-weight: 500;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  ошибка
+                </span>
+              {% else %}
+                <span style="display: inline-flex; align-items: center; gap: 4px; color: #d97706; font-weight: 500;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12" y2="16"/></svg>
+                  ожидание
+                </span>
+              {% endif %}
+            </td>
+            <td style="padding: 10px 12px; text-align: right; color: var(--ink-2);">
+              {{ row.attempt_no }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin: 16px 0 0; font-size: 0.8125rem; color: var(--muted);">
+      Показано последних {{ rows | length }} записей (лимит: {{ limit }}).
+    </p>
+
+  {% else %}
+    <div style="text-align: center; padding: 64px 24px;">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--muted); margin: 0 auto 16px; display: block;" aria-hidden="true">
+        <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+        <path d="M10 21a2 2 0 0 0 4 0"/>
+      </svg>
+      <p style="margin: 0; color: var(--ink-2); font-size: 1rem;">Уведомлений пока нет</p>
+      <p style="margin: 6px 0 0; color: var(--muted); font-size: 0.875rem;">
+        Уведомления появятся после первого найденного лота.
+      </p>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}

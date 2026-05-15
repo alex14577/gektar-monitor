@@ -1,19 +1,31 @@
 """FastAPI APIRouter for notification endpoints.
 
 Endpoints:
-  GET /notifications — list recent notifications via NotificationsRepository.list_recent()
+  GET /notifications      — HTML page listing recent notifications.
+  GET /notifications.json — JSON API (same data, machine-readable).
 
-DI: all dependencies injected via Depends(); routes decoupled from Container and
-testable via app.dependency_overrides.
+PII policy: ``recipient`` is never rendered in plain text.  The HTML page
+shows a masked form (``a***@example.com`` for email, ``local`` as-is for
+browser/heartbeat channels).  The JSON endpoint intentionally preserves the
+full ``recipient`` field for trusted internal consumers; it is not linked from
+any public-facing navigation.
+
+DI: all dependencies injected via Depends(); routes decoupled from Container
+and testable via app.dependency_overrides.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+import re
+from types import SimpleNamespace
+
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 
 from fis_monitor.domain.interfaces import NotificationsRepository
-from fis_monitor.web.deps import get_notifications_repo
+from fis_monitor.domain.models import NotificationRecord, Settings
+from fis_monitor.web.deps import get_config_source, get_notifications_repo, get_templates
 
 # ---------------------------------------------------------------------------
 # Router
@@ -29,16 +41,97 @@ _LIMIT_DEFAULT = 100
 _LIMIT_MAX = 500
 
 # ---------------------------------------------------------------------------
+# PII helpers
+# ---------------------------------------------------------------------------
+
+_EMAIL_RE = re.compile(r"^([^@]{1,2})[^@]*(@.+)$")
+
+
+def _mask_recipient(recipient: str) -> str:
+    """Return a masked representation of *recipient* safe for display.
+
+    Rules:
+    - ``local`` (browser/heartbeat sentinel) → returned as-is.
+    - Email address → ``a***@example.com`` (first 1-2 chars + *** + domain).
+    - Anything else → ``***`` (opaque fallback).
+    """
+    if recipient == "local":
+        return "local"
+    m = _EMAIL_RE.match(recipient)
+    if m:
+        return f"{m.group(1)}***{m.group(2)}"
+    return "***"
+
+
+def _display_timestamp(record: NotificationRecord) -> str:
+    """Return the most informative available timestamp as ISO string.
+
+    Priority: sent_at → last_attempt_at → "—".
+    """
+    ts = record.sent_at or record.last_attempt_at
+    if ts is None:
+        return "—"
+    return ts.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
-def list_notifications(
+@router.get("", response_class=HTMLResponse, include_in_schema=False)
+def notifications_page(
+    request: Request,
+    limit: int = Query(default=_LIMIT_DEFAULT, ge=1, le=_LIMIT_MAX),
+    repo: NotificationsRepository = Depends(get_notifications_repo),
+    config_source: object = Depends(get_config_source),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """Render the notifications history page."""
+    settings: Settings = config_source.current()  # type: ignore[attr-defined]
+    records = repo.list_recent(limit)
+    rows = [
+        {
+            "lot_id": r.lot_id,
+            "channel": r.channel,
+            "status": r.status,
+            "attempt_no": r.attempt_no,
+            "timestamp": _display_timestamp(r),
+            "recipient_masked": _mask_recipient(r.recipient),
+        }
+        for r in records
+    ]
+    return templates.TemplateResponse(
+        request,
+        "notifications.html.jinja",
+        {
+            "rows": rows,
+            "limit": limit,
+            # Stubs required by base.html.jinja header/partial rendering.
+            "settings": settings,
+            "dnd": SimpleNamespace(active=False, until_hhmm=""),
+            "session": SimpleNamespace(expired=False),
+            "monitor": SimpleNamespace(
+                state="active",
+                expires_at_hhmm="",
+                interval_minutes=settings.interval_minutes,
+                next_cycle_mmss="—",
+                last_new_human="—",
+            ),
+        },
+    )
+
+
+@router.get(".json")
+def list_notifications_json(
     limit: int = Query(default=_LIMIT_DEFAULT, ge=1, le=_LIMIT_MAX),
     repo: NotificationsRepository = Depends(get_notifications_repo),
 ) -> JSONResponse:
-    """Return the most recent *limit* notification records."""
+    """Return the most recent *limit* notification records as JSON.
+
+    Internal/machine-readable endpoint.  Full ``recipient`` field is included
+    intentionally (trusted consumers only — not linked from the UI).
+    """
     records = repo.list_recent(limit)
     return JSONResponse(
         content=[r.model_dump(mode="json") for r in records],
