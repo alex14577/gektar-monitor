@@ -47,9 +47,10 @@ from watchdog.observers import Observer
 
 from fis_monitor.domain.models import Settings
 from fis_monitor.infra.sse.subscriptions import ThreadConfigSubscription
+from fis_monitor.utils.log import log_audit
 
 if TYPE_CHECKING:
-    from fis_monitor.domain.interfaces import Clock
+    from fis_monitor.domain.interfaces import Clock, RegionSubscriptionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +158,12 @@ class WatchdogConfigSource:
         path: Path,
         *,
         clock: Clock,
+        region_subs_repo: RegionSubscriptionRepository | None = None,
         parser: Callable[[bytes], Settings] = _default_parser,
     ) -> None:
         self._path = path
         self._clock = clock
+        self._region_subs_repo = region_subs_repo
         self._parser = parser
 
         # Bootstrap: use defaults if file absent.
@@ -255,6 +258,7 @@ class WatchdogConfigSource:
         tmp_path = self._path.parent / f"{self._path.name}.tmp.{secrets.token_hex(4)}"
         try:
             with self._lock:
+                old_current = self._current
                 tmp_path.write_bytes(raw)
                 os.replace(tmp_path, self._path)
                 # Optimistic update: prevents the self-triggered watchdog event
@@ -265,6 +269,8 @@ class WatchdogConfigSource:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(tmp_path)
             raise
+
+        self._apply_region_diff(old_current, settings)
 
     # ------------------------------------------------------------------
     # Shutdown
@@ -286,6 +292,38 @@ class WatchdogConfigSource:
         self._observer.join(timeout=5.0)
         if self._observer.is_alive():
             logger.warning("config_source: Observer failed to stop within 5 s")
+
+    # ------------------------------------------------------------------
+    # Internal — region subscription diff (ADR-039)
+    # ------------------------------------------------------------------
+
+    def _apply_region_diff(self, old_settings: Settings, new_settings: Settings) -> None:
+        """Update region_subscriptions based on the diff old→new regions.
+
+        Net-new regions get set_if_absent(region_id, now).
+        Removed regions get delete(region_id) so re-add resets subscribed_at.
+        No-op if region_subs_repo is not injected.
+        """
+        if self._region_subs_repo is None:
+            return
+
+        old_regions = set(old_settings.regions)
+        new_regions = set(new_settings.regions)
+
+        now = self._clock.now()
+        for region_id in sorted(new_regions - old_regions):
+            self._region_subs_repo.set_if_absent(region_id, now)
+            log_audit(
+                "subscribed_at.migration_applied",
+                region_id=region_id,
+                subscribed_at=now.isoformat(),
+            )
+
+        for region_id in sorted(old_regions - new_regions):
+            self._region_subs_repo.delete(region_id)
+            logger.debug(
+                "config_source: region %d removed from subscription tracking", region_id
+            )
 
     # ------------------------------------------------------------------
     # Internal — env overrides
@@ -443,6 +481,9 @@ class WatchdogConfigSource:
         # Skip callback delivery if Settings identical (Settings is frozen/comparable).
         if new_settings == old_current:
             return
+
+        # --- Region subscription diff (ADR-039) ---
+        self._apply_region_diff(old_current, new_settings)
 
         # Deliver to each subscriber in isolation (one crash must not drop others).
         for sub in subscribers_snapshot:

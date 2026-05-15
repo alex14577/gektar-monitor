@@ -282,6 +282,7 @@ def _build_smoke_container(
         notif_repo=unused,
         cycles_repo=unused,
         smtp_creds_repo=unused,
+        region_sub_repo=unused,
         http_client=unused,
         list_parser=unused,
         detail_parser=unused,
