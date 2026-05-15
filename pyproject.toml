@@ -67,6 +67,12 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+# RUF001/RUF002/RUF003 flag Cyrillic vs Latin look-alike characters.  This
+# project's UI / domain copy is Russian — strings, docstrings and comments
+# legitimately contain Cyrillic letters that overlap with the Latin alphabet
+# (е, с, В, Х, К, ...).  Globally ignore the family rather than littering the
+# codebase with per-line noqa directives.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's Depends/Query/Path/Body/Header/Cookie/File/Form are idiomatic in

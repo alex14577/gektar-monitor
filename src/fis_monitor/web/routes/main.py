@@ -1,34 +1,67 @@
 """GET / — главный экран после завершённого онбординга.
 
 SRP: этот роут только компонует контекст из зависимостей и рендерит
-feed.html.jinja.  Никакой бизнес-логики здесь нет.
+feed.html.jinja.  Никакой бизнес-логики здесь нет — каждая «фича»
+(DnD-статус, фильтры из cookie, catch-up банер, archive-счётчик) живёт в
+своём сервисе и проброшена через ``Depends``.
 
-DIP: всё через Depends — get_config_source, get_session_probe, get_templates.
+DIP: всё через Depends — get_dnd_service, get_catchup_dismiss,
+get_view_filters_service, get_user_state_repo, get_clock и т.д.
 Container в роуте не виден.
 
-MVP-stub: lot-feed и health деривация — отдельные bd-таски.
-Реальный LotQueryService.feed_snapshot() и HealthService подключатся
-позже без изменения этого модуля (OCP).
+MVP-stub, переезжающие в follow-up bd:
+  * ``zones.hot`` / ``zones.today`` — заполняются когда LotUserDTO ↔ template-
+    маппинг будет полным (партиал ``_lot_poster.html.jinja`` сейчас требует
+    кучу полей которых на DTO нет: ``temp``, ``district``, ``url_pkk``,
+    ``coords_decimal`` …).  Отдельная bd на это.
+  * ``last_cycle`` / ``health`` — отдельная задача (зависит от CyclesRepository
+    + HealthService).
+  * ``catchup.new_count`` — текущий MVP-показатель: число активных лотов в
+    БД (``LotRepository.count_active``).  Точный «сколько появилось с момента
+    последнего визита» = отдельный bd когда LotRepository обзаведётся
+    ``count_first_seen_since(at)``.
+  * ``archive_count`` — нужен ``UserStateRepository.count_archived()``,
+    отдельный bd.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from fis_monitor.domain.interfaces import Clock, LotRepository, UserStateRepository
 from fis_monitor.domain.models import SessionStatus, Settings
+from fis_monitor.services.catchup_dismiss import CatchupDismissService
+from fis_monitor.services.dnd import DndService
 from fis_monitor.services.login import LoginService
+from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
 from fis_monitor.web.deps import (
+    get_catchup_dismiss,
+    get_clock,
     get_config_source,
+    get_dnd_service,
     get_login,
+    get_lot_repo,
     get_session_probe,
     get_templates,
+    get_user_state_repo,
+    get_view_filters_service,
 )
 
 router = APIRouter(prefix="", tags=["main"])
+
+# Cookie key produced by ``ViewFiltersService.serialize()`` — kept in sync with
+# the constant used by the /filters/* routes.
+_VIEW_FILTERS_COOKIE = "view_filters"
+
+
+# ---------------------------------------------------------------------------
+# Context builders — one helper per template slice (high cohesion)
+# ---------------------------------------------------------------------------
 
 
 def _build_session_context(status: SessionStatus) -> SimpleNamespace:
@@ -59,12 +92,133 @@ def _build_monitor_context(settings: Settings) -> SimpleNamespace:
     )
 
 
+def _build_dnd_context(dnd_svc: DndService, now: datetime) -> SimpleNamespace:
+    """Render DnD state into template-friendly fields.
+
+    ``until_hhmm`` is the local-time HH:MM string the user sees in the header.
+    When DnD is off, ``until_hhmm`` is empty so the template's ``{% if %}``
+    guards keep the header clean.
+    """
+    active = dnd_svc.is_active(now)
+    until = dnd_svc.until(now) if active else None
+    return SimpleNamespace(
+        active=active,
+        until_hhmm=until.strftime("%H:%M") if until is not None else "",
+    )
+
+
+def _build_filters_context(filters: ViewFilters) -> SimpleNamespace:
+    """Map ``ViewFilters`` onto the field names the sidebar template expects.
+
+    ``area_min`` / ``area_max`` are ``None`` for "no restriction" in the
+    domain model; the template binds them straight to ``<input value=...>``
+    so we render them as empty strings rather than ``None``.  The ``_label``
+    fields are the human-readable echo shown above the range inputs.
+    """
+    return SimpleNamespace(
+        subjects=filters.subjects,
+        area_min=filters.area_min if filters.area_min is not None else "",
+        area_max=filters.area_max if filters.area_max is not None else "",
+        area_min_label=str(filters.area_min) if filters.area_min is not None else "0",
+        area_max_label=str(filters.area_max) if filters.area_max is not None else "∞",
+        only_new=filters.only_new,
+        only_stars=filters.only_stars,
+    )
+
+
+def _filters_are_active(filters: ViewFilters) -> bool:
+    """Any non-default selection means the user has narrowed the feed."""
+    return bool(
+        filters.subjects
+        or filters.area_min is not None
+        or filters.area_max is not None
+        or filters.only_new
+        or filters.only_stars
+    )
+
+
+def _format_last_visit_human(last_visit: datetime, now: datetime) -> str:
+    """Render ``last_visit`` as «N ч назад» / «N мин назад» for the catch-up banner.
+
+    Coarse-grained on purpose: we never show seconds, and we clamp the lower
+    bound to «только что» for negative or sub-minute deltas (caused by clock
+    skew between server and client, which is irrelevant at this granularity).
+
+    Tz handling: if exactly one of the two datetimes is naive, strip tzinfo
+    from the aware one so subtraction works in both directions.  Production
+    invariant is "Clock returns UTC-aware, DB stores UTC-aware ISO", so this
+    guard exists for symmetry / defensive parity, not as a hot path.
+    """
+    if last_visit.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    elif now.tzinfo is None and last_visit.tzinfo is not None:
+        last_visit = last_visit.replace(tzinfo=None)
+    delta = now - last_visit
+    minutes = int(delta.total_seconds() // 60)
+    if minutes <= 1:
+        return "только что"
+    if minutes < 60:
+        return f"{minutes} мин назад"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} ч назад"
+    days = hours // 24
+    return f"{days} дн назад"
+
+
+def _build_catchup_context(
+    *,
+    is_dismissed: bool,
+    last_visit: datetime | None,
+    new_count: int,
+    now: datetime,
+) -> SimpleNamespace | None:
+    """Return the catch-up banner context, or ``None`` when it must stay hidden.
+
+    Hidden when the user has dismissed the banner for this window, has never
+    visited the dashboard before (fresh install), or has nothing new to show.
+    """
+    if is_dismissed or last_visit is None or new_count <= 0:
+        return None
+    return SimpleNamespace(
+        new_count=new_count,
+        last_visit_human=_format_last_visit_human(last_visit, now),
+        detail=None,
+    )
+
+
+def _build_scope_context(settings: Settings) -> SimpleNamespace:
+    """Derive sidebar scope chips from configured regions.
+
+    ``macro_regions``: the configured region codes (rendered as chip labels
+    by the template).  ``subjects_count``: a count of subjects the user can
+    pick from — proxied by configured-region count until the subject catalog
+    is wired (separate bd).
+    """
+    regions = list(settings.regions)
+    return SimpleNamespace(
+        macro_regions=regions,
+        subjects_count=len(regions),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Route handler
+# ---------------------------------------------------------------------------
+
+
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def feed_page(
     request: Request,
     config_source: object = Depends(get_config_source),
     session_probe: object = Depends(get_session_probe),
     login: LoginService = Depends(get_login),
+    dnd_svc: DndService = Depends(get_dnd_service),
+    catchup_svc: CatchupDismissService = Depends(get_catchup_dismiss),
+    filters_svc: ViewFiltersService = Depends(get_view_filters_service),
+    user_state_repo: UserStateRepository = Depends(get_user_state_repo),
+    lot_repo: LotRepository = Depends(get_lot_repo),
+    clock: Clock = Depends(get_clock),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
     """Render the main feed page (state=COMPLETED guaranteed by middleware).
@@ -72,18 +226,17 @@ async def feed_page(
     If the request reached this handler, OnboardingGateMiddleware has already
     confirmed that onboarding is COMPLETED — no duplicate gate check needed.
 
-    Context variables marked «MVP-stub» will be replaced by real service calls
-    in future bd-tasks (LotQueryService, HealthService, DndService).
+    Wires DnD-status, view-filters cookie, catch-up banner, and scope chips;
+    feed zones remain empty until the LotUserDTO ↔ template field mapping is
+    completed (separate follow-up bd — see module docstring).
     """
     settings: Settings = config_source.current()  # type: ignore[attr-defined]
+    now = clock.now()
+
+    # ── Session state ───────────────────────────────────────────────────
     # SessionProbe.check() in production graph is currently
     # _NotImplementedSessionProbe (bd a4t.8 — HttpSessionProbe deferred).
     # Defensive fallback: NotImplementedError → consult LoginService.
-    # If the user has just completed a successful headed login in this process,
-    # LoginService.status().last_outcome.success is True — treat session as
-    # ACTIVE so the "Сессия истекла" modal disappears after the post-login
-    # window.location.reload() in auth.js. Otherwise default to EXPIRED so a
-    # fresh post-onboarding instance with no cookies surfaces the login CTA.
     try:
         raw_status: SessionStatus = session_probe.check()  # type: ignore[attr-defined]
     except NotImplementedError:
@@ -94,14 +247,29 @@ async def feed_page(
             else SessionStatus.EXPIRED
         )
 
-    session = _build_session_context(raw_status)
-    monitor = _build_monitor_context(settings)
+    # ── View filters (cookie-persisted, no DB) ──────────────────────────
+    cookie_value = request.cookies.get(_VIEW_FILTERS_COOKIE, "")
+    parsed_filters = filters_svc.deserialize(cookie_value) or ViewFilters()
 
+    # ── Catch-up banner ─────────────────────────────────────────────────
+    # MVP heuristic for ``new_count``: number of currently active lots.  The
+    # exact "new since last visit" requires a per-timestamp count query on the
+    # lots table — separate bd (see module docstring).
+    last_visit = user_state_repo.last_visit()
+    active_count = lot_repo.count_active()
+    catchup_ctx = _build_catchup_context(
+        is_dismissed=catchup_svc.is_dismissed(now),
+        last_visit=last_visit,
+        new_count=active_count,
+        now=now,
+    )
+
+    # ── Assemble template context ───────────────────────────────────────
     ctx = {
         "request": request,
         "settings": settings,
-        "session": session,
-        "monitor": monitor,
+        "session": _build_session_context(raw_status),
+        "monitor": _build_monitor_context(settings),
         # MVP-stub: lot-feed query — separate bd
         "last_cycle": SimpleNamespace(
             error=False,
@@ -112,31 +280,18 @@ async def feed_page(
         # MVP-stub: health derivation — separate bd
         "health": SimpleNamespace(
             last_cycle_human="—",
-            total_lots=0,
+            total_lots=active_count,
             last_new_human="—",
         ),
-        # MVP-stub: feed zones — separate bd (LotQueryService.feed_snapshot())
+        # MVP-stub: feed zones — gated on LotUserDTO ↔ template mapping bd
         "zones": SimpleNamespace(hot=[], today=[]),
-        # MVP-stub: catch-up banner — separate bd
-        "catchup": None,
-        # MVP-stub: geo scope from Settings — separate bd
-        "scope": SimpleNamespace(macro_regions=[], subjects_count=0),
-        # MVP-stub: view filters — separate bd
-        "filters": SimpleNamespace(
-            subjects=None,
-            area_min=0,
-            area_max=0,
-            area_min_label="0",
-            area_max_label="0",
-            only_new=False,
-            only_stars=False,
-        ),
-        # MVP-stub: Do-Not-Disturb — separate bd
-        "dnd": SimpleNamespace(active=False, until_hhmm=""),
-        # MVP-stub: archive count — separate bd
+        "catchup": catchup_ctx,
+        "scope": _build_scope_context(settings),
+        "filters": _build_filters_context(parsed_filters),
+        "dnd": _build_dnd_context(dnd_svc, now),
+        # MVP-stub: needs UserStateRepository.count_archived() — separate bd
         "archive_count": 0,
-        # MVP-stub: active filter flag — separate bd
-        "filters_active": False,
+        "filters_active": _filters_are_active(parsed_filters),
         # MVP-stub: browser tab title — separate bd (lot counter from SSE)
         "title_format": "(0) Монитор гектара",
     }

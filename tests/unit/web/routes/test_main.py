@@ -14,7 +14,9 @@ Coverage:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -22,13 +24,19 @@ from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
 from fis_monitor.domain.interfaces import ConfigSubscription
-from fis_monitor.domain.models import SessionStatus, Settings
+from fis_monitor.domain.models import LotUserState, SessionStatus, Settings
 from fis_monitor.services.login import LoginStatus
+from fis_monitor.services.view_filters import ViewFilters, serialize
 from fis_monitor.web.deps import (
+    get_catchup_dismiss,
+    get_clock,
     get_config_source,
+    get_dnd_service,
     get_login,
+    get_lot_repo,
     get_session_probe,
     get_templates,
+    get_user_state_repo,
 )
 from fis_monitor.web.routes.main import router
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
@@ -68,6 +76,111 @@ class FakeConfigSource:
         self.save_calls.append(settings)
 
 
+class FakeDndService:
+    """Fake DndService — implements is_active() + until() (anti-mock §6)."""
+
+    def __init__(self, *, active: bool = False, until: datetime | None = None) -> None:
+        self._active = active
+        self._until = until
+        self.is_active_calls: int = 0
+        self.until_calls: int = 0
+
+    def is_active(self, now: datetime) -> bool:
+        self.is_active_calls += 1
+        return self._active
+
+    def until(self, now: datetime) -> datetime | None:
+        self.until_calls += 1
+        return self._until
+
+
+class FakeCatchupDismiss:
+    """Fake CatchupDismissService — implements is_dismissed()."""
+
+    def __init__(self, *, dismissed: bool = False) -> None:
+        self._dismissed = dismissed
+        self.is_dismissed_calls: int = 0
+
+    def is_dismissed(self, now: datetime) -> bool:
+        self.is_dismissed_calls += 1
+        return self._dismissed
+
+
+class FakeUserStateRepo:
+    """Fake UserStateRepository covering only the read API the route needs.
+
+    ``last_visit()`` is the only method exercised by the feed route; the rest
+    are stubs that raise to fail loud if a route regression starts reading
+    them.
+    """
+
+    def __init__(self, *, last_visit: datetime | None = None) -> None:
+        self._last_visit = last_visit
+        self.last_visit_calls: int = 0
+
+    def last_visit(self) -> datetime | None:
+        self.last_visit_calls += 1
+        return self._last_visit
+
+    def get(self, lot_id: int) -> LotUserState | None:
+        raise NotImplementedError
+
+    def get_many(self, ids: Any) -> dict[int, LotUserState]:
+        raise NotImplementedError
+
+    def set_starred(self, lot_id: int, value: bool) -> None:
+        raise NotImplementedError
+
+    def set_submitted(self, lot_id: int, value: bool, at: datetime | None) -> None:
+        raise NotImplementedError
+
+    def set_note(self, lot_id: int, note: str | None) -> None:
+        raise NotImplementedError
+
+    def mark_visited(self, at: datetime) -> None:
+        raise NotImplementedError
+
+
+class FakeLotRepo:
+    """Fake LotRepository — only ``count_active()`` is exercised by the feed.
+
+    Other Protocol methods raise NotImplementedError so a regression that
+    starts touching them fails loud (mirrors the FakeUserStateRepo pattern).
+    """
+
+    def __init__(self, *, active_count: int = 0) -> None:
+        self._active_count = active_count
+        self.count_active_calls: int = 0
+
+    def count_active(self) -> int:
+        self.count_active_calls += 1
+        return self._active_count
+
+    def get(self, lot_id: int) -> Any:
+        raise NotImplementedError
+
+    def upsert(self, lot: Any, *, tracked: Any) -> Any:
+        raise NotImplementedError
+
+    def mark_inactive(self, lot_id: int, reason: str, at: Any) -> None:
+        raise NotImplementedError
+
+
+class FakeClock:
+    """Fake Clock — fixed timestamp; ``now()`` returns the same value each call."""
+
+    def __init__(self, *, now: datetime | None = None) -> None:
+        self._now = now or datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
+        self.now_calls: int = 0
+
+    def now(self) -> datetime:
+        self.now_calls += 1
+        return self._now
+
+    def monotonic(self) -> float:
+        return 0.0
+
+
 class FakeSessionProbe:
     """Fake SessionProbe — implements check() protocol method.
 
@@ -92,10 +205,20 @@ def _make_app(
     *,
     settings: Settings | None = None,
     session_status: SessionStatus = SessionStatus.ACTIVE,
+    dnd: FakeDndService | None = None,
+    catchup: FakeCatchupDismiss | None = None,
+    user_state: FakeUserStateRepo | None = None,
+    lot_repo: FakeLotRepo | None = None,
+    clock: FakeClock | None = None,
 ) -> tuple[FastAPI, FakeConfigSource, FakeSessionProbe]:
     """Build a minimal FastAPI app with main router + injected fakes."""
     fake_cfg = FakeConfigSource(settings=settings)
     fake_probe = FakeSessionProbe(status=session_status)
+    fake_dnd = dnd if dnd is not None else FakeDndService()
+    fake_catchup = catchup if catchup is not None else FakeCatchupDismiss()
+    fake_user_state = user_state if user_state is not None else FakeUserStateRepo()
+    fake_lot_repo = lot_repo if lot_repo is not None else FakeLotRepo()
+    fake_clock = clock if clock is not None else FakeClock()
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     # Real FakeSessionProbe.check() never raises NotImplementedError, so the
@@ -112,6 +235,11 @@ def _make_app(
     app.dependency_overrides[get_session_probe] = lambda: fake_probe
     app.dependency_overrides[get_login] = lambda: _StubLogin()
     app.dependency_overrides[get_templates] = lambda: templates
+    app.dependency_overrides[get_dnd_service] = lambda: fake_dnd
+    app.dependency_overrides[get_catchup_dismiss] = lambda: fake_catchup
+    app.dependency_overrides[get_user_state_repo] = lambda: fake_user_state
+    app.dependency_overrides[get_lot_repo] = lambda: fake_lot_repo
+    app.dependency_overrides[get_clock] = lambda: fake_clock
     return app, fake_cfg, fake_probe
 
 
@@ -207,3 +335,116 @@ def test_all_fake_methods_are_called() -> None:
     result = fake_probe.check()
     assert result == SessionStatus.EXPIRING
     assert fake_probe.check_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# bd jh2 — Feed integration (DnD / filters / catchup / scope)
+# ---------------------------------------------------------------------------
+
+
+def test_dnd_active_reflected_in_template() -> None:
+    """AC#1: DndService.is_active() drives the dnd.active flag in the template."""
+    now = datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
+    dnd = FakeDndService(active=True, until=datetime(2026, 5, 15, 13, 30, tzinfo=UTC))
+    app, _, _ = _make_app(dnd=dnd, clock=FakeClock(now=now))
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    assert dnd.is_active_calls == 1
+    # When DnD is active the until() must be consulted to fill the header label.
+    assert dnd.until_calls == 1
+    # The HH:MM (UTC) of the until() value must appear in the page.
+    assert "13:30" in resp.text
+
+
+def test_dnd_inactive_does_not_call_until() -> None:
+    """When DnD is off the route should not waste a call on until()."""
+    dnd = FakeDndService(active=False)
+    app, _, _ = _make_app(dnd=dnd)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    assert dnd.is_active_calls == 1
+    assert dnd.until_calls == 0
+
+
+def test_view_filters_cookie_parsed_and_applied() -> None:
+    """AC#2: a valid view_filters cookie populates filters.* + filters_active."""
+    payload = ViewFilters(subjects=["Москва", "Татарстан"], area_min=10, only_new=True)
+    cookie = serialize(payload)
+    app, _, _ = _make_app()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/", cookies={"view_filters": cookie})
+    html = resp.text
+    # only_new checkbox should be rendered with `checked`
+    assert 'name="only_new"' in html
+    # The subject count appears in the sidebar header («2 выбрано»)
+    assert "2 выбран" in html
+
+
+def test_view_filters_corrupt_cookie_falls_back_to_defaults() -> None:
+    """Bad cookie payloads must not crash the page — silently default to empty."""
+    app, _, _ = _make_app()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/", cookies={"view_filters": quote("not-json")})
+    assert resp.status_code == 200
+
+
+def test_catchup_banner_hidden_when_no_last_visit() -> None:
+    """AC#3a: no prior visit → catchup banner not rendered (fresh install)."""
+    app, _, _ = _make_app(
+        user_state=FakeUserStateRepo(last_visit=None),
+        lot_repo=FakeLotRepo(active_count=5),
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    # The catch-up banner template uses the unique "Пока вас не было" phrase.
+    assert "Пока вас не было" not in resp.text
+
+
+def test_catchup_banner_hidden_when_dismissed() -> None:
+    """AC#3b: dismissed within window → banner suppressed even with last_visit."""
+    now = datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
+    app, _, _ = _make_app(
+        catchup=FakeCatchupDismiss(dismissed=True),
+        user_state=FakeUserStateRepo(last_visit=now - timedelta(hours=3)),
+        lot_repo=FakeLotRepo(active_count=20),
+        clock=FakeClock(now=now),
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert "Пока вас не было" not in resp.text
+
+
+def test_catchup_banner_visible_when_state_present() -> None:
+    """AC#3c: prior visit + not dismissed + lots > 0 → banner rendered."""
+    now = datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
+    app, _, _ = _make_app(
+        catchup=FakeCatchupDismiss(dismissed=False),
+        user_state=FakeUserStateRepo(last_visit=now - timedelta(hours=3)),
+        lot_repo=FakeLotRepo(active_count=42),
+        clock=FakeClock(now=now),
+    )
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    html = resp.text
+    assert "Пока вас не было" in html
+    # The active-lot count flows into the banner heading.
+    assert "42" in html
+    # The relative-time formatter renders "3 ч назад" for the 3h delta.
+    assert "3 ч назад" in html
+
+
+def test_scope_subjects_count_reflects_configured_regions() -> None:
+    """AC#4: when no filter is set the sidebar shows total subjects count.
+
+    For MVP that count is proxied by the number of configured regions.
+    """
+    settings = make_settings(regions=[77, 16, 50])
+    app, _, _ = _make_app(settings=settings)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    html = resp.text
+    # The sidebar renders "Все · {{ scope.subjects_count }}" when no subjects
+    # are selected.  Three regions configured → "Все · 3".
+    assert "Все · 3" in html

@@ -45,7 +45,7 @@ def make_lot(**overrides: Any) -> Lot:
         "municipality": "Хабаровск",
         "land_category": "Земли сельхозназначения",
         "permitted_use": "ЛПХ",
-        "ogv": "Минимущество ХК",  # noqa: RUF001 — Cyrillic abbrev for Хабаровский край
+        "ogv": "Минимущество ХК",
         "status": "Свободен",
         "date_create": _DEFAULT_NOW,
         "date_update": _DEFAULT_NOW,

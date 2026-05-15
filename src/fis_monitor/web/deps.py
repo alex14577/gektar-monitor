@@ -22,7 +22,13 @@ from fis_monitor.services.view_filters import ViewFiltersService
 
 if TYPE_CHECKING:
     from fis_monitor.container import Container
-    from fis_monitor.domain.interfaces import Clock, ConfigSource, NotificationsRepository
+    from fis_monitor.domain.interfaces import (
+        Clock,
+        ConfigSource,
+        LotRepository,
+        NotificationsRepository,
+        UserStateRepository,
+    )
     from fis_monitor.infra.sse.sse_stream import SseStreamer
     from fis_monitor.services.backfill import BackfillService
     from fis_monitor.services.catchup_dismiss import CatchupDismissService
@@ -187,6 +193,27 @@ def get_catchup_dismiss(
     Route tests override via ``app.dependency_overrides[get_catchup_dismiss]``.
     """
     return c.services.catchup_dismiss  # type: ignore[return-value]
+
+
+def get_user_state_repo(
+    c: Container = Depends(get_container),
+) -> UserStateRepository:
+    """Return UserStateRepository for read-only per-lot user state queries.
+
+    Used by the feed route to read ``last_visit()`` for the catch-up banner.
+    Routes that need to mutate state should depend on ``LotUserStateService``
+    instead.
+    """
+    return c.infra.user_state_repo
+
+
+def get_lot_repo(c: Container = Depends(get_container)) -> LotRepository:
+    """Return LotRepository for read-only count/lookup queries.
+
+    Used by the feed route for ``count_active()``; mutations go through
+    services, not the repo directly.
+    """
+    return c.infra.lot_repo
 
 
 def get_view_filters_service() -> ViewFiltersService:

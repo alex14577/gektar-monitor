@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
 """FastAPI APIRouter for onboarding FSM endpoints.
 
 Endpoints (JSON API):

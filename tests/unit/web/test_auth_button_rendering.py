@@ -11,6 +11,8 @@ Coverage:
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -19,10 +21,15 @@ from fastapi.testclient import TestClient
 from fis_monitor.domain.models import SessionStatus, Settings
 from fis_monitor.services.login import LoginStatus
 from fis_monitor.web.deps import (
+    get_catchup_dismiss,
+    get_clock,
     get_config_source,
+    get_dnd_service,
     get_login,
+    get_lot_repo,
     get_session_probe,
     get_templates,
+    get_user_state_repo,
 )
 from fis_monitor.web.routes.main import router
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
@@ -82,6 +89,40 @@ def _make_app(
 
     app.dependency_overrides[get_login] = lambda: _StubLogin()
     app.dependency_overrides[get_templates] = lambda: templates
+
+    # Feed integration deps (bd jh2) — auth-button tests only care about the
+    # session/login HTML, so we provide do-nothing stubs for the rest.
+    class _StubDnd:
+        def is_active(self, now: datetime) -> bool:
+            return False
+
+        def until(self, now: datetime) -> datetime | None:
+            return None
+
+    class _StubCatchup:
+        def is_dismissed(self, now: datetime) -> bool:
+            return True  # suppress banner — irrelevant to auth-button tests
+
+    class _StubUserStateRepo:
+        def last_visit(self) -> datetime | None:
+            return None
+
+    class _StubLotRepo:
+        def count_active(self) -> int:
+            return 0
+
+    class _StubClock:
+        def now(self) -> datetime:
+            return datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
+
+        def monotonic(self) -> float:
+            return 0.0
+
+    app.dependency_overrides[get_dnd_service] = lambda: _StubDnd()
+    app.dependency_overrides[get_catchup_dismiss] = lambda: _StubCatchup()
+    app.dependency_overrides[get_user_state_repo] = lambda: _StubUserStateRepo()
+    app.dependency_overrides[get_lot_repo] = lambda: _StubLotRepo()
+    app.dependency_overrides[get_clock] = lambda: _StubClock()
     return app
 
 

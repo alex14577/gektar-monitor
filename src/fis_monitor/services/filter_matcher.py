@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001
 """Notify-time lot filtering -- FilterMatcher implementations.
 
 ``FilterMatcher`` (defined in ``domain/interfaces.py``) is evaluated before

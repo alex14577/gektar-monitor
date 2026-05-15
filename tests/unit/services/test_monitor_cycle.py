@@ -868,11 +868,11 @@ class TestParserPjaxFragmentCompat:
             '<td data-col-seq="2">Москва</td>'
             '<td data-col-seq="3">ЦАО</td>'
             '<td data-col-seq="4"></td>'
-            '<td data-col-seq="5">г. Москва</td>'  # noqa: RUF001
+            '<td data-col-seq="5">г. Москва</td>'
             '<td data-col-seq="6">0</td>'
             '<td data-col-seq="7">Земли населённых пунктов</td>'
             '<td data-col-seq="8">ИЖС</td>'
-            '<td title="ДГИ г. Москвы" data-col-seq="9">ДГИ</td>'  # noqa: RUF001
+            '<td title="ДГИ г. Москвы" data-col-seq="9">ДГИ</td>'
             '<td data-col-seq="10">14.05.2026</td>'
             '<td data-col-seq="11">Росреестр</td>'
             '<td data-col-seq="12">14.05.2026</td>'
