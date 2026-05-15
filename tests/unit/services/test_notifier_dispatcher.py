@@ -1267,7 +1267,7 @@ def test_dispatch_subscribed_at_drops_lot_older_than_cutoff(caplog):
     dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
     lot = _make_lot_public()  # date_create = _NOW < _SUBSCRIBED_AT_AFTER
 
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.DEBUG, logger="fis_monitor.services.notifier_dispatcher"):
         dispatcher.dispatch(lot)
 
     assert dispatcher._queue.empty(), "queue must be empty — lot was dropped"
