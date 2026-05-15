@@ -358,7 +358,8 @@ class FullScanService:
             return set()
 
         try:
-            rows = self._list_parser.parse(response.text)
+            parsed_page = self._list_parser.parse(response.text)
+            rows = parsed_page.rows
         except SessionExpiredError:
             # Session cookie expired: site returned an ESIA login page.
             # Log at WARN (not ERROR) — this is an auth issue, not a DOM bug.

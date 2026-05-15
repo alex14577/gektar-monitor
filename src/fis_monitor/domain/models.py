@@ -701,6 +701,15 @@ class ParsedListRow(BaseModel):
     date_update: datetime | None
 
 
+class ParsedListPage(BaseModel):
+    """Result of parsing one lot-list page."""
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    rows: list[ParsedListRow]
+    total_count: int | None
+
+
 class ParsedDetail(BaseModel):
     """One detail-card payload (`cabinet-free-lot-view`).
 

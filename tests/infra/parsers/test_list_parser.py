@@ -36,7 +36,7 @@ def html_sorted_desc() -> str:
 def test_happy_path_returns_non_empty_list(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     assert isinstance(rows, list)
     assert len(rows) > 0
 
@@ -44,7 +44,7 @@ def test_happy_path_returns_non_empty_list(
 def test_happy_path_first_row_has_required_fields(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     first = rows[0]
     assert isinstance(first, ParsedListRow)
     assert isinstance(first.id, int)
@@ -58,7 +58,7 @@ def test_happy_path_first_row_known_values(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
     """Verify first row matches known fixture data (id=1492)."""
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     first = rows[0]
     assert first.id == 1492
     assert first.cadastral_no == "14:29:040004:523"
@@ -76,7 +76,7 @@ def test_sorted_desc_first_row_values(
     parser: SelectolaxListParser, html_sorted_desc: str
 ) -> None:
     """Sorted fixture has id=9990 at top per sort-strategy.md verification."""
-    rows = parser.parse(html_sorted_desc)
+    rows = parser.parse(html_sorted_desc).rows
     assert len(rows) > 0
     first = rows[0]
     assert first.id == 9990
@@ -86,7 +86,7 @@ def test_sorted_desc_first_row_values(
 def test_sorted_desc_date_create_parses_correctly(
     parser: SelectolaxListParser, html_sorted_desc: str
 ) -> None:
-    rows = parser.parse(html_sorted_desc)
+    rows = parser.parse(html_sorted_desc).rows
     first = rows[0]
     assert isinstance(first.date_create, datetime)
     # date_create for id=9990 is 12.05.2026
@@ -97,7 +97,7 @@ def test_sorted_desc_top_rows_known_ids(
     parser: SelectolaxListParser, html_sorted_desc: str
 ) -> None:
     """Top 3 rows per sort-strategy.md check (12.05.2026): 9990, 9989, 9988."""
-    rows = parser.parse(html_sorted_desc)
+    rows = parser.parse(html_sorted_desc).rows
     assert len(rows) >= 3
     assert rows[0].id == 9990
     assert rows[1].id == 9989
@@ -112,7 +112,7 @@ def test_sorted_desc_top_rows_known_ids(
 def test_field_types_are_correct(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     for row in rows:
         assert isinstance(row.id, int)
         assert isinstance(row.cadastral_no, str)
@@ -136,7 +136,7 @@ def test_empty_fields_are_none_not_empty_string(
     parser: SelectolaxListParser, html_sorted_desc: str
 ) -> None:
     """Sorted fixture id=9990 has empty permitted_use (data-col-seq=8 is empty)."""
-    rows = parser.parse(html_sorted_desc)
+    rows = parser.parse(html_sorted_desc).rows
     lot_9990 = next((r for r in rows if r.id == 9990), None)
     assert lot_9990 is not None
     # permitted_use is empty in fixture
@@ -149,7 +149,7 @@ def test_no_field_is_empty_string(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
     """Parser invariant: no optional string field should be empty string."""
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     for row in rows:
         assert row.municipality != "", (
             f"municipality must not be empty str in row {row.id}"
@@ -175,8 +175,8 @@ def test_empty_tbody_returns_empty_list(parser: SelectolaxListParser) -> None:
         "<tbody></tbody>"
         "</table></body></html>"
     )
-    rows = parser.parse(html)
-    assert rows == []
+    page = parser.parse(html)
+    assert page.rows == []
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ def test_missing_table_raises_parse_bug_error(parser: SelectolaxListParser) -> N
 
 
 def test_id_is_int(parser: SelectolaxListParser, html_perpage50: str) -> None:
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     for row in rows:
         assert type(row.id) is int, f"row.id should be int, got {type(row.id)}"
 
@@ -218,7 +218,7 @@ def test_id_is_int(parser: SelectolaxListParser, html_perpage50: str) -> None:
 def test_date_create_is_utc_aware(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     for row in rows:
         assert row.date_create.tzinfo is not None, (
             f"date_create should be timezone-aware for row {row.id}"
@@ -234,7 +234,7 @@ def test_date_create_is_utc_aware(
 def test_area_sqm_is_integer(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     rows_with_area = [r for r in rows if r.area_sqm is not None]
     assert len(rows_with_area) > 0, "Expected at least one row with area_sqm"
     for row in rows_with_area:
@@ -248,7 +248,7 @@ def test_area_sqm_parsed_from_fixture_first_row(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
     """First row has '3 998 kv.m' -> 3998."""
-    rows = parser.parse(html_perpage50)
+    rows = parser.parse(html_perpage50).rows
     first = rows[0]
     assert first.area_sqm == 3998
 
@@ -274,8 +274,8 @@ def test_error_page_no_region_raises_session_expired(parser: SelectolaxListParse
 def test_idempotency(
     parser: SelectolaxListParser, html_perpage50: str
 ) -> None:
-    rows1 = parser.parse(html_perpage50)
-    rows2 = parser.parse(html_perpage50)
+    rows1 = parser.parse(html_perpage50).rows
+    rows2 = parser.parse(html_perpage50).rows
     assert len(rows1) == len(rows2)
     for r1, r2 in zip(rows1, rows2, strict=True):
         assert r1.id == r2.id
@@ -393,7 +393,7 @@ def test_normal_page_with_esia_navlink_not_session_expired(
     The normal site navigation includes an ESIA registration link.
     Only an ESIA-titled redirect page (title contains ESIA markers) should trigger.
     """
-    rows = parser.parse(_NORMAL_PAGE_WITH_ESIA_NAVLINK_HTML)
+    rows = parser.parse(_NORMAL_PAGE_WITH_ESIA_NAVLINK_HTML).rows
     assert rows == []
 
 
@@ -401,7 +401,7 @@ def test_normal_empty_tbody_does_not_raise_session_expired(
     parser: SelectolaxListParser,
 ) -> None:
     """A page with a real tbody (even empty) must NOT raise SessionExpiredError."""
-    rows = parser.parse(_NORMAL_EMPTY_PAGE_HTML)
+    rows = parser.parse(_NORMAL_EMPTY_PAGE_HTML).rows
     assert rows == []
 
 
@@ -479,7 +479,7 @@ def test_esia_body_link_does_not_raise_session_expired(
 
     Verifies that head-signal scoping to <head> prevents false positives.
     """
-    rows = parser.parse(_ESIA_BODY_LINK_ONLY_HTML)
+    rows = parser.parse(_ESIA_BODY_LINK_ONLY_HTML).rows
     assert rows == []
 
 
@@ -580,5 +580,62 @@ def test_normal_internal_form_does_not_raise_session_expired(
     Verifies that Signal 3 is scoped to forms whose action contains
     esia.gosuslugi.ru, not all forms.
     """
-    rows = parser.parse(_NORMAL_PAGE_WITH_INTERNAL_FORM_HTML)
+    rows = parser.parse(_NORMAL_PAGE_WITH_INTERNAL_FORM_HTML).rows
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# 16. total_count extraction
+# ---------------------------------------------------------------------------
+
+
+def test_total_count_from_perpage50_fixture(
+    parser: SelectolaxListParser, html_perpage50: str
+) -> None:
+    page = parser.parse(html_perpage50)
+    assert page.total_count == 404
+
+
+def test_total_count_from_sorted_desc_fixture(
+    parser: SelectolaxListParser, html_sorted_desc: str
+) -> None:
+    page = parser.parse(html_sorted_desc)
+    assert page.total_count == 405
+
+
+def test_total_count_none_when_no_paginate_info(parser: SelectolaxListParser) -> None:
+    html = (
+        "<html><body><table>"
+        "<thead><tr><th>X</th></tr></thead>"
+        "<tbody></tbody>"
+        "</table></body></html>"
+    )
+    page = parser.parse(html)
+    assert page.total_count is None
+
+
+def test_total_count_zero_for_empty_fixture(parser: SelectolaxListParser) -> None:
+    html = load_fixture("list_region_empty.html")
+    page = parser.parse(html)
+    assert page.rows == []
+    assert page.total_count == 0
+
+
+def test_total_count_none_for_malformed_text(parser: SelectolaxListParser) -> None:
+    html = (
+        "<html><body>"
+        "<table><thead><tr><th>X</th></tr></thead><tbody></tbody></table>"
+        '<div class="table-paginate__info">Нет данных</div>'
+        "</body></html>"
+    )
+    page = parser.parse(html)
+    assert page.total_count is None
+
+
+def test_parse_returns_parsedlistpage_type(
+    parser: SelectolaxListParser, html_perpage50: str
+) -> None:
+    from fis_monitor.domain.models import ParsedListPage
+
+    page = parser.parse(html_perpage50)
+    assert isinstance(page, ParsedListPage)

@@ -16,7 +16,7 @@ import threading
 from typing import Any
 
 from fis_monitor.domain.errors import ParseBugError, UpstreamError
-from fis_monitor.domain.models import HttpResponse, ParsedListRow
+from fis_monitor.domain.models import HttpResponse, ParsedListPage, ParsedListRow
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
 
@@ -91,15 +91,15 @@ class FakeListParser:
         self.calls: list[str] = []
         self._idx = 0
 
-    def parse(self, html: str) -> list[ParsedListRow]:
+    def parse(self, html: str) -> ParsedListPage:
         self.calls.append(html)
         if self._idx >= len(self._page_rows):
-            return []
+            return ParsedListPage(rows=[], total_count=None)
         result = self._page_rows[self._idx]
         self._idx += 1
         if isinstance(result, Exception):
             raise result
-        return result
+        return ParsedListPage(rows=result, total_count=len(result))
 
 
 def _make_fetcher(
@@ -200,9 +200,10 @@ class TestPageLimit:
             def __init__(self) -> None:
                 self.call_count = 0
 
-            def parse(self, html: str) -> list[ParsedListRow]:
+            def parse(self, html: str) -> ParsedListPage:
                 self.call_count += 1
-                return [_make_row(self.call_count)]
+                rows = [_make_row(self.call_count)]
+                return ParsedListPage(rows=rows, total_count=len(rows))
 
         class InfiniteHttp:
             def __init__(self) -> None:

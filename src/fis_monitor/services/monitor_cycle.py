@@ -405,7 +405,8 @@ class MonitorCycleService:
 
         # ---------- Step 2b: parse list ------------------------------------
         try:
-            parsed_rows = self._list_parser.parse(response.text)
+            parsed_page = self._list_parser.parse(response.text)
+            parsed_rows = parsed_page.rows
         except SessionExpiredError:
             # Session cookie expired: site returned an ESIA login page instead of
             # lot-list DOM.  This is an auth failure, NOT a site DOM change.

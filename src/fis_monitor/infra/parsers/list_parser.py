@@ -25,12 +25,13 @@ Parser invariants (R3-minor):
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from selectolax.parser import HTMLParser, Node
 
 from fis_monitor.domain.errors import ParseBugError, SessionExpiredError
-from fis_monitor.domain.models import ParsedListRow
+from fis_monitor.domain.models import ParsedListPage, ParsedListRow
 
 # Markers that identify an ESIA (Gosuslugi) login-redirect response.
 # The site returns HTTP 200 with a login page when the session cookie is expired.
@@ -126,7 +127,7 @@ class SelectolaxListParser:
     Stateless. ``__init__`` takes no arguments. Thread-safe (no shared state).
     """
 
-    def parse(self, html: str) -> list[ParsedListRow]:
+    def parse(self, html: str) -> ParsedListPage:
         """Parse the lot-list HTML page into structured rows.
 
         Returns an empty list for a valid page that happens to be empty
@@ -268,4 +269,11 @@ class SelectolaxListParser:
                 )
             )
 
-        return rows
+        total_count: int | None = None
+        info_node = tree.css_first(".table-paginate__info")
+        if info_node is not None:
+            m = re.search(r"Найдено записей:\s*(\d+)\s*из\s*\d+", info_node.text(strip=True))
+            if m is not None:
+                total_count = int(m.group(1))
+
+        return ParsedListPage(rows=rows, total_count=total_count)

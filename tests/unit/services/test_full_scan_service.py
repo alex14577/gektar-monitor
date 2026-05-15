@@ -17,6 +17,7 @@ from fis_monitor.domain.interfaces import Lot
 from fis_monitor.domain.models import (
     CycleResult,
     HttpResponse,
+    ParsedListPage,
     ParsedListRow,
     Settings,
 )
@@ -132,11 +133,11 @@ class FakeListParser:
         self._rows = rows or []
         self._raises = raises
 
-    def parse(self, html: str) -> list[ParsedListRow]:
+    def parse(self, html: str) -> ParsedListPage:
         self.calls.append(html)
         if self._raises is not None:
             raise self._raises
-        return self._rows
+        return ParsedListPage(rows=self._rows, total_count=len(self._rows))
 
 
 class FakeLotRepository:

@@ -81,7 +81,7 @@ async def test_list_endpoint_parseable_by_list_parser(
     _patch_lots(monkeypatch, tmp_path / "lots.json")
     async with _make_client() as c:
         resp = await c.get("/cabinet/free-lot", params={"region": 1})
-    rows = SelectolaxListParser().parse(resp.text)
+    rows = SelectolaxListParser().parse(resp.text).rows
     assert rows == []
 
 
@@ -169,7 +169,7 @@ async def test_add_lot_parseable_by_list_parser(
         await c.post("/admin/lots", data=_SAMPLE_LOT_FORM, follow_redirects=False)
         list_resp = await c.get("/cabinet/free-lot", params={"region": 1})
 
-    rows = SelectolaxListParser().parse(list_resp.text)
+    rows = SelectolaxListParser().parse(list_resp.text).rows
     assert len(rows) == 1
     row = rows[0]
     assert row.id == 2002

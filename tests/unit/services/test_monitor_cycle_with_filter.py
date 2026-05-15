@@ -28,6 +28,7 @@ from fis_monitor.domain.models import (
     HttpResponse,
     LotPublicDTO,
     LotUpsertResult,
+    ParsedListPage,
     ParsedListRow,
     Settings,
     SseLotNew,
@@ -58,8 +59,8 @@ class FakeListParser:
     def __init__(self, rows: list[ParsedListRow]) -> None:
         self._rows = rows
 
-    def parse(self, html: str) -> list[ParsedListRow]:
-        return self._rows
+    def parse(self, html: str) -> ParsedListPage:
+        return ParsedListPage(rows=self._rows, total_count=len(self._rows))
 
 
 class FakeEnrichmentService:

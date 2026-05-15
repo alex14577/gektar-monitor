@@ -20,6 +20,7 @@ from fis_monitor.domain.models import (
     HttpResponse,
     LotPublicDTO,
     LotUpsertResult,
+    ParsedListPage,
     ParsedListRow,
     Settings,
     SseCycleError,
@@ -129,11 +130,11 @@ class FakeListParser:
         self._rows = rows or []
         self._raises = raises
 
-    def parse(self, html: str) -> list[ParsedListRow]:
+    def parse(self, html: str) -> ParsedListPage:
         self.calls.append(html)
         if self._raises is not None:
             raise self._raises
-        return self._rows
+        return ParsedListPage(rows=self._rows, total_count=len(self._rows))
 
 
 class FakeEnrichmentService:
@@ -762,8 +763,8 @@ class TestAllFakeMethodsInvoked:
         # FakeListParser.parse
         row = _make_parsed_row(1)
         parser = FakeListParser(rows=[row])
-        result_rows = parser.parse("<html/>")
-        assert result_rows == [row]
+        result_page = parser.parse("<html/>")
+        assert result_page.rows == [row]
         assert len(parser.calls) == 1
 
         # FakeEnrichmentService.enrich_lots
@@ -885,7 +886,7 @@ class TestParserPjaxFragmentCompat:
         )
 
         parser = SelectolaxListParser()
-        rows = parser.parse(fragment)
+        rows = parser.parse(fragment).rows
 
         assert len(rows) == 1, f"expected 1 row, got {len(rows)}: {rows}"
         assert rows[0].id == 100
