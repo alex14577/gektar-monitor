@@ -130,6 +130,9 @@ class Lot(BaseModel):
     inactive_since: datetime | None = None
     inactive_confirmed_at: datetime | None = None
 
+    # --- Region (macro-region FK; ADR-039) --------------------------------
+    region_id: int | None = None
+
 
 # ---------------------------------------------------------------------------
 # Diff protocol — FieldChange / LotUpsertResult
@@ -924,7 +927,7 @@ class SseLotStatus(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def parsed_row_to_lot(row: ParsedListRow, now: datetime) -> Lot:
+def parsed_row_to_lot(row: ParsedListRow, now: datetime, *, region_id: int | None = None) -> Lot:
     """Construct a minimal ``Lot`` from a ``ParsedListRow``.
 
     Detail fields (lat, lon, raw_json, enrichment_status, …) are set to
@@ -960,6 +963,7 @@ def parsed_row_to_lot(row: ParsedListRow, now: datetime) -> Lot:
         inactive_reason=None,
         inactive_since=None,
         inactive_confirmed_at=None,
+        region_id=region_id,
     )
 
 

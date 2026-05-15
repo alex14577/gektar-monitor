@@ -576,7 +576,7 @@ class TestInvalidParsedRowRaisesParseBugError:
 
         # Patch _parsed_row_to_lot to raise ValidationError by constructing a Lot
         # with invalid data — simplest is to raise via a minimal Pydantic model.
-        def _raise_validation_error(row: Any, now: Any) -> Any:
+        def _raise_validation_error(row: Any, now: Any, **_: Any) -> Any:
             from pydantic import BaseModel
 
             class _Strict(BaseModel):
@@ -615,7 +615,7 @@ class TestInvalidParsedRowRaisesParseBugError:
 
         call_count = 0
 
-        def _fail_on_third(row: Any, now: Any) -> Any:
+        def _fail_on_third(row: Any, now: Any, **kwargs: Any) -> Any:
             nonlocal call_count
             call_count += 1
             if call_count == 3:
@@ -625,7 +625,7 @@ class TestInvalidParsedRowRaisesParseBugError:
                     x: int
 
                 _Strict(x="bad")  # type: ignore[arg-type]
-            return _parsed_row_to_lot_real(row, now)
+            return _parsed_row_to_lot_real(row, now, **kwargs)
 
         from fis_monitor.services.monitor_cycle import _parsed_row_to_lot as _parsed_row_to_lot_real
 
@@ -893,3 +893,35 @@ class TestParserPjaxFragmentCompat:
         assert rows[0].cadastral_no == "77:01:0001:1"
         assert rows[0].area_sqm == 1000
         assert rows[0].region == "Москва"
+
+
+class TestRegionIdStamping:
+    """Lots ingested by run_cycle must carry the region_id of the cycle (eov8)."""
+
+    def test_run_cycle_stamps_region_id_on_upserted_lots(self) -> None:
+        region = 1
+        rows = [_make_parsed_row(1), _make_parsed_row(2)]
+        lot_repo = FakeLotRepository(was_new_for={1, 2})
+
+        svc, *_ = _make_service(
+            list_parser=FakeListParser(rows=rows),
+            lot_repo=lot_repo,
+        )
+        svc.run_cycle(region)
+
+        assert len(lot_repo.upsert_calls) == 2
+        for lot, _ in lot_repo.upsert_calls:
+            assert lot.region_id == region
+
+    def test_run_cycle_region2_stamps_region_id_2(self) -> None:
+        region = 2
+        rows = [_make_parsed_row(10)]
+        lot_repo = FakeLotRepository(was_new_for={10})
+
+        svc, *_ = _make_service(
+            list_parser=FakeListParser(rows=rows),
+            lot_repo=lot_repo,
+        )
+        svc.run_cycle(region)
+
+        assert lot_repo.upsert_calls[0][0].region_id == 2

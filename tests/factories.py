@@ -63,6 +63,7 @@ def make_lot(**overrides: Any) -> Lot:
         "inactive_reason": None,
         "inactive_since": None,
         "inactive_confirmed_at": None,
+        "region_id": None,
     }
     defaults.update(overrides)
     return Lot(**defaults)

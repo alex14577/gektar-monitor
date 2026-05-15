@@ -528,7 +528,7 @@ class MonitorCycleService:
         try:
             for index, row in enumerate(parsed_rows):
                 try:
-                    lots.append(_parsed_row_to_lot(row, now))
+                    lots.append(_parsed_row_to_lot(row, now, region_id=region))
                 except ValidationError as exc:
                     raise ParseBugError(
                         selector="<list-row-conversion>",

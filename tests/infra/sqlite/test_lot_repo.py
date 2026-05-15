@@ -567,3 +567,48 @@ def test_first_upsert_with_coords_creates_exactly_one_rtree_row(
     )
     assert cur.fetchone()[0] == 1
     cur.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: region_id stamping (gektar_monitor-eov8)
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_insert_persists_region_id(tmp_db: ConnectionProvider) -> None:
+    """INSERT path: region_id is written to the DB (not NULL)."""
+    repo = _make_repo(tmp_db)
+    lot = make_lot(id=200, region_id=1)
+    repo.upsert(lot, tracked=[])
+
+    cur = tmp_db.get().execute("SELECT region_id FROM lots WHERE id = 200")
+    row = cur.fetchone()
+    cur.close()
+    assert row is not None
+    assert row[0] == 1
+
+
+def test_upsert_update_persists_region_id(tmp_db: ConnectionProvider) -> None:
+    """UPDATE path: region_id is kept/written on subsequent upsert."""
+    repo = _make_repo(tmp_db)
+    lot = make_lot(id=201, region_id=2)
+    repo.upsert(lot, tracked=[])
+    # Second upsert (UPDATE branch) with same region_id
+    repo.upsert(lot, tracked=[])
+
+    cur = tmp_db.get().execute("SELECT region_id FROM lots WHERE id = 201")
+    row = cur.fetchone()
+    cur.close()
+    assert row is not None
+    assert row[0] == 2
+
+
+def test_count_active_filters_by_region_id(tmp_db: ConnectionProvider) -> None:
+    """count_active(region_id=X) counts only lots with matching region_id."""
+    repo = _make_repo(tmp_db)
+    repo.upsert(make_lot(id=301, region_id=1), tracked=[])
+    repo.upsert(make_lot(id=302, region_id=1), tracked=[])
+    repo.upsert(make_lot(id=303, region_id=2), tracked=[])
+
+    assert repo.count_active(region_id=1) == 2
+    assert repo.count_active(region_id=2) == 1
+    assert repo.count_active(region_id=99) == 0
