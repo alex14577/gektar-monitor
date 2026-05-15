@@ -143,7 +143,8 @@ _LOT_SELECT = (
     "has_boundaries, raw_json, parser_version, first_seen, last_seen, "
     "detail_fetched_at, enrichment_status, enrichment_retries, "
     "enrichment_last_error, last_seen_at, last_status, last_status_at, "
-    "is_active, inactive_reason, inactive_since, inactive_confirmed_at"
+    "is_active, inactive_reason, inactive_since, inactive_confirmed_at, "
+    "region_id"
 )
 
 

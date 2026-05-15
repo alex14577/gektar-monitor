@@ -612,3 +612,27 @@ def test_count_active_filters_by_region_id(tmp_db: ConnectionProvider) -> None:
     assert repo.count_active(region_id=1) == 2
     assert repo.count_active(region_id=2) == 1
     assert repo.count_active(region_id=99) == 0
+
+
+def test_region_id_roundtrip_via_get(tmp_db: ConnectionProvider) -> None:
+    """upsert lot with region_id=1 → get() returns lot with region_id=1."""
+    repo = _make_repo(tmp_db)
+    lot = make_lot(id=400, region_id=1)
+    repo.upsert(lot, tracked=[])
+
+    fetched = repo.get(400)
+
+    assert fetched is not None
+    assert fetched.region_id == 1
+
+
+def test_region_id_roundtrip_via_list_active(tmp_db: ConnectionProvider) -> None:
+    """upsert lot with region_id=2 → list_active() returns lot with region_id=2."""
+    repo = _make_repo(tmp_db)
+    repo.upsert(make_lot(id=401, region_id=2), tracked=[])
+
+    active = repo.list_active(limit=10, offset=0)
+    matched = [lot for lot in active if lot.id == 401]
+
+    assert len(matched) == 1
+    assert matched[0].region_id == 2

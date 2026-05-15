@@ -53,7 +53,8 @@ _LOT_COLS = (
     "has_boundaries, raw_json, parser_version, first_seen, last_seen, "
     "detail_fetched_at, enrichment_status, enrichment_retries, "
     "enrichment_last_error, last_seen_at, last_status, last_status_at, "
-    "is_active, inactive_reason, inactive_since, inactive_confirmed_at"
+    "is_active, inactive_reason, inactive_since, inactive_confirmed_at, "
+    "region_id"
 )
 
 
@@ -64,6 +65,7 @@ def _make_db_row(
     status: str = "Свободен",
     first_seen: datetime = _FIRST_SEEN_HOT,
     is_active: int = 1,
+    region_id: int | None = None,
 ) -> sqlite3.Row:
     """Build an in-memory sqlite3.Row matching the lots SELECT column list."""
     conn = sqlite3.connect(":memory:")
@@ -74,7 +76,7 @@ def _make_db_row(
     ts = first_seen.isoformat()
     now_ts = _NOW.isoformat()
     conn.execute(
-        "INSERT INTO lots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO lots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             lot_id,
             f"27:01:{lot_id:08d}:0001",  # cadastral_no
@@ -102,6 +104,7 @@ def _make_db_row(
             None,            # last_status_at
             is_active,
             None, None, None,  # inactive_reason, inactive_since, inactive_confirmed_at
+            region_id,
         ),
     )
     conn.commit()
@@ -601,3 +604,12 @@ def test_freshness_cold_old_lot() -> None:
     page = svc.search(LotFilters())
     assert page.items[0].freshness == "cold"
     assert page.items[0].age_seconds >= 86400
+
+
+def test_search_region_id_propagates_to_dto() -> None:
+    """region_id from DB row must appear in LotUserDTO (read-path fix)."""
+    row = _make_db_row(lot_id=10, region_id=1)
+    svc = _make_service(rows=[row])
+    page = svc.search(LotFilters())
+    assert len(page.items) == 1
+    assert page.items[0].region_id == 1

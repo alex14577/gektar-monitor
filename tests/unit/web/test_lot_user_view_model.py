@@ -7,8 +7,6 @@ Invariants:
 """
 from __future__ import annotations
 
-import pytest
-
 from fis_monitor.domain.models import LotUserDTO
 from fis_monitor.web.sse_encoder import LotUserViewModel
 from tests.factories import make_lot
