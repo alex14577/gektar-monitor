@@ -61,6 +61,7 @@ from fis_monitor.infra.sqlite.repositories.settings import SqliteSettingsReposit
 from fis_monitor.infra.sqlite.repositories.smtp_credentials import (
     SqliteSmtpCredentialsRepository,
 )
+from fis_monitor.infra.sqlite.repositories.state import SqliteStateRepository
 from fis_monitor.infra.sqlite.repositories.user_state import SqliteUserStateRepository
 from fis_monitor.infra.sse.browser_sse_notifier import BrowserSseNotifier
 from fis_monitor.infra.sse.bus import ThreadEventBus
@@ -229,6 +230,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     lot_repo = SqliteLotRepository(conn_provider=conn_provider, clock=clock)
     user_state_repo = SqliteUserStateRepository(conn_provider=conn_provider, clock=clock)
     settings_repo = SqliteSettingsRepository(conn_provider=conn_provider, clock=clock)
+    state_repo = SqliteStateRepository(conn_provider=conn_provider, clock=clock)
     notif_repo = SqliteNotificationsRepository(conn_provider=conn_provider, clock=clock)
     cycles_repo = SqliteCyclesRepository(conn_provider=conn_provider, clock=clock)
     smtp_creds_repo = SqliteSmtpCredentialsRepository(
@@ -278,6 +280,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         lot_repo=lot_repo,
         user_state_repo=user_state_repo,
         settings_repo=settings_repo,
+        state_repo=state_repo,
         notif_repo=notif_repo,
         cycles_repo=cycles_repo,
         smtp_creds_repo=smtp_creds_repo,

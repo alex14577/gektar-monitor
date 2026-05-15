@@ -259,6 +259,7 @@ def _build_smoke_container(
         lot_repo=_StubLotRepo(),
         user_state_repo=unused,
         settings_repo=unused,
+        state_repo=unused,
         notif_repo=unused,
         cycles_repo=unused,
         smtp_creds_repo=unused,

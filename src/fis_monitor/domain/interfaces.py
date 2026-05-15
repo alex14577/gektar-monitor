@@ -94,6 +94,7 @@ __all__ = [
     "SettingsRepository",
     "SmtpCredentialsRepository",
     "SmtpHostPolicy",
+    "StateRepository",
     "UserStateRepository",
 ]
 
@@ -421,6 +422,41 @@ class NotificationsRepository(Protocol):
         ...
 
     def list_recent(self, limit: int) -> list[NotificationRecord]: ...
+
+
+class StateRepository(Protocol):
+    """Generic key/value repository over the ``state`` table.
+
+    Thin KV seam: get / set / delete.  No domain semantics — callers own the
+    key namespace.  Known key namespaces are documented in ``docs/db/schema.sql``
+    (the ``state`` table comment block).
+
+    Write methods (``set``, ``delete``) use ``BEGIN IMMEDIATE`` (ADR-016).
+    ``get`` runs without an explicit transaction (snapshot isolation is
+    sufficient for a single-row read).
+
+    Implementation: ``infra/sqlite/repositories/state.py::SqliteStateRepository``.
+    """
+
+    def get(self, key: str) -> str | None:
+        """Return the stored value for *key*, or ``None`` if the key is absent."""
+        ...
+
+    def set(self, key: str, value: str) -> None:
+        """Upsert *key* / *value* inside a ``BEGIN IMMEDIATE`` transaction.
+
+        ``updated_at`` is refreshed on every call (including no-value-change
+        overwrites) so callers can use it as a last-write timestamp.
+        """
+        ...
+
+    def delete(self, key: str) -> None:
+        """Remove *key* from the store.
+
+        Idempotent: deleting a non-existent key is a no-op (no exception).
+        Executes inside a ``BEGIN IMMEDIATE`` transaction (ADR-016).
+        """
+        ...
 
 
 class SettingsRepository(Protocol):

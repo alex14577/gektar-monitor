@@ -68,7 +68,7 @@ ErrorCategory = Literal[
     "timeout",
     "parse_bug",
     "schema_anomaly",
-    "internal_error",   # M1 fix: для unexpected exceptions (bugs)
+    "internal_error",  # M1 fix: для unexpected exceptions (bugs)
 ]
 
 
@@ -612,9 +612,7 @@ class NotificationRecord(BaseModel):
         via birthday paradox. Sufficient for distinguishing recipients in
         logs without exposing plaintext PII.
         """
-        recipient_hash = hashlib.sha256(
-            self.recipient.encode("utf-8")
-        ).hexdigest()[:8]
+        recipient_hash = hashlib.sha256(self.recipient.encode("utf-8")).hexdigest()[:8]
         return (
             f"NotificationRecord(lot_id={self.lot_id}, channel={self.channel!r}, "
             f"recipient=<sha256:{recipient_hash}>, status={self.status!r}, "
@@ -880,6 +878,7 @@ class SseLotStatus(BaseModel):
 # Conversion helpers — public domain functions
 # ---------------------------------------------------------------------------
 
+
 def parsed_row_to_lot(row: ParsedListRow, now: datetime) -> Lot:
     """Construct a minimal ``Lot`` from a ``ParsedListRow``.
 
@@ -960,11 +959,4 @@ def lot_to_public_dto(lot: Lot) -> LotPublicDTO:
 #: `EventBus.subscribe() -> EventSubscription[SseEvent]` use this alias.
 #: Adding a new event type = extend this union AND register its priority
 #: ClassVar; nothing else changes (OCP).
-type SseEvent = (
-    SseCycleError
-    | SseSmtpFailed
-    | SseSessionExpired
-    | SseLotNew
-    | SseLotStatus
-)
-
+type SseEvent = SseCycleError | SseSmtpFailed | SseSessionExpired | SseLotNew | SseLotStatus

@@ -41,6 +41,7 @@ from fis_monitor.domain.interfaces import (
     SettingsRepository,
     SmtpCredentialsRepository,
     SmtpHostPolicy,
+    StateRepository,
     UserStateRepository,
 )
 from fis_monitor.infra.sqlite.connection import (
@@ -126,6 +127,11 @@ class Infra:
 
     settings_repo: SettingsRepository
     """Read/write onboarding state and settings persistence."""
+
+    state_repo: StateRepository
+    """Generic KV store over the ``state`` table (get/set/delete).
+    Unified repository for critical_event slots, session flags, and other
+    single-key state that does not belong to a domain-specific repository."""
 
     notif_repo: NotificationsRepository
     """Read/write notifications with state machine: reserve → mark_attempt → mark_sent.

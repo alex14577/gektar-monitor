@@ -50,6 +50,7 @@ def mock_container() -> Container:
             lot_repo=Mock(),
             user_state_repo=Mock(),
             settings_repo=Mock(),
+            state_repo=Mock(),
             notif_repo=Mock(),
             cycles_repo=Mock(),
             smtp_creds_repo=Mock(),
