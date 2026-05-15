@@ -16,9 +16,8 @@
     <span style="color: var(--accent); flex: none;">✓</span>
     <span>Наблюдаем за
       <b>
-      {%- set names = {'dfo': 'ДФО', 'arctic': 'Арктикой'} -%}
-      {%- for r in data.regions -%}
-        {{ names[r] }}{% if not loop.last %} и {% endif %}
+      {%- for slug in data.region_slugs -%}
+        {{ data.region_title_by_slug[slug] }}{% if not loop.last %} и {% endif %}
       {%- endfor -%}
       </b>
     </span>

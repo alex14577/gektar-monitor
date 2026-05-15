@@ -228,6 +228,18 @@ bye.4 → a4t.4 → a4t.3 → 8ov.2 → 8ov.4 → oxy.1 → oxy.6 → vgm.5
 
 **Итог:** 5/5 closed. Workflow note: 2 writer-агента (4ly, mi8) нарушили pre-review-commit правило (пушнули в master до ревью). Ревью прошло APPROVE post-hoc, blocker'ов не было — damage минимальный, но в следующих волнах писать в промпте явно «НЕ коммитить и НЕ закрывать bd».
 
+### Wave 11b (2026-05-15) — Parallel cleanup (rate-limit / SSE dedup / region SSOT)
+
+3 параллельных таски. 3 writer-агента (sonnet×3) → 3 reviewer-агента (sonnet×3) → fix-iter 1 (Backend Architect sonnet, т.к. `python-pro` template ещё не подхвачен в agent registry).
+
+- [x] `cgt` — RateLimiter на POST `/onboarding/smtp-test` (Security F-05). Sonnet writer обнаружил что код уже был реализован ранее, fix'ил cross-test pollution в `_make_app`. Sonnet reviewer NEEDS-WORK (M1 missing `unknown` IP test, M2 missing explanatory comment) → fix-iter 1 APPROVE. Vault: NO-OP (применение существующего pattern из `cycle.py`).
+- [x] `b54` — SSE dedup: убрана двойная публикация `SseLotNew`. Sonnet writer обнаружил что код-fix был сделан ранее, заполнил **doc-gap**: создан **ADR-030** (SSE LotNew Dispatcher SSOT), обновлён `decisions-log.md`, `architecture/07-concurrency.md §7.3` (диаграмма SSE fan-out). Sonnet reviewer APPROVE 0/0 (1 unrelated major по awb, исправлен в fix-iter).
+- [x] `awb` — Region mapping SSOT в `domain/regions.py` (MappingProxyType для 3 dict'ов + helper-функции strict/lenient). Удалён inline `_REGION_SLUG_TO_INT` из `routes/onboarding.py`. Templates `_step1.html.jinja` / `_step4.html.jinja` мигрированы на `data.region_slugs` + `data.region_title_by_slug`. 28 unit-тестов в `test_regions.py`. Sonnet writer + sonnet reviewer NEEDS-WORK (M1 `_rerender(step=4)` не инжектил region data → silent UI regression; M2 грамматическая регрессия "Арктикой"→"Арктика" — творительный падеж в "Наблюдаем за X"). Fix-iter 1: M1 расширен elif step==4 в `_rerender`; M2 Option A — `"arctic": "Арктикой"` в `REGION_TITLE_BY_SLUG` (verified: только `_step4` использует это значение в instrumental context, `_step1` рендерит свой локальный r.title). Vault: glossary +1 (`REGION_BY_SLUG`/`slug_to_id`).
+
+**Итог:** 3/3 closed. Suite 948 passed, ruff clean. Workflow: writer'ы не закрывали bd самостоятельно — reviewer + fix-iter прошли до commit.
+
+**Note для будущих волн**: установлен template `programming-languages/python-pro` (`.claude/agents/python-pro.md`) — но agent registry загружается при старте сессии и не подхватил его. В следующей сессии будет доступен. Memory: [[feedback_python_code_agent]].
+
 ---
 
 ## Session log

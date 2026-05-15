@@ -41,6 +41,7 @@
 - [[decisions/ADR-027-silent-cookie-refresh|ADR-027]] — Silent cookie refresh: headless Playwright `silent_refresh()` для продления сессии без интерактивного логина (shared `_lock`, 30s deadline, `needs_manual_login` enum value)
 - [[decisions/ADR-028-paginated-catalogue-backfill|ADR-028]] — Paginated catalogue backfill: `PaginatedListFetcher` + `BackfillService` + auto-trigger heuristic (empty DB) + single-flight across auto/manual + notify caller-side
 - [[decisions/ADR-029-vendor-htmx-no-cdn|ADR-029]] — Vendor htmx locally (no CDN for JS assets): supply-chain mitigation F-03; htmx 1.9.12 + ext/sse.js in `static/vendor/htmx-1.9.12/`
+- [[decisions/ADR-030-sse-lot-new-dispatcher-ssot|ADR-030]] — SseLotNew dedup: Dispatcher SSOT for SSE channel — убрана прямая публикация из `MonitorCycleService`; единственный путь — через `BrowserSseNotifier`
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

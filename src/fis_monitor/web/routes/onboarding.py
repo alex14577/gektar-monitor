@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,9 +38,11 @@ from pydantic import BaseModel, EmailStr, TypeAdapter, ValidationError
 from fis_monitor.domain.errors import InvalidTransitionError, SmtpHostPolicyError
 from fis_monitor.domain.interfaces import ConfigSource
 from fis_monitor.domain.models import LotPublicDTO, OnboardingState, Settings, SmtpCredentials
+from fis_monitor.domain.regions import REGION_TITLE_BY_SLUG, ids_to_slugs, slug_to_id
 from fis_monitor.services.onboarding import OnboardingService
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
+from fis_monitor.web._helpers import client_ip
 from fis_monitor.web.deps import (
     get_config_source,
     get_onboarding,
@@ -47,6 +50,7 @@ from fis_monitor.web.deps import (
     get_smtp_test,
     get_templates,
 )
+from fis_monitor.web.rate_limit import RateLimiter
 
 __all__ = ["router"]
 
@@ -61,6 +65,15 @@ _EMAIL_VALIDATOR: TypeAdapter[EmailStr] = TypeAdapter(EmailStr)
 # ---------------------------------------------------------------------------
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
+
+# ---------------------------------------------------------------------------
+# Rate limiter — 1 request per 10 seconds per client IP (Security F-05).
+# Module-level singleton: shared across all requests for the lifetime of the
+# process.  Can be replaced in tests via app.dependency_overrides or by
+# reassigning ``_smtp_test_rate_limiter`` before TestClient construction.
+# ---------------------------------------------------------------------------
+
+_smtp_test_rate_limiter = RateLimiter(max_requests=1, window_seconds=10.0)
 
 # ---------------------------------------------------------------------------
 # Wizard step mapping — extension point for future steps (OCP).
@@ -160,18 +173,13 @@ def get_onboarding_regions(
     """Step 1 — region selection.
 
     Renders when state == NOT_STARTED; otherwise 302 to current step.
-
-    Note: the template checks ``r.id in data.regions`` where r.id is a string
-    ('dfo', 'arctic'), but Settings.regions is list[int] (domain IDs). This is
-    a known UI/domain model mismatch — the wizard will show no pre-selection
-    until a dedicated mapping task resolves it.
-    # TODO(53e): map Settings.regions (list[int]) to region-card string IDs
-    #            ('dfo'/'arctic') before passing to step 1 template.
+    Passes ``region_slugs`` (list of slug strings) derived from the stored
+    integer IDs so the template can pre-select cards without a type mismatch.
     """
     if svc.current() != OnboardingState.NOT_STARTED:
         return _mismatch_redirect(svc)
     settings = cfg.current()
-    data: dict[str, object] = {"regions": settings.regions}
+    data: dict[str, object] = {"region_slugs": ids_to_slugs(settings.regions)}
     return _wizard_response(request, templates, step=1, data=data, settings=settings)
 
 
@@ -246,7 +254,8 @@ def get_onboarding_test_email(
     email = settings.notifications.email
     recipients = email.recipients
     data: dict[str, object] = {
-        "regions": settings.regions,
+        "region_slugs": ids_to_slugs(settings.regions),
+        "region_title_by_slug": REGION_TITLE_BY_SLUG,
         "smtp_login": "",  # credentials live in state.db, not config.json
         "recipient_email": ", ".join(str(r) for r in recipients) if recipients else "",
     }
@@ -359,13 +368,6 @@ def post_skip_email(
 # POST Wizard endpoints (htmx form submission)
 # ---------------------------------------------------------------------------
 
-# Mapping: region slug (string from HTML form) → domain integer ID.
-# TODO(awb): move to domain/regions.py once dedicated region-mapping task lands.
-_REGION_SLUG_TO_INT: dict[str, int] = {
-    "dfo": 1,
-    "arctic": 2,
-}
-
 
 def _hx_redirect(url: str) -> HTMLResponse:
     """Return 200 with HX-Redirect header so htmx performs client-side navigation."""
@@ -385,9 +387,18 @@ def _rerender(
     error: str,
     extra_data: dict[str, Any] | None = None,
 ) -> HTMLResponse:
-    """Re-render the wizard at the given step with an error message."""
+    """Re-render the wizard at the given step with an error message.
+
+    Step 1 always gets ``region_slugs`` injected so the region-card template
+    can pre-select the current state even after a form error.
+    """
     settings = cfg.current()
     data: dict[str, Any] = {"error": error}
+    if step == 1:
+        data["region_slugs"] = ids_to_slugs(settings.regions)
+    elif step == 4:
+        data["region_slugs"] = ids_to_slugs(settings.regions)
+        data["region_title_by_slug"] = REGION_TITLE_BY_SLUG
     if extra_data:
         data.update(extra_data)
     return _wizard_response(request, templates, step=step, data=data, settings=settings)
@@ -476,8 +487,9 @@ def _handle_step1_next(
 
     region_ids: list[int] = []
     for slug in raw_slugs:
-        rid = _REGION_SLUG_TO_INT.get(slug)
-        if rid is None:
+        try:
+            rid = slug_to_id(slug)
+        except KeyError:
             return _rerender(
                 request, templates, cfg, step=1,
                 error="Выберите хотя бы один регион из списка.",
@@ -788,6 +800,14 @@ async def post_onboarding_smtp_test(
     All errors return 200 (not HTTP errors) — they are user-facing validation
     messages rendered as the fragment.  PII-free: no host/password in fragment.
     """
+    ip = client_ip(request)
+    now = time.monotonic()
+    if not _smtp_test_rate_limiter.acquire(ip, now=now):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests — try again in 10 seconds",
+        )
+
     form = await request.form()
     smtp_host = (form.get("smtp_host") or "").strip()
     smtp_login = (form.get("smtp_login") or "").strip()

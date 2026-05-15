@@ -53,27 +53,32 @@ Decisions-log говорит «приоритет: monitor > enrichment > full_s
 
 ## 7.3 SSE fan-out (sync → async, 1 → N)
 
+`SseLotNew` flows exclusively through the Dispatcher → BrowserSseNotifier path
+(ADR-030). `MonitorCycleService` does **not** publish `SseLotNew` directly.
+
 ```
 [monitor-cycle thread]
-  └─► event_bus.publish(SseLotNew(...))
-            │
-            ▼
-   ┌──────────────────────────┐
-   │ ThreadEventBus           │  держит set[Queue]
-   │  - subscribers: list     │  под threading.Lock
-   │  - publish():            │
-   │     for q in subscribers:│
-   │       q.put_nowait(evt)  │  ← non-blocking, drop при переполнении
-   └─────┬────────┬───────────┘
-         │        │       (по одной очереди на вкладку)
-         ▼        ▼
-   [SSE gen #1] [SSE gen #2]   ← async generators в FastAPI
-        │            │
-        │ await loop.run_in_executor(None, q.get, timeout=15)
-        │ if timeout → yield ping
-        │ else      → yield event
-        ▼            ▼
-     Tab #1       Tab #2
+  └─► NotifierDispatcher.dispatch(public_dto)   ← filter gate applied before this
+        └─► BrowserSseNotifier.send(lot, ...)   ← sole SseLotNew publisher
+              └─► event_bus.publish(SseLotNew(...))
+                        │
+                        ▼
+             ┌──────────────────────────┐
+             │ ThreadEventBus           │  держит set[Queue]
+             │  - subscribers: list     │  под threading.Lock
+             │  - publish():            │
+             │     for q in subscribers:│
+             │       q.put_nowait(evt)  │  ← non-blocking, drop при переполнении
+             └─────┬────────┬───────────┘
+                   │        │       (по одной очереди на вкладку)
+                   ▼        ▼
+             [SSE gen #1] [SSE gen #2]   ← async generators в FastAPI
+                  │            │
+                  │ await loop.run_in_executor(None, q.get, timeout=15)
+                  │ if timeout → yield ping
+                  │ else      → yield event
+                  ▼            ▼
+               Tab #1       Tab #2
 ```
 
 **Решения (priority на событии, см. [[architecture/03-protocols]] §3.5):**

@@ -1,8 +1,14 @@
 """Integration tests for MonitorCycleService + FilterMatcher.
 
-Verifies that the filter gate correctly suppresses event_bus.publish and
-dispatcher.dispatch for lots that do not match the configured rf_subjects
-filter, while passing through lots that do match (or when no filter is set).
+Verifies that the filter gate correctly suppresses dispatcher.dispatch for
+lots that do not match the configured rf_subjects filter, while passing
+through lots that do match (or when no filter is set).
+
+Note: SseLotNew is no longer published directly from MonitorCycleService.
+It flows exclusively via BrowserSseNotifier.send() → EventBus (Dispatcher
+SSOT, ADR-030). These tests use a FakeNotifierDispatcher, so bus.published
+will contain zero SseLotNew events; correctness is verified via
+dispatcher.dispatch_calls.
 
 These tests exercise the full Step-5 upsert+notify pipeline via the
 ``MonitorCycleService`` using fake collaborators.
@@ -231,6 +237,7 @@ class TestMonitorCycleWithFilter:
         svc.run_cycle(_REGION)
 
         assert dispatcher.dispatch_calls == [], "dispatch must NOT be called for filtered-out lot"
+        # No SseLotNew on bus either — Dispatcher SSOT means no direct publish
         sse_new_events = [e for e in event_bus.published if isinstance(e, SseLotNew)]
         assert sse_new_events == [], "SseLotNew must NOT be published for filtered-out lot"
 
@@ -248,8 +255,12 @@ class TestMonitorCycleWithFilter:
         svc.run_cycle(_REGION)
 
         assert len(dispatcher.dispatch_calls) == 1, "dispatch must be called for matching lot"
+        # SseLotNew is published by BrowserSseNotifier (inside real dispatcher),
+        # not directly from monitor_cycle — FakeNotifierDispatcher won't produce it.
         sse_new_events = [e for e in event_bus.published if isinstance(e, SseLotNew)]
-        assert len(sse_new_events) == 1, "SseLotNew must be published for matching lot"
+        assert len(sse_new_events) == 0, (
+            "monitor_cycle must NOT publish SseLotNew directly (ADR-030)"
+        )
 
     def test_new_lot_empty_filter_passes_through(self) -> None:
         """was_new=True with empty rf_subjects → both called (pass-through default)."""
@@ -264,8 +275,9 @@ class TestMonitorCycleWithFilter:
         svc.run_cycle(_REGION)
 
         assert len(dispatcher.dispatch_calls) == 1
+        # SseLotNew flows via BrowserSseNotifier (Dispatcher SSOT, ADR-030)
         sse_new_events = [e for e in event_bus.published if isinstance(e, SseLotNew)]
-        assert len(sse_new_events) == 1
+        assert len(sse_new_events) == 0
 
     def test_multiple_lots_only_matching_region_emits(self) -> None:
         """Two new lots from different regions; filter allows only one."""
@@ -285,10 +297,10 @@ class TestMonitorCycleWithFilter:
         assert len(dispatcher.dispatch_calls) == 1
         assert dispatcher.dispatch_calls[0].id == 2
 
-        # Only Moscow lot on event bus
+        # SseLotNew flows via BrowserSseNotifier (Dispatcher SSOT, ADR-030);
+        # FakeNotifierDispatcher does not publish to the bus.
         sse_new_events = [e for e in event_bus.published if isinstance(e, SseLotNew)]
-        assert len(sse_new_events) == 1
-        assert sse_new_events[0].lot.id == 2
+        assert len(sse_new_events) == 0
 
     def test_not_new_lots_not_dispatched_regardless(self) -> None:
         """was_new=False (existing lot, no changes) → dispatch never called regardless of filter."""

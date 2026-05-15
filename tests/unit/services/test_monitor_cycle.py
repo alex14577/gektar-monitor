@@ -363,12 +363,13 @@ class TestRunCycleHappyPath:
         # upsert called 3 times
         assert len(lot_repo.upsert_calls) == 3
 
-        # dispatcher.dispatch called 3 times
+        # dispatcher.dispatch called 3 times (SseLotNew flows through
+        # BrowserSseNotifier → EventBus, not directly from monitor_cycle)
         assert len(dispatcher.dispatch_calls) == 3
 
-        # SseLotNew published 3 times
+        # No SseLotNew published directly from monitor_cycle — Dispatcher SSOT
         new_events = [e for e in bus.published if isinstance(e, SseLotNew)]
-        assert len(new_events) == 3
+        assert len(new_events) == 0
 
         # cycles.close called once with status=ok
         assert len(cycles_repo.close_calls) == 1

@@ -57,7 +57,6 @@ from fis_monitor.domain.models import (
     ErrorCategory,
     Lot,
     SseCycleError,
-    SseLotNew,
 )
 from fis_monitor.domain.models import (
     lot_to_public_dto as _lot_to_public_dto,
@@ -461,9 +460,6 @@ class MonitorCycleService:
                 new_lots_count += 1
                 public_dto = _lot_to_public_dto(lot)
                 if self._filter_matcher.matches(public_dto, current_filters):
-                    self._event_bus.publish(
-                        SseLotNew(lot=public_dto, fragment_template="poster")
-                    )
                     self._notifier_dispatcher.dispatch(public_dto)
             elif upsert_result.changes:
                 # Publish status update for changed lots (optional, best-effort).
