@@ -230,7 +230,7 @@ def _assemble_feed_zones(
     items: tuple[LotUserDTO, ...],
     *,
     view_filters: ViewFilters,
-    subscribed_regions: frozenset[str],
+    subscribed_regions: frozenset[int],
 ) -> tuple[SimpleNamespace, int]:
     """Group ``LotUserDTO`` items into the template's feed zones.
 
@@ -340,7 +340,7 @@ async def feed_page(
     # bd would add a dedicated COUNT(*) by age range.
     lot_filters = _view_filters_to_lot_filters(parsed_filters)
     page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE)
-    subscribed_regions = frozenset(str(r) for r in settings.regions)
+    subscribed_regions = frozenset(settings.regions)
     zones, archive_count = _assemble_feed_zones(
         page.items,
         view_filters=parsed_filters,
