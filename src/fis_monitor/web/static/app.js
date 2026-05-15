@@ -268,20 +268,32 @@
     if (trigger) {
       const id = trigger.dataset.toggleMenu;
       const menu = document.getElementById(id);
-      if (menu) menu.hidden = !menu.hidden;
+      if (menu) {
+        menu.hidden = !menu.hidden;
+        trigger.setAttribute('aria-expanded', String(!menu.hidden));
+      }
       return;
     }
     // close all when clicking outside
     if (!e.target.closest('[data-menu]')) {
-      $$('[data-menu]').forEach(m => m.hidden = true);
+      $$('[data-menu]').forEach(m => {
+        m.hidden = true;
+        const btn = document.querySelector(`[data-toggle-menu="${m.id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
     }
   });
 
-  // ---------- modal close on Esc ----------
+  // ---------- modal + menu close on Esc ----------
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const m = $('.modal-backdrop:not([hidden])');
       if (m) m.hidden = true;
+      $$('[data-menu]:not([hidden])').forEach(menu => {
+        menu.hidden = true;
+        const btn = document.querySelector(`[data-toggle-menu="${menu.id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
     }
   });
 

@@ -1,5 +1,7 @@
 # ADR-031 — Region SSOT: site-id mapping субъектов по макрорегионам
 
+> **Partially superseded by [[decisions/ADR-035-three-scope-filter-model|ADR-035]]** (§Q3 и Addendum об `subject_site_ids` как fetch-narrowing).
+
 **Status**: Accepted
 **Date**: 2026-05-15
 **Deciders**: Backend Architect

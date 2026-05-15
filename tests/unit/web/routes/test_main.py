@@ -557,3 +557,13 @@ def test_scope_subjects_count_reflects_subject_site_ids() -> None:
     html = resp.text
     # Three monitored subjects → "Все · 3".
     assert "Все · 3" in html
+
+
+def test_sidebar_subjects_button_uses_toggle_menu_pattern() -> None:
+    """Sidebar subjects button must use data-toggle-menu wiring so app.js can show/hide it."""
+    app, _, _ = _make_app()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    html = resp.text
+    assert 'data-toggle-menu="filter-subjects-menu"' in html
+    assert 'data-menu' in html

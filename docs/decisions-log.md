@@ -46,6 +46,7 @@
 - [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]] — Onboarding-driven backfill: auto-trigger перенесён из lifespan в `_handle_step4_next` (completion handler); supersedes ADR-028 §Auto-trigger
 - [[decisions/ADR-033-web-editable-schedule|ADR-033]] — Web-editable schedule: `POST /settings/schedule` (единый payload); hot-reload через ConfigSource; `MonitorCycleService` и `FullScanService` читают `.current()` каждую итерацию
 - [[decisions/ADR-034-cookie-bridge-playwright-requests|ADR-034]] — Cookie bridge Playwright → requests.Session: `CookieStore` Protocol + `RequestsCookieStore`; `_export_cookies()` после каждого успешного login/refresh; `SessionExpiredError` по title в `SelectolaxListParser`
+- [[decisions/ADR-035-three-scope-filter-model|ADR-035]] — Three-scope filter model: Fetch (macro-region URL) / Notify (`filters.rf_subjects`) / View (cookie `view_filters`); удаление мёртвого поля `Settings.subject_site_ids`; migration shim `subject_site_ids → rf_subjects`; supersedes ADR-031 §Q3 + Addendum
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES
