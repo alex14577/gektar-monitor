@@ -395,6 +395,9 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         config_source=config_source,
         monitor_cycle=monitor_cycle,
     )
+    # Late-bind backfill into monitor_cycle (breaks circular dep: monitor_cycle
+    # was built before backfill, so it received backfill=None in its constructor).
+    monitor_cycle.set_backfill(backfill)
 
     # ---------------------------------------------------------------------------
     # on_login_success: backfill auto-trigger on headed-login completion (f5u fix).

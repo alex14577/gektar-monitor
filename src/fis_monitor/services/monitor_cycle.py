@@ -36,7 +36,7 @@ import queue
 import threading
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
@@ -78,6 +78,25 @@ if TYPE_CHECKING:
     from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
 
 logger = logging.getLogger(__name__)
+
+_PARSE_MISS_THRESHOLD = 5
+
+
+# ---------------------------------------------------------------------------
+# BackfillHandle Protocol (avoids direct import / circular dep with backfill.py)
+# ---------------------------------------------------------------------------
+
+class BackfillHandle(Protocol):
+    def maybe_start(
+        self,
+        region_id: int,
+        site_total: int | None,
+        db_count: int,
+        stop_event: threading.Event,
+        *,
+        len_parsed_hint: int = 0,
+    ) -> bool: ...
+
 
 # DEFAULT_TRACKED_FIELDS and _parsed_row_to_lot are re-exported from domain/models.py
 # for backward-compat imports (e.g. tests that import from monitor_cycle directly).
@@ -145,6 +164,7 @@ class MonitorCycleService:
         filter_matcher: FilterMatcher,
         url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
         enrichment_workers: int = 4,
+        backfill: BackfillHandle | None = None,
     ) -> None:
         self._http = http
         self._list_parser = list_parser
@@ -159,6 +179,7 @@ class MonitorCycleService:
         self._filter_matcher = filter_matcher
         self._url_builder = url_builder
         self._enrichment_workers = enrichment_workers
+        self._backfill: BackfillHandle | None = backfill
         # Trigger queue: request_run_now() places a sentinel here; _wait_for_next_pass()
         # consumes it to wake the scheduler early.  maxsize=1 ensures at most one
         # pending sentinel exists; a second put_nowait raises queue.Full which is
@@ -169,6 +190,10 @@ class MonitorCycleService:
         # catalogue writes.  Guarded by _backfill_lock.
         self._regions_in_backfill: set[int] = set()
         self._backfill_lock = threading.Lock()
+        # Stop-event stored at run_forever entry; used by _run_cycle_inner for delta-trigger.
+        self._stop_event: threading.Event | None = None
+        # Per-region count of consecutive total_count=None parse misses.
+        self._parse_miss_counter: dict[int, int] = {}
 
     # Default poll interval used when ``interval_minutes`` is 0 (continuous mode).
     _DEFAULT_POLL_INTERVAL_SEC: float = 60.0
@@ -197,6 +222,10 @@ class MonitorCycleService:
         """
         with self._backfill_lock:
             self._regions_in_backfill.discard(region)
+
+    def set_backfill(self, backfill: BackfillHandle) -> None:
+        """Late-bind BackfillService after both services are constructed (breaks circular dep)."""
+        self._backfill = backfill
 
     def request_run_now(self) -> None:
         """Wake the scheduler for an immediate pass (non-blocking, idempotent).
@@ -231,6 +260,7 @@ class MonitorCycleService:
             continues — one bad region must not kill the scheduler.
         """
         logger.info("monitor_cycle: scheduler started")
+        self._stop_event = stop_event
 
         while not stop_event.is_set():
             settings = self._config_source.current()
@@ -439,6 +469,38 @@ class MonitorCycleService:
             return self._close_with_parse_bug(
                 exc, cycle_id=cycle_id, region=region, started_at=started_at
             )
+
+        # ---------- Step 2c: delta-trigger --------------------------------
+        if parsed_page.total_count is None:
+            miss = self._parse_miss_counter.get(region, 0) + 1
+            self._parse_miss_counter[region] = miss
+            if miss >= _PARSE_MISS_THRESHOLD:
+                logger.error(
+                    "delta_check.parse_failure: region=%s consecutive_misses=%d "
+                    "(total_count absent from DOM)",
+                    region,
+                    miss,
+                )
+        else:
+            self._parse_miss_counter.pop(region, None)
+            if self._backfill is not None and self._stop_event is not None:
+                db_count = self._lot_repo.count_active(region_id=region)
+                decision = self._backfill.maybe_start(
+                    region,
+                    parsed_page.total_count,
+                    db_count,
+                    self._stop_event,
+                    len_parsed_hint=len(parsed_rows),
+                )
+                logger.info(
+                    "delta_check.fired: region=%s total_count=%d db_count=%d "
+                    "len_hint=%d decision=%s",
+                    region,
+                    parsed_page.total_count,
+                    db_count,
+                    len(parsed_rows),
+                    decision,
+                )
 
         # ---------- Step 3: convert ParsedListRow → Lot -------------------
         now = self._clock.now()
