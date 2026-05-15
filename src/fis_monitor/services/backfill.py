@@ -84,7 +84,6 @@ class _PaginatedListFetcherProto(Protocol):
         stop_event: threading.Event,
         *,
         sleep_between_pages: float,
-        subject_site_ids: tuple[int, ...] = (),
     ) -> object: ...  # returns Iterator[ParsedListRow]
 
 

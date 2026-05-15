@@ -6,8 +6,8 @@ Endpoints:
   POST /settings/smtp/test    — send a test email to a given recipient.
   POST /settings/regions      — replace macro-region scope; truncates subjects + htmx partial.
   POST /settings/recipients   — replace ``Settings.notifications.email.recipients``.
-  POST /settings/subjects     — replace ``Settings.subject_site_ids`` (fetch-scope, ADR-031);
-                                htmx partial; ≥1 subject required.
+  POST /settings/subjects     — replace ``Settings.filters.rf_subjects`` (notify scope, ADR-035);
+                                htmx partial; empty list = notify-all.
   POST /settings/schedule     — replace monitoring schedule fields (ADR-033).
 
 DI: all dependencies are injected via Depends(); routes are decoupled from
@@ -32,7 +32,6 @@ from fis_monitor.domain.regions import (
     REGION_BY_SLUG,
     REGION_TITLE_NOMINATIVE_BY_SLUG,
     SUBJECT_TITLE_BY_ID,
-    subjects_for_macros,
 )
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
@@ -142,9 +141,11 @@ def _scope_template_context(settings: Any) -> dict[str, Any]:
 
     Encapsulates the derivation logic so GET /settings, POST /settings/regions
     and POST /settings/subjects all render the same shape.
+
+    available_subjects is the FULL notify-scope catalog (ADR-035: independent
+    of macro-regions); all 19 subjects are always shown.
     """
-    scoped_ids = subjects_for_macros(settings.regions)
-    available_subjects = [(sid, SUBJECT_TITLE_BY_ID[sid]) for sid in scoped_ids]
+    available_subjects = sorted(SUBJECT_TITLE_BY_ID.items(), key=lambda t: t[1])
     all_macro_regions = [
         (REGION_BY_SLUG[slug], title)
         for slug, title in REGION_TITLE_NOMINATIVE_BY_SLUG.items()
@@ -273,10 +274,6 @@ def post_regions(
       - at least one region must be selected;
       - each id must be a known macro-region (currently {1=ДФО, 2=Арктика}).
 
-    Side effect: ``subject_site_ids`` is auto-truncated to the intersection
-    with ``subjects_for_macros(new_regions)`` so the persisted subject list
-    can never reference an out-of-scope macro after the swap.
-
     Returns:
         200 with _scope_and_subjects.html.jinja partial; htmx swaps the whole
         ``#scope-and-subjects`` container so the subject chips reflect the
@@ -298,15 +295,8 @@ def post_regions(
     # Deduplicate while preserving submission order.
     unique_regions = list(dict.fromkeys(region_ids))
     current = config_source.current()
-    valid_subjects = set(subjects_for_macros(unique_regions))
-    truncated_subjects = [sid for sid in current.subject_site_ids if sid in valid_subjects]
 
-    new_settings = current.model_copy(
-        update={
-            "regions": unique_regions,
-            "subject_site_ids": truncated_subjects,
-        }
-    )
+    new_settings = current.model_copy(update={"regions": unique_regions})
     config_source.save(new_settings)
     return templates.TemplateResponse(
         request,
@@ -342,38 +332,35 @@ def post_recipients(
 @router.post("/subjects", response_model=None)
 def post_subjects(
     request: Request,
-    subject_site_ids: Annotated[list[int], Form()] = [],  # noqa: B006 — FastAPI never mutates repeated-key default
+    rf_subjects: Annotated[list[int], Form()] = [],  # noqa: B006 — FastAPI never mutates repeated-key default
     config_source: Any = Depends(get_config_source),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> Response:
-    """Replace the fetch-scope subject filter (ADR-031).
+    """Replace the notify-scope subject filter (writes to filters.rf_subjects per ADR-035).
 
-    Accepts form-encoded repeated ``subject_site_ids`` keys from the htmx
-    chip form. Validation:
-      - at least one subject must be selected;
-      - each id must belong to ``subjects_for_macros(current.regions)``.
+    Accepts form-encoded repeated ``rf_subjects`` keys from the htmx chip form.
+    Validation:
+      - each id must be in the FULL SUBJECT_TITLE_BY_ID catalog (19 subjects);
+        notify scope is independent of macro-regions (ADR-035 I4).
+      - empty list is allowed (empty = notify-all per ADR-035 I4).
 
     Returns:
         200 with _scope_and_subjects.html.jinja partial; htmx swaps the
         ``#scope-and-subjects`` container.
-        422 if the selection is empty or contains out-of-scope ids.
+        422 if any id is not in the known catalog.
     """
-    current = config_source.current()
-    valid_ids = set(subjects_for_macros(current.regions))
-    out_of_scope = [sid for sid in subject_site_ids if sid not in valid_ids]
-    if out_of_scope:
+    valid_ids = frozenset(SUBJECT_TITLE_BY_ID)
+    unknown = [sid for sid in rf_subjects if sid not in valid_ids]
+    if unknown:
         raise HTTPException(
             status_code=422,
-            detail=f"subject_site_ids out of scope for current regions: {out_of_scope}",
-        )
-    if not subject_site_ids:
-        raise HTTPException(
-            status_code=422,
-            detail="At least one subject must be selected.",
+            detail=f"Unknown subject ids (not in catalog): {unknown}",
         )
 
-    unique_subjects = list(dict.fromkeys(subject_site_ids))
-    new_settings = current.model_copy(update={"subject_site_ids": unique_subjects})
+    unique_subjects = list(dict.fromkeys(rf_subjects))
+    current = config_source.current()
+    new_filters = current.filters.model_copy(update={"rf_subjects": unique_subjects})
+    new_settings = current.model_copy(update={"filters": new_filters})
     config_source.save(new_settings)
     return templates.TemplateResponse(
         request,

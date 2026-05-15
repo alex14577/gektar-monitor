@@ -105,13 +105,12 @@ class TestPostScheduleHappyPath:
 
     def test_does_not_clobber_other_fields(self) -> None:
         """Schedule update must preserve unrelated Settings fields."""
-        initial = Settings(regions=[2], subject_site_ids=[27])
+        initial = Settings(regions=[2])
         app, fc = _make_app(FakeConfigSource(initial))
         with TestClient(app) as client:
             client.post("/settings/schedule", data=_VALID_PAYLOAD)
         saved = fc.save_calls[0]
         assert saved.regions == [2], "regions must be preserved"
-        assert saved.subject_site_ids == [27], "subject_site_ids must be preserved"
 
     def test_hot_reload_smoke(self) -> None:
         """After save, config_source.current() reflects the new schedule.

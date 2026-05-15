@@ -35,6 +35,7 @@ from fastapi.templating import Jinja2Templates
 
 from fis_monitor.domain.interfaces import Clock, LotRepository, UserStateRepository
 from fis_monitor.domain.models import LotUserDTO, SessionStatus, Settings
+from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 from fis_monitor.services.catchup_dismiss import CatchupDismissService
 from fis_monitor.services.dnd import DndService
 from fis_monitor.services.login import LoginService
@@ -266,12 +267,12 @@ def _build_scope_context(settings: Settings) -> SimpleNamespace:
     """Derive sidebar scope chips from configured regions.
 
     ``macro_regions``: the configured region codes (rendered as chip labels
-    by the template).  ``subjects_count``: count of monitored subjects from
-    settings.subject_site_ids.
+    by the template).  ``subjects_count``: total subjects available in the
+    full catalog (ADR-035: view scope is independent of notify selection).
     """
     return SimpleNamespace(
         macro_regions=list(settings.regions),
-        subjects_count=len(settings.subject_site_ids),
+        subjects_count=len(SUBJECT_TITLE_BY_ID),
     )
 
 

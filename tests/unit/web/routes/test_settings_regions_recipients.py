@@ -9,11 +9,10 @@ and a dedicated all-methods test exercises every method.
 Coverage (POST /settings/regions — htmx form, ≥1 macro-region required):
   1. Happy path with form-encoded region_ids → 200 + partial HTML.
   2. Saved Settings.regions matches submission (deduplicated).
-  3. subject_site_ids auto-truncated to subjects_for_macros(new_regions).
-  4. Other Settings fields preserved.
-  5. Empty selection → 422.
-  6. Unknown macro id (e.g. 99) → 422.
-  7. Duplicates collapsed.
+  3. Other Settings fields preserved.
+  4. Empty selection → 422.
+  5. Unknown macro id (e.g. 99) → 422.
+  6. Duplicates collapsed.
 
 Coverage (POST /settings/recipients): unchanged JSON contract.
 """
@@ -141,19 +140,6 @@ def test_post_regions_dedups_submission() -> None:
     saved = fc.save_calls[0]
     assert saved.regions == [1, 2]
 
-
-def test_post_regions_truncates_subjects_to_new_scope() -> None:
-    """Dropping a macro auto-removes subjects that belonged only to it."""
-    # 27 (Карелия) is Arctic-only. Initial state: both macros selected, Карелия picked.
-    initial = Settings(regions=[1, 2], subject_site_ids=[27, 87])
-    app, fc = _make_app(FakeConfigSource(settings=initial))
-    with TestClient(app, raise_server_exceptions=True) as client:
-        client.post("/settings/regions", data={"region_ids": ["1"]})  # keep only ДФО
-    saved = fc.save_calls[0]
-    assert saved.regions == [1]
-    # 87 (Якутия) belongs to both → kept; 27 (Карелия) Arctic-only → dropped.
-    assert 27 not in saved.subject_site_ids
-    assert 87 in saved.subject_site_ids
 
 
 def test_post_regions_preserves_other_settings_fields() -> None:

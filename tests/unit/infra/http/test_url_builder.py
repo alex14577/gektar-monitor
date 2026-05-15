@@ -8,7 +8,6 @@ Tests:
 - frozen dataclass rejects attribute mutation
 - default sort=-DATE_CREATE is appended raw (RFC 3986 unreserved chars)
 - custom sort=-DATE_UPDATE is substituted correctly
-- subject_site_ids non-empty appends FreeLotSearch[rfSubjectId][] params
 """
 from __future__ import annotations
 
@@ -44,12 +43,10 @@ class TestLotListUrl:
         )
 
     def test_region_param_uses_macro_id(self) -> None:
-        """region= macro-param must appear; old rfSubjectId syntax must not (ADR-031)."""
+        """region= macro-param must appear; rfSubjectId must not appear (ADR-035)."""
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
         url = builder.lot_list_url(region=1)
         assert "region=1" in url
-        # The old field is gone from the base query; it only appears when
-        # subject_site_ids is non-empty.
         assert "FreeLotSearch%5BrfSubjectId%5D%5B%5D=1" not in url
 
     def test_use_filter_pocket_present(self) -> None:
@@ -71,16 +68,8 @@ class TestLotListUrl:
         assert "sort=-DATE_UPDATE" in url
         assert "DATE_CREATE" not in url
 
-    def test_subject_site_ids_appended_when_non_empty(self) -> None:
-        """Non-empty subject_site_ids appends FreeLotSearch[rfSubjectId][] params."""
-        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
-        url = builder.lot_list_url(region=1, subject_site_ids=(88, 89))
-        assert "region=1" in url
-        assert "FreeLotSearch%5BrfSubjectId%5D%5B%5D=88" in url
-        assert "FreeLotSearch%5BrfSubjectId%5D%5B%5D=89" in url
-
-    def test_subject_site_ids_empty_no_rfsubjectid_param(self) -> None:
-        """Empty subject_site_ids (default) must not produce rfSubjectId params."""
+    def test_no_rfsubjectid_param_in_url(self) -> None:
+        """lot_list_url must never emit rfSubjectId params (ADR-035: fetch = macro only)."""
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
         url = builder.lot_list_url(region=1)
         assert "rfSubjectId" not in url

@@ -1,12 +1,12 @@
-"""Unit tests for POST /settings/subjects (ADR-031, gektar_monitor-ekb).
+"""Unit tests for POST /settings/subjects (ADR-035).
 
 Coverage:
   1. POST /settings/subjects happy path → 200 + partial HTML, config saved.
-  2. POST /settings/subjects empty list → 422 (≥1 subject required, gektar_monitor-rsf).
-  3. POST /settings/subjects out-of-scope id → 422.
+  2. POST /settings/subjects empty list → 200, saved as [] (notify-all per ADR-035 I4).
+  3. POST /settings/subjects unknown catalog id → 422.
   4. POST /settings/subjects does not clobber other Settings fields.
-  5. GET /settings HTML includes subject chip-picker with scoped subject names.
-  6. GET /filters/subjects returns scoped subjects (real names, not PLACEHOLDER).
+  5. GET /settings HTML includes subject chip-picker with all catalog subjects.
+  6. GET /settings HTML shows correct checked state from filters.rf_subjects.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
 from fis_monitor.domain.models import Settings
+from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 from fis_monitor.web.deps import (
     get_config_source,
     get_settings_service,
@@ -85,36 +86,36 @@ def _make_app(
 
 class TestPostSubjectsHappyPath:
     def test_returns_200_html_on_valid_ids(self) -> None:
-        """Valid site-ids within regions=[1] → 200 + partial HTML."""
-        fc = FakeConfigSource(Settings(regions=[1]))
+        """Valid catalog ids → 200 + partial HTML (ADR-035: full catalog, any region)."""
+        fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
-        # 87 = Якутия, belongs to ДФО (macro 1)
+        # 87 = Якутия, 27 = Карелия — both are in SUBJECT_TITLE_BY_ID
         with TestClient(app) as client:
             resp = client.post(
                 "/settings/subjects",
-                data="subject_site_ids=87&subject_site_ids=88",
+                data="rf_subjects=87&rf_subjects=27",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
         assert resp.status_code == 200, resp.text
         assert "text/html" in resp.headers["content-type"]
         assert 'id="scope-and-subjects"' in resp.text
 
-    def test_saves_subject_site_ids(self) -> None:
-        """POST /settings/subjects stores the new ids via config_source.save()."""
-        fc = FakeConfigSource(Settings(regions=[1]))
+    def test_saves_rf_subjects(self) -> None:
+        """POST /settings/subjects stores the new ids in filters.rf_subjects."""
+        fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
         with TestClient(app) as client:
             client.post(
                 "/settings/subjects",
-                data="subject_site_ids=87&subject_site_ids=88",
+                data="rf_subjects=87&rf_subjects=27",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
         assert len(fc.save_calls) == 1
-        assert set(fc.save_calls[0].subject_site_ids) == {87, 88}
+        assert set(fc.save_calls[0].filters.rf_subjects) == {87, 27}
 
-    def test_empty_list_rejected(self) -> None:
-        """Empty subject_site_ids → 422 (at least one subject required)."""
-        fc = FakeConfigSource(Settings(regions=[1]))
+    def test_empty_list_is_accepted(self) -> None:
+        """Empty rf_subjects → 200, saved as [] (notify-all per ADR-035 I4)."""
+        fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
         with TestClient(app) as client:
             resp = client.post(
@@ -122,23 +123,39 @@ class TestPostSubjectsHappyPath:
                 data="",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
-        assert resp.status_code == 422, resp.text
-        assert "At least one" in resp.text
-        assert fc.save_calls == []
+        assert resp.status_code == 200, resp.text
+        assert len(fc.save_calls) == 1
+        assert fc.save_calls[0].filters.rf_subjects == []
 
     def test_does_not_clobber_other_fields(self) -> None:
-        """subject_site_ids update must preserve other Settings fields."""
-        initial = Settings(interval_minutes=42, regions=[1])
+        """rf_subjects update must preserve other Settings fields."""
+        initial = Settings(interval_minutes=42)
         fc = FakeConfigSource(initial)
         app, _ = _make_app(fc)
         with TestClient(app) as client:
             client.post(
                 "/settings/subjects",
-                data="subject_site_ids=87",
+                data="rf_subjects=87",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
         saved = fc.save_calls[0]
         assert saved.interval_minutes == 42, "interval_minutes must be preserved"
+
+    def test_any_catalog_id_valid_regardless_of_regions(self) -> None:
+        """ADR-035: notify scope is independent of regions.
+
+        27 (Карелия) is Арктика-only but must be accepted even when regions=[1] (ДФО).
+        """
+        fc = FakeConfigSource(Settings(regions=[1]))
+        app, _ = _make_app(fc)
+        with TestClient(app) as client:
+            resp = client.post(
+                "/settings/subjects",
+                data="rf_subjects=27",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+        assert resp.status_code == 200, resp.text
+        assert fc.save_calls[0].filters.rf_subjects == [27]
 
 
 # ---------------------------------------------------------------------------
@@ -147,72 +164,79 @@ class TestPostSubjectsHappyPath:
 
 
 class TestPostSubjectsValidation:
-    def test_out_of_scope_id_returns_422(self) -> None:
-        """site-id not in subjects_for_macros(regions) → 422."""
-        # regions=[1] (ДФО); site-id 27 (Карелия) belongs to Арктика only
-        fc = FakeConfigSource(Settings(regions=[1]))
+    def test_unknown_catalog_id_returns_422(self) -> None:
+        """site-id not in SUBJECT_TITLE_BY_ID → 422."""
+        fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
         with TestClient(app) as client:
             resp = client.post(
                 "/settings/subjects",
-                data="subject_site_ids=27",
+                data="rf_subjects=99999",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
         assert resp.status_code == 422, resp.text
 
-    def test_out_of_scope_error_mentions_id(self) -> None:
+    def test_unknown_id_error_mentions_id(self) -> None:
         """422 detail must mention the offending id."""
-        fc = FakeConfigSource(Settings(regions=[1]))
+        fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
         with TestClient(app) as client:
             resp = client.post(
                 "/settings/subjects",
-                data="subject_site_ids=27",
+                data="rf_subjects=99999",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
-        assert "27" in resp.text
-
-    def test_both_regions_allows_shared_subjects(self) -> None:
-        """87 (Якутия) is in both ДФО and Арктика — valid for regions=[1,2]."""
-        fc = FakeConfigSource(Settings(regions=[1, 2]))
-        app, _ = _make_app(fc)
-        with TestClient(app) as client:
-            resp = client.post(
-                "/settings/subjects",
-                data="subject_site_ids=87&subject_site_ids=27",
-                headers={"content-type": "application/x-www-form-urlencoded"},
-            )
-        assert resp.status_code == 200, resp.text
+        assert "99999" in resp.text
 
 
 # ---------------------------------------------------------------------------
-# GET /settings HTML — subjects chip-picker renders correct names
+# GET /settings HTML — subjects chip-picker renders full catalog
 # ---------------------------------------------------------------------------
 
 
 class TestSettingsPageSubjectsUI:
-    def test_subject_names_in_html(self) -> None:
-        """GET /settings HTML must contain subject names (not raw numbers)."""
-        fc = FakeConfigSource(Settings(regions=[1]))
+    def test_all_catalog_subjects_in_html(self) -> None:
+        """GET /settings HTML must contain all catalog subject names."""
+        fc = FakeConfigSource(Settings())
         app, _ = _make_app(fc)
         with TestClient(app) as client:
             resp = client.get("/settings", headers={"accept": "text/html"})
         assert resp.status_code == 200, resp.text
-        # At least one known ДФО subject name must appear
-        assert "Якутия" in resp.text, "Expected ДФО subject name in settings page"
+        # All 19 subjects must appear.
+        for name in SUBJECT_TITLE_BY_ID.values():
+            assert name in resp.text, f"Expected catalog subject '{name}' in settings page"
 
-    def test_current_subject_site_ids_checked(self) -> None:
-        """Settings with subject_site_ids=[87] → checkbox value=87 is checked."""
-        fc = FakeConfigSource(Settings(regions=[1], subject_site_ids=[87]))
+    def test_heading_is_subiekty_uvedomleniy(self) -> None:
+        """Settings page must use new heading 'Субъекты уведомлений'."""
+        fc = FakeConfigSource(Settings())
+        app, _ = _make_app(fc)
+        with TestClient(app) as client:
+            resp = client.get("/settings", headers={"accept": "text/html"})
+        assert "Субъекты уведомлений" in resp.text
+
+    def test_selected_rf_subjects_checked(self) -> None:
+        """filters.rf_subjects=[87] → checkbox value=87 is checked."""
+        from fis_monitor.domain.models import FiltersConfig
+
+        fc = FakeConfigSource(Settings(filters=FiltersConfig(rf_subjects=[87])))
         app, _ = _make_app(fc)
         with TestClient(app) as client:
             resp = client.get("/settings", headers={"accept": "text/html"})
         body = resp.text
-        # The checked checkbox must have value="87" co-located in the same <input> tag.
+        # value=87 must be checked.
         assert re.search(r'<input[^>]*value="87"[^>]*\bchecked\b', body), (
             "Expected value=87 input to be checked"
         )
-        # Negative case: site-id 88 must NOT be checked (it is not in subject_site_ids).
+        # value=88 must NOT be checked (it is not in rf_subjects).
         assert not re.search(r'<input[^>]*value="88"[^>]*\bchecked\b', body), (
             "Expected value=88 input to NOT be checked"
         )
+
+    def test_form_input_name_is_rf_subjects(self) -> None:
+        """Form checkboxes must use name='rf_subjects', not the legacy name."""
+        fc = FakeConfigSource(Settings())
+        app, _ = _make_app(fc)
+        with TestClient(app) as client:
+            resp = client.get("/settings", headers={"accept": "text/html"})
+        assert 'name="rf_subjects"' in resp.text
+        assert 'name="subject_site_ids"' not in resp.text

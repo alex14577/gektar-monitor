@@ -548,15 +548,21 @@ def test_feed_subjects_filter_passed_to_lot_query() -> None:
     assert used.regions == (77, 16)
 
 
-def test_scope_subjects_count_reflects_subject_site_ids() -> None:
-    """AC#4: sidebar «Все · N» reflects count of monitored subjects (subject_site_ids)."""
-    settings = make_settings(regions=[1], subject_site_ids=[87, 88, 25])
+def test_scope_subjects_count_reflects_full_catalog() -> None:
+    """Sidebar «Все · N» reflects the full SUBJECT_TITLE_BY_ID catalog count.
+
+    ADR-035: view scope is independent of notify selection (filters.rf_subjects).
+    Even when rf_subjects has only 3 ids, the sidebar shows all 19 subjects.
+    """
+    from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
+
+    settings = make_settings(regions=[1], subject_site_ids=[87, 88, 25])  # migrated → rf_subjects
     app, _, _ = _make_app(settings=settings)
     with TestClient(app, raise_server_exceptions=True) as client:
         resp = client.get("/")
     html = resp.text
-    # Three monitored subjects → "Все · 3".
-    assert "Все · 3" in html
+    # Full catalog (19) → "Все · 19".
+    assert f"Все · {len(SUBJECT_TITLE_BY_ID)}" in html
 
 
 def test_sidebar_subjects_button_uses_toggle_menu_pattern() -> None:

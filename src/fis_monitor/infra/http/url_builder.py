@@ -17,9 +17,6 @@ _LIST_QUERY = "?region={region}&use_filter_pocket=1&sort={sort}"
 # Yii2 pagination parameter.  Page 1 is the default (omit for first page to
 # keep URLs canonical); page 2+ appends "&FreeLotSearch_page={page}".
 _LIST_PAGE_PARAM = "&FreeLotSearch_page={page}"
-# Subject site-id filter appended when subject_site_ids is non-empty.
-# Percent-encoded square brackets are required by the Yii2 multi-value syntax.
-_SUBJECT_PARAM = "&FreeLotSearch%5BrfSubjectId%5D%5B%5D={sid}"
 _DETAIL_PATH = "/cabinet/free-lot-view?id={lot_id}"
 
 # Default sort: DESC by date_create — newest lots first (research v3 confirmed,
@@ -55,18 +52,13 @@ class TorgiUrlBuilder:
         region: int,
         sort: str = DEFAULT_LIST_SORT,
         page: int = 1,
-        subject_site_ids: tuple[int, ...] = (),
     ) -> str:
         """Return the list-page URL for *region* with optional *sort* and *page*.
 
         *region* is a macro_id (1=ДФО, 2=Арктика) passed via the dedicated
         ``region=`` parameter.  The server filters the entire macro-region in
-        one request.
-
-        *subject_site_ids* is an optional tuple of site-id values (72–96, per
-        ADR-031 ``Settings.subject_site_ids``).  When non-empty, each id is
-        appended as ``FreeLotSearch[rfSubjectId][]=<id>`` to narrow the fetch
-        scope to specific subjects within the macro-region.
+        one request.  Subject-narrowing is not performed at the fetch layer
+        (ADR-035: fetch scope = macro-region only).
 
         *sort* defaults to ``DEFAULT_LIST_SORT`` ("-DATE_CREATE") so the server
         returns newest lots first — a P1 correctness fix (without DESC sort,
@@ -82,8 +74,6 @@ class TorgiUrlBuilder:
         performed here; callers enforce the 1..1000 guard.
         """
         base = f"{self.base_url}{_LIST_PATH}{_LIST_QUERY.format(region=region, sort=sort)}"
-        for sid in subject_site_ids:
-            base += _SUBJECT_PARAM.format(sid=sid)
         if page > 1:
             base += _LIST_PAGE_PARAM.format(page=page)
         return base

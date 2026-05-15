@@ -24,7 +24,7 @@ DI: ViewFiltersService is injected via get_view_filters_service() from deps.py.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -36,7 +36,7 @@ from fis_monitor.services.view_filters import (
     ViewFilters,
     ViewFiltersService,
 )
-from fis_monitor.web.deps import get_config_source, get_templates, get_view_filters_service
+from fis_monitor.web.deps import get_templates, get_view_filters_service
 
 __all__ = ["router"]
 
@@ -120,23 +120,20 @@ def get_subjects(
     request: Request,
     templates: Jinja2Templates = Depends(get_templates),
     svc: ViewFiltersService = Depends(get_view_filters_service),
-    config_source: Any = Depends(get_config_source),
 ) -> HTMLResponse:
-    """Return partial HTML with subject checkboxes scoped to settings.subject_site_ids.
+    """Return partial HTML with subject checkboxes for the full SUBJECT_TITLE_BY_ID catalog.
 
-    Subject list contains only the subjects the user actually monitors.
+    View scope (popover) shows all 19 subjects regardless of the user's notify
+    selection (ADR-035: view scope is independent of filters.rf_subjects).
     Labels are human-readable names from SUBJECT_TITLE_BY_ID; values are site-ids.
-    Order follows settings.subject_site_ids. Empty list is a valid state.
+    ``selected_subjects`` comes from the view-filter cookie (user's active filter).
 
     The checkboxes carry ``form="filters"`` so they participate in the main
     #filters form submission even though they live in a popover outside it.
     """
-    settings = config_source.current()
-    subjects = [
-        (sid, SUBJECT_TITLE_BY_ID[sid])
-        for sid in settings.subject_site_ids
-        if sid in SUBJECT_TITLE_BY_ID
-    ]
+    # Popover shows the full catalog (ADR-035: view scope is independent of
+    # notify selection in filters.rf_subjects).
+    subjects = sorted(SUBJECT_TITLE_BY_ID.items(), key=lambda t: t[1])
     current = _current_filters(request, svc)
     ctx = {
         "subjects": subjects,

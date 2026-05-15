@@ -354,41 +354,49 @@ class TestGetSubjects:
         assert "text/html" in resp.headers["content-type"]
 
     def test_contains_checkbox_input(self) -> None:
-        """Template renders a checkbox for each subject in subject_site_ids."""
-        cs = _FakeConfigSource(Settings(subject_site_ids=[87]))
+        """Template renders a checkbox for each subject in filters.rf_subjects."""
+        cs = _FakeConfigSource(Settings(subject_site_ids=[87]))  # migrated → rf_subjects
         app = _build_app(config_source=cs)
         with TestClient(app) as client:
             resp = client.get("/filters/subjects")
         assert 'type="checkbox"' in resp.text, "Expected checkbox input in response"
 
     def test_subject_names_displayed(self) -> None:
-        """Template renders names from SUBJECT_TITLE_BY_ID for subject_site_ids."""
-        cs = _FakeConfigSource(Settings(subject_site_ids=[87]))
+        """Template renders names from SUBJECT_TITLE_BY_ID for filters.rf_subjects."""
+        cs = _FakeConfigSource(Settings(subject_site_ids=[87]))  # migrated → rf_subjects
         app = _build_app(config_source=cs)
         with TestClient(app) as client:
             resp = client.get("/filters/subjects")
         assert "Якутия" in resp.text, "Expected subject name in response"
 
-    def test_only_monitored_subjects_rendered(self) -> None:
-        """Only subjects in subject_site_ids appear — not the full macro-region scope."""
-        cs = _FakeConfigSource(Settings(subject_site_ids=[27, 28]))
+    def test_full_catalog_rendered_regardless_of_rf_subjects(self) -> None:
+        """Popover shows all catalog subjects (ADR-035: view scope is region-independent).
+
+        Even when rf_subjects contains only [27, 28], all 19 subjects including
+        Якутия (87) must appear — view scope is independent of notify selection.
+        """
+        cs = _FakeConfigSource(Settings(subject_site_ids=[27, 28]))  # migrated → rf_subjects
         app = _build_app(config_source=cs)
         with TestClient(app) as client:
             resp = client.get("/filters/subjects")
         from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
         assert SUBJECT_TITLE_BY_ID[27] in resp.text
         assert SUBJECT_TITLE_BY_ID[28] in resp.text
-        # site-id 87 (Якутия) is not in subject_site_ids — must not appear.
-        assert "Якутия" not in resp.text
+        # All subjects including Якутия (87) must appear — full catalog.
+        assert "Якутия" in resp.text
 
-    def test_empty_subject_site_ids_renders_no_checkboxes(self) -> None:
-        """Empty subject_site_ids → no checkboxes rendered (valid state)."""
-        cs = _FakeConfigSource(Settings(subject_site_ids=[]))
+    def test_empty_rf_subjects_renders_all_catalog_checkboxes(self) -> None:
+        """Empty filters.rf_subjects → all 19 catalog subjects still rendered."""
+        from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
+
+        cs = _FakeConfigSource(Settings())
         app = _build_app(config_source=cs)
         with TestClient(app) as client:
             resp = client.get("/filters/subjects")
         assert resp.status_code == 200
-        assert 'type="checkbox"' not in resp.text
+        assert 'type="checkbox"' in resp.text
+        # Full catalog must appear.
+        assert len(SUBJECT_TITLE_BY_ID) == 19  # guard against catalog drift
 
     def test_selected_subjects_pre_checked(self) -> None:
         """Checkbox for a subject in the view_filters cookie must have checked attribute.
@@ -398,7 +406,7 @@ class TestGetSubjects:
         """
         from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
 
-        cs = _FakeConfigSource(Settings(subject_site_ids=[87, 88]))
+        cs = _FakeConfigSource(Settings(subject_site_ids=[87, 88]))  # migrated → rf_subjects
         svc = ViewFiltersService()
         app = _build_app(svc=svc, config_source=cs)
 

@@ -465,17 +465,32 @@ class Settings(BaseModel):
 
     model_config = _DOMAIN_MODEL_CONFIG
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_subject_site_ids(cls, data: Any) -> Any:
+        # Preserves on-disk user intent during ADR-035 transition.
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)  # defensive copy — never mutate caller's dict
+        legacy = data.pop("subject_site_ids", None)
+        if legacy is not None:
+            filters = data.get("filters") or {}
+            # Coerce FiltersConfig instance so .get() is always safe below.
+            if isinstance(filters, FiltersConfig):
+                filters = filters.model_dump()
+            elif not isinstance(filters, dict):
+                filters = {}
+            if not filters.get("rf_subjects"):
+                filters["rf_subjects"] = legacy
+                data["filters"] = filters
+        return data
+
     mode: Literal["local", "server"] = "local"
     # Default 1 min: отзывчивый out-of-box. Per docs/ops/server-performance-v3.md
     # типичный цикл ~71s, 60s между full-pass — рабочая нижняя планка.
     interval_minutes: Annotated[int, Field(ge=0, le=60)] = 1
     timezone: str = "Europe/Moscow"
     regions: list[int] = Field(default_factory=lambda: [1, 2])
-    # fetch-scope subject filter: site-id values (72–96) per ADR-031.
-    # Empty = fetch all subjects within the selected macro-regions (default).
-    # Non-empty = also send FreeLotSearch[rfSubjectId][] to narrow fetch scope.
-    # Distinct from FiltersConfig.rf_subjects which is a notify-time filter.
-    subject_site_ids: list[int] = Field(default_factory=list)
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     ui: UIConfig = Field(default_factory=UIConfig)

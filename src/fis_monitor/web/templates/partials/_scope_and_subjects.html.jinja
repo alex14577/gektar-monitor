@@ -2,13 +2,12 @@
    _scope_and_subjects.html.jinja — atomic block for monitoring scope.
 
    Returned by POST /settings/regions and POST /settings/subjects so htmx
-   swaps the whole #scope-and-subjects container outerHTML — that way
-   changing the macro-region set automatically refreshes the subject chip
-   list (subjects_for_macros) without a page reload.
+   swaps the whole #scope-and-subjects container outerHTML.
 
    Context:
-     settings              — Settings instance (regions, subject_site_ids).
-     available_subjects    — list[(site_id, name)] scoped to current regions.
+     settings              — Settings instance (regions, filters.rf_subjects).
+     available_subjects    — list[(site_id, name)] — full SUBJECT_TITLE_BY_ID
+                             catalog (ADR-035: notify scope is region-independent).
      all_macro_regions     — list[(macro_id, title_nominative)] for chip render.
      scope_error           — optional str shown above forms on validation 422.
    ======================================================================== #}
@@ -60,49 +59,42 @@
   <hr style="border: none; border-top: 1px solid var(--line); margin-bottom: 40px;" />
 
   <section id="subjects" style="margin-bottom: 40px;">
-    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Регионы (субъекты РФ)</h2>
+    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Субъекты уведомлений</h2>
     <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
-      Конкретные субъекты РФ внутри выбранных округов. Должен быть выбран хотя бы один регион.
-      Список автоматически обновляется при изменении округов выше.
+      Субъекты РФ, по которым вы хотите получать уведомления о новых лотах.
+      Оставьте пустым — уведомления будут приходить по всем субъектам.
     </p>
 
     <form id="form-subjects"
           hx-post="/settings/subjects"
           hx-target="#scope-and-subjects"
           hx-swap="outerHTML">
-      {% if available_subjects %}
       <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
         {% for sid, name in available_subjects %}
         <label style="display: inline-flex; align-items: center; gap: 6px;
                        padding: 6px 12px; border: 1px solid var(--line); border-radius: 20px;
                        cursor: pointer; font-size: 0.8125rem;
-                       background: {{ 'var(--accent-light, #e8f4fd)' if sid in settings.subject_site_ids else 'var(--bg)' }};">
-          <input type="checkbox" name="subject_site_ids" value="{{ sid }}"
+                       background: {{ 'var(--accent-light, #e8f4fd)' if sid in settings.filters.rf_subjects else 'var(--bg)' }};">
+          <input type="checkbox" name="rf_subjects" value="{{ sid }}"
                  data-scope-checkbox="subjects"
-                 {% if sid in settings.subject_site_ids %}checked{% endif %}
+                 {% if sid in settings.filters.rf_subjects %}checked{% endif %}
                  style="accent-color: var(--accent, #0070f3);" />
           {{ name }}
         </label>
         {% endfor %}
       </div>
-      {% else %}
-      <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
-        Сначала выберите хотя бы один округ выше.
-      </p>
-      {% endif %}
       <button class="btn btn--primary" type="submit"
-              data-scope-submit="subjects"
-              {% if not available_subjects %}disabled{% endif %}>
-        Сохранить регионы
+              data-scope-submit="subjects">
+        Сохранить субъекты
       </button>
     </form>
   </section>
 
   <script>
     (function () {
-      // Disable Save buttons when their form has zero checked checkboxes.
-      // Re-runs after every htmx swap because the script lives inside the
-      // swapped fragment.
+      // Disable Save button for regions when zero checkboxes are checked
+      // (at least one region required).  The subjects Save button is always
+      // enabled — empty selection means notify-all (ADR-035 I4).
       function syncDisabled(group) {
         var boxes = document.querySelectorAll(
           'input[data-scope-checkbox="' + group + '"]'
@@ -111,6 +103,11 @@
           'button[data-scope-submit="' + group + '"]'
         );
         if (!btn) return;
+        if (group === 'subjects') {
+          // Empty notify-scope is valid — always allow save.
+          btn.disabled = false;
+          return;
+        }
         var any = false;
         boxes.forEach(function (b) { if (b.checked) any = true; });
         btn.disabled = !any;
