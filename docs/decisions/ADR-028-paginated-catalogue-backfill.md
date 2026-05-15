@@ -1,13 +1,15 @@
 # ADR-028 — Paginated Catalogue Backfill
 
-**Status**: Accepted (Auto-trigger section superseded by ADR-032)
+**Status**: Accepted (Auto-trigger section superseded by ADR-032; updated with delta-trigger generation — 2026-05-15)
 **Date**: 2026-05-15
 **Deciders**: Backend Architect
-**Tags**: backfill, pagination, catalogue, cold-start
+**Tags**: backfill, pagination, catalogue, cold-start, delta-trigger
 
-> **Note**: The «Auto-trigger heuristic» section below is superseded by
-> [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]]. Trigger has been
-> moved from `lifespan` to `_handle_step4_next` (onboarding completion handler).
+> **Note (Updated 2026-05-15: delta-trigger generation)**: The «Auto-trigger heuristic» section now documents
+> three generations. The primary mechanism is now a **delta-based trigger** in `MonitorCycleService` via
+> `BackfillService.maybe_start(region, site_total, db_count, stop_event) -> bool` with threshold
+> `len(parsed_lots) + 3`. The `count_active() == 0` + `on_login_success` approach (ADR-032) is **secondary
+> fallback** used only when `total_count is None` (site did not return paginator markup).
 > All other sections of this ADR remain in effect.
 
 ---
@@ -53,10 +55,30 @@ courtesy.
   `MonitorCycleService` skips that region to prevent concurrent catalogue writes.
 
 ### Auto-trigger heuristic
-`lifespan` checks `lot_repo.count_active() == 0` after startup.  If the DB is
-empty, a supervised `backfill-auto` thread is started that calls
-`backfill.start(supervisor.stop_event)`.  This gives users a populated initial
-catalogue within minutes of first launch.
+
+Three generations (newest first):
+
+**Generation 3 — Delta-based trigger in `MonitorCycleService` (primary, 2026-05-15)**
+
+After each head-poll `MonitorCycleService` calls
+`BackfillService.maybe_start(region, site_total, db_count, stop_event) -> bool`.
+
+- `site_total` — `ParsedListPage.total_count` (int | None) extracted from
+  `<div class="table-paginate__info">Найдено записей: N из N</div>` (ADR-036 update).
+- Trigger condition: `site_total is not None` and `site_total - db_count > len(parsed_lots) + 3`.
+- If condition met, `maybe_start` fires a supervised `backfill-auto` thread.
+  The `+3` slack absorbs normal churn (concurrent deactivations / in-flight monitor writes).
+- No TTL. Single-flight lock inside `BackfillService.start()` keeps it idempotent.
+
+**Generation 2 — `on_login_success` callback, `count_active() == 0` guard (secondary fallback)**
+
+Used when `total_count is None` (paginator markup absent). See [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]] for full rationale.
+ADR-032 is now marked **deprecated to secondary fallback** — it fires only when Generation 3 cannot.
+
+**Generation 1 — lifespan `count_active() == 0` (superseded)**
+
+`lifespan` checked `lot_repo.count_active() == 0` after startup.  Superseded by ADR-032 (race
+with login), then again by Generation 3 (race with empty DB on fresh start).
 
 ### Manual trigger
 `POST /backfill/start` spawns a daemon thread that calls `svc.start()`.

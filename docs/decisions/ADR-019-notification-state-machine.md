@@ -85,4 +85,6 @@ COMMIT;
 
 Greenfield MVP не имеет prod-баз с v1 — реальные пользователи получат сразу v2 при первом запуске installer'а через `schema.sql`. MigrationRunner есть для совместимости с unit-тестами и dev-данными, и для будущих v2→v3.
 
-См. также: [[decisions-log]], [[notifications]], [[data-model/notifications]].
+**Расширение 2026-05-15: Intentional dispatch suppression (ADR-039).** at-least-once SLO определён над notifications, которые система **решает** отправить — не над universe of lots в регионе. Фильтрация по `subscribed_at` (ADR-039) происходит до стадии dispatch: если `lot.date_create < region.subscribed_at`, `notifier_dispatcher.dispatch()` возвращает раньше без вызова `reserve()` / `mark_attempt()`. Это намеренная suppression, не нарушение SLO. Idempotency-гарантии PK + `status_of()` остаются неизменными для всего, что прошло в dispatch. Документируется явно чтобы не допустить трактовки as «дыра» в at-least-once.
+
+См. также: [[decisions-log]], [[notifications]], [[data-model/notifications]], [[decisions/ADR-039-subscribed-at-region-cutoff|ADR-039]].

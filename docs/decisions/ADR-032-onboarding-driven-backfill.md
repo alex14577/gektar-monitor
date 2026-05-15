@@ -1,10 +1,17 @@
 # ADR-032 — Backfill Auto-trigger: Login-success event (revised)
 
-**Status**: Revised — supersedes earlier version (onboarding-completion trigger)
+**Status**: Deprecated to secondary fallback — superseded as primary trigger by delta-based mechanism in ADR-028 §Generation 3 (Updated 2026-05-15)
 **Date (original)**: 2026-05-15
 **Date (revision)**: 2026-05-15 (f5u race-condition fix)
 **Deciders**: Backend Architect
 **Tags**: backfill, onboarding, login, trigger, race-condition
+
+> **Note (Updated 2026-05-15)**: This ADR describes the `on_login_success` callback trigger, now
+> **secondary fallback only**. It fires exclusively when `ParsedListPage.total_count is None` —
+> i.e., the site did not return paginator markup and the delta-trigger (ADR-028 §Generation 3)
+> cannot operate. When `total_count` is available, the delta-trigger in `MonitorCycleService` is
+> the primary mechanism. `on_login_success` + `count_active() == 0` guard remains active code;
+> it is not removed.
 
 Supersedes the «Auto-trigger heuristic» section of
 [[decisions/ADR-028-paginated-catalogue-backfill|ADR-028]] only.

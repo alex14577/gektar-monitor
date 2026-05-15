@@ -1,9 +1,9 @@
 # ADR-036 — Head-Poll Cycle Policy: MonitorCycle vs FullScan vs Backfill
 
-**Status**: Accepted
+**Status**: Accepted (Updated 2026-05-15: ParsedListPage.total_count field + delta-trigger contract)
 **Date**: 2026-05-15
 **Deciders**: Backend Architect
-**Tags**: monitor-cycle, full-scan, backfill, pagination, head-poll, per_page, PaginatedListFetcher
+**Tags**: monitor-cycle, full-scan, backfill, pagination, head-poll, per_page, PaginatedListFetcher, total_count, delta-trigger
 **Supersedes**: —
 **See also**: [[decisions/ADR-035-three-scope-filter-model|ADR-035]] (Notify scope still applies), [[decisions/ADR-028-paginated-catalogue-backfill|ADR-028]], [[decisions/ADR-033-web-editable-schedule|ADR-033]]
 
@@ -58,6 +58,13 @@ MonitorCycle fetches only page=1 with `per_page=20`. This is a **head-poll**: it
 - **`FullScanService._fetch_region_ids_paginated`** (`full_scan.py:310`) invokes `iterate(region, stop_event, per_page=50)` — semantically unchanged, new kwarg only.
 - **`BackfillService._process_region`** (`backfill.py:270`) invokes `iterate(region, stop, per_page=50)` — semantically unchanged.
 - **`infra/http/url_builder.lot_list_url`** (`url_builder.py:49`) does NOT currently support a `per_page` query param. bd `gektar_monitor-3pw` must verify whether the Yii2 front-end (`надальнийвосток.рф`) honours a `FreeLotSearch[per-page]` or equivalent parameter. If supported, `lot_list_url` gains a `per_page` kwarg and appends the param. If the site ignores the param, head-poll falls back to the site's native default page size (graceful degradation — correctness of discovery is unaffected; only the batch size differs).
+
+**Updated 2026-05-15: `ParsedListPage.total_count` and delta-trigger contract**
+
+- **`ParsedListPage`** gains a new field `total_count: int | None`. `ListParser.parse()` contract changes: implementations MUST populate `total_count` by extracting the value from `<div class="table-paginate__info">Найдено записей: N из N</div>` via regex (`r"Найдено записей:\s*(\d+)\s*из\s*\d+"` — first capture group). Fallback: `total_count = None` when the element is absent or regex does not match.
+- **`MonitorCycleService`** reads `parsed_page.total_count` after head-poll and passes it to `BackfillService.maybe_start(region, site_total, db_count, stop_event)`. When `total_count is None`, `maybe_start` defers to the secondary fallback (ADR-032 `on_login_success` path).
+- Invariant **H3** (uniform notification gate) is unaffected — `total_count` is a trigger signal only, not part of dispatch logic.
+- Invariant **H2** (bounded coverage gap ≤24 h) is strengthened: delta-trigger can initiate backfill intra-day when catalogue grows faster than head-poll discovers.
 
 ---
 
