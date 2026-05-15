@@ -1,16 +1,19 @@
 """Unit tests for /filters routes.
 
 Coverage:
-  (a) POST /filters/view — valid body → 204 + Set-Cookie with correct JSON.
-  (b) POST /filters/view — invalid body (extra forbidden field) → 422.
+  (a) POST /filters/view — valid form body → 204 + Set-Cookie with correct JSON.
+  (b) POST /filters/view — invalid form body → 422.
   (c) POST /filters/clear → 204 + Set-Cookie with max_age=0.
   (d) GET /filters/subjects → 200 text/html containing a checkbox input.
-  (e) Anti-mock: FakeViewFiltersService — all methods exercised.
+  (e) Anti-mock: ViewFiltersService — all methods exercised.
+  (f) Edge cases: subjects empty/multi, area_* empty/number/negative,
+      checkboxes on/off, unknown field ignored.
 """
 
 from __future__ import annotations
 
 import json
+import urllib.parse
 from urllib.parse import unquote
 
 from fastapi import FastAPI
@@ -39,9 +42,24 @@ def _build_app(svc: ViewFiltersService | None = None) -> FastAPI:
     return app
 
 
+_FORM_HEADERS = {"content-type": "application/x-www-form-urlencoded"}
+
+
+def _form(pairs: list[tuple[str, str]]) -> dict[str, object]:
+    """Encode a list of (key, value) pairs as form body kwargs for TestClient."""
+    body = urllib.parse.urlencode(pairs)
+    return {"content": body, "headers": _FORM_HEADERS}
+
+
+def _cookie_data(resp: object) -> dict:  # type: ignore[type-arg]
+    """Decode percent-encoded JSON cookie from response."""
+    cookie_raw = resp.cookies.get("view_filters")  # type: ignore[attr-defined]
+    assert cookie_raw is not None, "view_filters cookie missing"
+    return json.loads(unquote(cookie_raw))
+
+
 # ---------------------------------------------------------------------------
-# Anti-mock: ensure all FakeViewFiltersService / real ViewFiltersService methods
-# are exercised so we catch runtime API bugs in fakes.
+# Anti-mock: ensure all ViewFiltersService methods are exercised
 # ---------------------------------------------------------------------------
 
 
@@ -64,7 +82,7 @@ def test_view_filters_service_all_methods() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (a) POST /filters/view — valid body → 204 + Set-Cookie
+# (a) POST /filters/view — valid form body → 204 + Set-Cookie
 # ---------------------------------------------------------------------------
 
 
@@ -74,7 +92,7 @@ class TestPostViewFiltersValid:
         with TestClient(app) as client:
             resp = client.post(
                 "/filters/view",
-                json={"subjects": ["Краснодарский край"], "only_new": True},
+                data={"subjects": "Краснодарский край", "only_new": "on"},
             )
         assert resp.status_code == 204, resp.text
 
@@ -83,7 +101,7 @@ class TestPostViewFiltersValid:
         with TestClient(app) as client:
             resp = client.post(
                 "/filters/view",
-                json={"subjects": ["Краснодарский край"], "only_new": True},
+                data={"subjects": "Краснодарский край", "only_new": "on"},
             )
         assert "view_filters" in resp.cookies
 
@@ -92,56 +110,153 @@ class TestPostViewFiltersValid:
         with TestClient(app) as client:
             resp = client.post(
                 "/filters/view",
-                json={
-                    "subjects": ["ASCII_SUBJECT"],
-                    "area_min": 5,
-                    "area_max": 50,
-                    "only_new": False,
-                    "only_stars": True,
+                data={
+                    "subjects": "ASCII_SUBJECT",
+                    "area_min": "5",
+                    "area_max": "50",
+                    "only_stars": "on",
                 },
             )
-        cookie_raw = resp.cookies.get("view_filters")
-        assert cookie_raw is not None, "view_filters cookie missing"
-        # Cookie value is percent-encoded JSON — decode before parsing.
-        data = json.loads(unquote(cookie_raw))
+        data = _cookie_data(resp)
         assert data["subjects"] == ["ASCII_SUBJECT"]
         assert data["area_min"] == 5
         assert data["area_max"] == 50
         assert data["only_stars"] is True
 
     def test_empty_body_defaults_accepted(self) -> None:
-        """Completely empty body should use defaults — no 422."""
+        """Completely empty form body should use defaults — no 422."""
         app = _build_app()
         with TestClient(app) as client:
-            resp = client.post("/filters/view", json={})
+            resp = client.post("/filters/view", data={})
         assert resp.status_code == 204, resp.text
 
 
 # ---------------------------------------------------------------------------
-# (b) POST /filters/view — invalid body → 422
+# (b) POST /filters/view — invalid form body → 422
 # ---------------------------------------------------------------------------
 
 
 class TestPostViewFiltersInvalid:
-    def test_extra_field_returns_422(self) -> None:
-        """ViewFiltersBody has extra='forbid'; unknown field → 422."""
+    def test_negative_area_min_returns_422(self) -> None:
+        """area_min with ge=0 constraint — negative value → 422."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"area_min": "-1"})
+        assert resp.status_code == 422, resp.text
+
+    def test_negative_area_max_returns_422(self) -> None:
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"area_max": "-5"})
+        assert resp.status_code == 422, resp.text
+
+    def test_non_numeric_area_min_returns_422(self) -> None:
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"area_min": "abc"})
+        assert resp.status_code == 422, resp.text
+
+    def test_subjects_over_limit_returns_422(self) -> None:
+        """More than 50 subjects → 422."""
         app = _build_app()
         with TestClient(app) as client:
             resp = client.post(
                 "/filters/view",
-                json={"unknown_field": "should_fail"},
+                **_form([("subjects", f"subject_{i}") for i in range(51)]),
             )
         assert resp.status_code == 422, resp.text
 
-    def test_negative_area_min_returns_422(self) -> None:
-        """area_min has ge=0 constraint — negative value → 422."""
+    def test_subject_too_long_returns_422(self) -> None:
+        """Subject longer than 128 chars → 422."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"subjects": "x" * 129})
+        assert resp.status_code == 422, resp.text
+
+
+# ---------------------------------------------------------------------------
+# (f) Edge cases per task spec
+# ---------------------------------------------------------------------------
+
+
+class TestPostViewFiltersEdgeCases:
+    def test_subjects_empty_list(self) -> None:
+        """No subjects key in form → subjects defaults to []."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={})
+        assert resp.status_code == 204, resp.text
+        data = _cookie_data(resp)
+        assert data["subjects"] == []
+
+    def test_subjects_multiple_values(self) -> None:
+        """Repeated subjects keys → parsed as list."""
         app = _build_app()
         with TestClient(app) as client:
             resp = client.post(
                 "/filters/view",
-                json={"area_min": -1},
+                **_form([("subjects", "Foo"), ("subjects", "Bar")]),
             )
-        assert resp.status_code == 422, resp.text
+        assert resp.status_code == 204, resp.text
+        data = _cookie_data(resp)
+        assert set(data["subjects"]) == {"Foo", "Bar"}
+
+    def test_area_min_empty_string_treated_as_none(self) -> None:
+        """Empty string for area_min (e.g. from range input) → None in cookie."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"area_min": ""})
+        assert resp.status_code == 204, resp.text
+        data = _cookie_data(resp)
+        assert data["area_min"] is None
+
+    def test_area_min_valid_number(self) -> None:
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"area_min": "10"})
+        assert resp.status_code == 204, resp.text
+        data = _cookie_data(resp)
+        assert data["area_min"] == 10
+
+    def test_checkbox_only_new_checked(self) -> None:
+        """Checkbox with value 'on' → only_new True in cookie."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"only_new": "on"})
+        data = _cookie_data(resp)
+        assert data["only_new"] is True
+
+    def test_checkbox_only_new_unchecked(self) -> None:
+        """Absent checkbox key → only_new False in cookie."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={})
+        data = _cookie_data(resp)
+        assert data["only_new"] is False
+
+    def test_checkbox_only_stars_checked(self) -> None:
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={"only_stars": "on"})
+        data = _cookie_data(resp)
+        assert data["only_stars"] is True
+
+    def test_checkbox_only_stars_unchecked(self) -> None:
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={})
+        data = _cookie_data(resp)
+        assert data["only_stars"] is False
+
+    def test_unknown_form_field_ignored(self) -> None:
+        """Unknown form fields must not cause 422 — they are silently ignored."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post(
+                "/filters/view",
+                data={"unknown_field": "should_be_ignored"},
+            )
+        assert resp.status_code == 204, resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +276,6 @@ class TestPostClearFilters:
         app = _build_app()
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post("/filters/clear")
-        # TestClient follows Set-Cookie; the cookie value should be empty
-        # and the raw header should contain max-age=0.
         set_cookie = resp.headers.get("set-cookie", "")
         assert "view_filters" in set_cookie
         assert "max-age=0" in set_cookie.lower()
@@ -196,12 +309,10 @@ class TestGetSubjects:
     def test_selected_subjects_pre_checked(self) -> None:
         """Subjects from current cookie should appear with checked attribute."""
         app = _build_app()
-        # Set cookie with a known subject checked
         with TestClient(app) as client:
             client.post(
                 "/filters/view",
-                json={"subjects": ["Московская область"]},
+                data={"subjects": "Московская область"},
             )
             resp = client.get("/filters/subjects")
-        # The pre-selected subject should have 'checked' somewhere in its label context
         assert "Московская область" in resp.text

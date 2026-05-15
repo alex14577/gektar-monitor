@@ -26,10 +26,9 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
 
 from fis_monitor.services.view_filters import (
     PLACEHOLDER_SUBJECTS,
@@ -52,28 +51,27 @@ _COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
 router = APIRouter(prefix="/filters", tags=["filters"])
 
 # ---------------------------------------------------------------------------
-# Request body
+# Form-parsing helpers
 # ---------------------------------------------------------------------------
 
 
-class ViewFiltersBody(BaseModel):
-    """JSON body for POST /filters/view.
+def _parse_int_or_none(v: str | None) -> int | None:
+    """Convert a form string to int, treating empty string as None.
 
-    All fields are optional so a partial payload is accepted (partial update
-    semantics are intentionally NOT supported here — each POST replaces the
-    full filter state; omitted fields revert to defaults).
+    Raises HTTPException(422) on non-numeric or negative input so callers
+    get a consistent 422 rather than an unhandled ValueError.
     """
-
-    model_config = {"extra": "forbid"}
-
-    subjects: Annotated[
-        list[Annotated[str, Field(max_length=128)]],
-        Field(max_length=50),
-    ] = Field(default_factory=list)
-    area_min: int | None = Field(default=None, ge=0)
-    area_max: int | None = Field(default=None, ge=0)
-    only_new: bool = False
-    only_stars: bool = False
+    if v is None or v == "":
+        return None
+    try:
+        result = int(v)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid integer value: {v!r}") from None
+    if result < 0:
+        raise HTTPException(
+            status_code=422, detail=f"Value must be >= 0, got {result}"
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -143,22 +141,42 @@ def get_subjects(
 
 @router.post("/view", status_code=204, response_model=None)
 def post_view_filters(
-    body: ViewFiltersBody,
     request: Request,
     svc: ViewFiltersService = Depends(get_view_filters_service),
+    subjects: Annotated[list[str], Form()] = [],  # noqa: B006 — FastAPI never mutates this default; reassigning to None would break repeated-key parsing
+    area_min: Annotated[str | None, Form()] = None,
+    area_max: Annotated[str | None, Form()] = None,
+    only_new: Annotated[str | None, Form()] = None,
+    only_stars: Annotated[str | None, Form()] = None,
 ) -> Response:
-    """Apply view filters; persist state in cookie.
+    """Apply view filters submitted as application/x-www-form-urlencoded by htmx.
 
-    Body is validated by Pydantic — invalid payloads return 422 automatically.
+    Unknown form fields are silently ignored — form-data has no equivalent of
+    Pydantic extra='forbid'. This is acceptable because only parsed values are
+    written to the cookie; unknown fields are never propagated.
+
+    Cross-field validation (area_min <= area_max) is intentionally deferred to
+    gektar_monitor-gho — matches pre-existing behaviour of the JSON variant.
 
     Returns 204 No Content + Set-Cookie header.
     """
+    if len(subjects) > 50:
+        raise HTTPException(status_code=422, detail="subjects: at most 50 items allowed")
+    for s in subjects:
+        if len(s) > 128:
+            raise HTTPException(
+                status_code=422, detail="subjects: each item must be <= 128 characters"
+            )
+
     filters = ViewFilters(
-        subjects=body.subjects,
-        area_min=body.area_min,
-        area_max=body.area_max,
-        only_new=body.only_new,
-        only_stars=body.only_stars,
+        subjects=subjects,
+        area_min=_parse_int_or_none(area_min),
+        area_max=_parse_int_or_none(area_max),
+        # Checkbox unchecked → key absent → None → False.
+        # Checked → key present with any value (typically "on") → True.
+        # only_new="" (empty value, key present) also → True — non-browser edge case, intentional.
+        only_new=only_new is not None,
+        only_stars=only_stars is not None,
     )
     cookie_value = svc.serialize(filters)
     response = Response(status_code=204)
