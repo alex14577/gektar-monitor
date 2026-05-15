@@ -300,6 +300,32 @@ class FakeNotificationsRepository:
 # ---------------------------------------------------------------------------
 
 
+class FakeRegionSubscriptionRepository:
+    """In-memory RegionSubscriptionRepository for tests."""
+
+    def __init__(self) -> None:
+        self._rows: dict[int, datetime] = {}
+        self._calls: list[str] = []
+
+    def get_subscribed_at(self, region_id: int) -> datetime | None:
+        self._calls.append(f"get_subscribed_at:{region_id}")
+        return self._rows.get(region_id)
+
+    def set_if_absent(self, region_id: int, subscribed_at: datetime) -> bool:
+        self._calls.append(f"set_if_absent:{region_id}")
+        if region_id in self._rows:
+            return False
+        self._rows[region_id] = subscribed_at
+        return True
+
+    def delete(self, region_id: int) -> None:
+        self._calls.append(f"delete:{region_id}")
+        self._rows.pop(region_id, None)
+
+    def seed(self, region_id: int, subscribed_at: datetime) -> None:
+        self._rows[region_id] = subscribed_at
+
+
 class FakeDndService:
     """Fake DndService that returns a fixed is_active result."""
 
@@ -454,6 +480,7 @@ def _make_dispatcher(
     event_bus: FakeEventBus | None = None,
     stop_event: threading.Event | None = None,
     dnd_service: FakeDndService | None = None,
+    region_sub_repo: FakeRegionSubscriptionRepository | None = None,
     retry_attempts: int = 3,
     retry_backoff: Sequence[float] = (0.01, 0.02, 0.04),  # tiny for fast tests
     max_queue_size: int = 100,
@@ -485,6 +512,7 @@ def _make_dispatcher(
         event_bus=event_bus,
         stop_event=stop_event,
         dnd_service=dnd_service,
+        region_sub_repo=region_sub_repo,
         retry_attempts=retry_attempts,
         retry_backoff=retry_backoff,
         max_queue_size=max_queue_size,
@@ -1218,3 +1246,149 @@ def test_all_fake_config_source_methods_invoked():
     sub.__enter__()
     sub.__exit__(None, None, None)
     sub.unsubscribe()
+
+
+# ===========================================================================
+# Tests: dispatch() — subscribed_at cutoff filter (ADR-039)
+# ===========================================================================
+
+# make_lot() default: region="Хабаровский край" (ID 89), date_create=_NOW
+_REGION_ID_KHABAROVSK = 89
+_SUBSCRIBED_AT_BEFORE = _NOW - timedelta(hours=1)   # date_create > subscribed_at → pass
+_SUBSCRIBED_AT_EQUAL = _NOW                          # date_create == subscribed_at → pass (>=)
+_SUBSCRIBED_AT_AFTER = _NOW + timedelta(hours=1)    # date_create < subscribed_at → drop
+
+
+def test_dispatch_subscribed_at_drops_lot_older_than_cutoff(caplog):
+    """date_create < subscribed_at → dispatch skipped, log emitted, queue empty."""
+    region_sub_repo = FakeRegionSubscriptionRepository()
+    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_AFTER)
+
+    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
+    lot = _make_lot_public()  # date_create = _NOW < _SUBSCRIBED_AT_AFTER
+
+    with caplog.at_level(logging.DEBUG):
+        dispatcher.dispatch(lot)
+
+    assert dispatcher._queue.empty(), "queue must be empty — lot was dropped"
+    assert "notification.subscribed_at_dropped" in caplog.text
+    drop_records = [
+        r for r in caplog.records if r.getMessage() == "notification.subscribed_at_dropped"
+    ]
+    assert drop_records, "expected at least one subscribed_at_dropped log record"
+    assert drop_records[0].decision == "dropped_subscribed_at"  # type: ignore[attr-defined]
+
+
+def test_dispatch_subscribed_at_allows_lot_equal_to_cutoff():
+    """date_create == subscribed_at → dispatch allowed (>= condition)."""
+    region_sub_repo = FakeRegionSubscriptionRepository()
+    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_EQUAL)
+
+    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
+    lot = _make_lot_public()  # date_create = _NOW == _SUBSCRIBED_AT_EQUAL
+
+    dispatcher.dispatch(lot)
+
+    assert not dispatcher._queue.empty(), "lot must be enqueued when date_create == subscribed_at"
+
+
+def test_dispatch_subscribed_at_allows_lot_newer_than_cutoff():
+    """date_create > subscribed_at → dispatch normal."""
+    region_sub_repo = FakeRegionSubscriptionRepository()
+    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_BEFORE)
+
+    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
+    lot = _make_lot_public()  # date_create = _NOW > _SUBSCRIBED_AT_BEFORE
+
+    dispatcher.dispatch(lot)
+
+    assert not dispatcher._queue.empty(), "lot must be enqueued when date_create > subscribed_at"
+
+
+def test_dispatch_subscribed_at_none_allows_dispatch():
+    """region_subs_repo.get_subscribed_at returns None → dispatch normal (graceful)."""
+    region_sub_repo = FakeRegionSubscriptionRepository()
+    # No seed — get_subscribed_at returns None
+
+    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
+    lot = _make_lot_public()
+
+    dispatcher.dispatch(lot)
+
+    assert not dispatcher._queue.empty(), "lot must be enqueued when subscribed_at is None"
+
+
+def test_dispatch_no_region_sub_repo_allows_dispatch():
+    """region_sub_repo=None (not injected) → dispatch normal (backward compat)."""
+    dispatcher, *_ = _make_dispatcher(region_sub_repo=None)
+    lot = _make_lot_public()
+
+    dispatcher.dispatch(lot)
+
+    assert not dispatcher._queue.empty(), "lot must be enqueued when region_sub_repo is None"
+
+
+def test_dispatch_subscribed_at_filter_applied_per_lot():
+    """Multiple lots: filter applied per-lot based on their individual date_create."""
+    region_sub_repo = FakeRegionSubscriptionRepository()
+    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_EQUAL)
+
+    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
+
+    # old lot: date_create before subscribed_at → dropped
+    old_lot = LotPublicDTO(
+        **make_lot(id=1, date_create=_NOW - timedelta(hours=1)).model_dump(),
+        age_seconds=0, tier="match", freshness="warm",
+    )
+    # new lot: date_create == subscribed_at → allowed
+    new_lot = LotPublicDTO(
+        **make_lot(id=2, date_create=_NOW).model_dump(),
+        age_seconds=0, tier="match", freshness="warm",
+    )
+
+    dispatcher.dispatch(old_lot)
+    dispatcher.dispatch(new_lot)
+
+    items = []
+    while not dispatcher._queue.empty():
+        items.append(dispatcher._queue.get_nowait())
+
+    assert len(items) == 1
+    assert items[0].id == 2, "only new_lot (id=2) should pass the filter"
+
+
+# ===========================================================================
+# Anti-mock: FakeRegionSubscriptionRepository all methods exercised
+# ===========================================================================
+
+
+def test_all_fake_region_sub_repo_methods_invoked():
+    """Every method on FakeRegionSubscriptionRepository must be callable."""
+    repo = FakeRegionSubscriptionRepository()
+
+    # set_if_absent — first insert returns True
+    inserted = repo.set_if_absent(89, _NOW)
+    assert inserted is True
+
+    # set_if_absent — idempotent, second call returns False
+    inserted2 = repo.set_if_absent(89, _NOW)
+    assert inserted2 is False
+
+    # get_subscribed_at — existing
+    result = repo.get_subscribed_at(89)
+    assert result == _NOW
+
+    # get_subscribed_at — missing
+    result_none = repo.get_subscribed_at(999)
+    assert result_none is None
+
+    # delete — removes entry
+    repo.delete(89)
+    assert repo.get_subscribed_at(89) is None
+
+    # delete — idempotent (no raise)
+    repo.delete(89)
+
+    assert "get_subscribed_at:89" in repo._calls
+    assert "set_if_absent:89" in repo._calls
+    assert "delete:89" in repo._calls

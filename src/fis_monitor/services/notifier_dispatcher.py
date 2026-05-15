@@ -39,6 +39,7 @@ from fis_monitor.domain.interfaces import (
     EventBus,
     LotRepository,
     NotificationsRepository,
+    RegionSubscriptionRepository,
     SettingsRepository,
 )
 from fis_monitor.domain.models import (
@@ -51,10 +52,13 @@ from fis_monitor.domain.models import (
 from fis_monitor.domain.models import (
     lot_to_public_dto as _lot_to_public_dto,
 )
+from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
 from fis_monitor.services.dnd import DndService
 
 logger = logging.getLogger(__name__)
+
+_REGION_NAME_TO_ID: dict[str, int] = {name: id_ for id_, name in SUBJECT_TITLE_BY_ID.items()}
 
 # ---------------------------------------------------------------------------
 # Hard cap on total delivery attempts (R4-M6)
@@ -127,6 +131,7 @@ class NotifierDispatcher:
         event_bus: EventBus,
         stop_event: threading.Event,
         dnd_service: DndService,
+        region_sub_repo: RegionSubscriptionRepository | None = None,
         settings_repo: SettingsRepository | None = None,
         retry_attempts: int = 3,
         retry_backoff: Sequence[float] = (2.0, 4.0, 8.0),
@@ -141,6 +146,7 @@ class NotifierDispatcher:
         self._event_bus = event_bus
         self.stop_event = stop_event
         self._dnd_service = dnd_service
+        self._region_sub_repo = region_sub_repo
         self._settings_repo = settings_repo
         self.retry_attempts = retry_attempts
         self.retry_backoff = list(retry_backoff)
@@ -155,9 +161,29 @@ class NotifierDispatcher:
     def dispatch(self, lot: LotPublicDTO) -> None:
         """Fire-and-forget: enqueue ``lot`` for async delivery.
 
+        Applies subscribed_at cutoff filter (ADR-039) before enqueuing:
+        if the lot was created before the region's subscription timestamp,
+        it is intentionally suppressed (not a violation of at-least-once SLO).
+
         On queue overflow the lot is silently dropped and a warning is
         logged — monitor-cycle throughput takes priority over notifications.
         """
+        if self._region_sub_repo is not None:
+            region_id = _REGION_NAME_TO_ID.get(lot.region)
+            if region_id is not None:
+                subscribed_at = self._region_sub_repo.get_subscribed_at(region_id)
+                if subscribed_at is not None and lot.date_create < subscribed_at:
+                    logger.debug(
+                        "notification.subscribed_at_dropped",
+                        extra={
+                            "region_id": region_id,
+                            "lot_id": lot.id,
+                            "lot_date_create": lot.date_create.isoformat(),
+                            "subscribed_at": subscribed_at.isoformat(),
+                            "decision": "dropped_subscribed_at",
+                        },
+                    )
+                    return
         try:
             self._queue.put_nowait(lot)
         except queue.Full:

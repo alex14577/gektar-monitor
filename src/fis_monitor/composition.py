@@ -212,7 +212,6 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     event_bus = ThreadEventBus()
     conn_provider = ConnectionProvider(db_path=data_dir / "state.db")
     locker = FileLocker(path=data_dir / "app.lock")
-    config_source = WatchdogConfigSource(path=data_dir / "config.json", clock=clock)
     cycle_progress_signal = threading.Event()
 
     # Initialise the schema (fresh DB → apply DDL; existing → verify version).
@@ -236,6 +235,14 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         conn_provider=conn_provider, clock=clock
     )
     region_sub_repo = SqliteRegionSubscriptionRepository(conn_provider=conn_provider)
+
+    # config_source is created after init_db so region_sub_repo can safely write
+    # to region_subscriptions (ADR-039: WatchdogConfigSource._do_reload diff logic).
+    config_source = WatchdogConfigSource(
+        path=data_dir / "config.json",
+        clock=clock,
+        region_subs_repo=region_sub_repo,
+    )
 
     # Build TorgiUrlBuilder from current settings (ADR-024).
     # base_url trailing slash is stripped by TargetConfig validator at construction;
@@ -328,6 +335,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         event_bus=event_bus,
         stop_event=dispatcher_stop_event,
         dnd_service=dnd,
+        region_sub_repo=region_sub_repo,
         settings_repo=settings_repo,
         retry_attempts=3,
         retry_backoff=(2.0, 4.0, 8.0),
