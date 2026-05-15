@@ -13,64 +13,12 @@
   <h1 style="margin: 0 0 32px; font-size: 1.5rem; font-weight: 600;">Настройки</h1>
 
   {# ------------------------------------------------------------------ #}
-  {# Section: Regions (scope) — macro-region checkboxes                  #}
+  {# Sections: Regions (округа) + Subjects (регионы РФ).                 #}
+  {# Both rendered via shared partial so POST to either endpoint can     #}
+  {# atomically swap the whole block — selecting a macro-region rebuilds #}
+  {# the subject chip list automatically.                                #}
   {# ------------------------------------------------------------------ #}
-  <section id="scope" style="margin-bottom: 40px;">
-    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Регионы мониторинга</h2>
-    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
-      Макрорегионы, из которых собираются лоты.
-    </p>
-
-    <form method="post" action="/settings/regions">
-      <div class="field" style="max-width: 480px;">
-        <label class="field__label" for="regions-input">Номера округов</label>
-        <input class="input" id="regions-input" name="regions_csv" type="text"
-               value="{{ settings.regions | join(', ') }}"
-               placeholder="1, 2, 25, 27"
-               autocomplete="off" />
-        <p style="font-size: 0.75rem; color: var(--muted); margin: 6px 0 0;">
-          Допустимые значения: 1–80. Пример: <span class="mono">1, 2, 25</span>
-        </p>
-      </div>
-      <button class="btn btn--primary" type="submit" style="margin-top: 16px;">
-        Сохранить регионы
-      </button>
-    </form>
-  </section>
-
-  <hr style="border: none; border-top: 1px solid var(--line); margin-bottom: 40px;" />
-
-  {# ------------------------------------------------------------------ #}
-  {# Section: Subjects (fetch-scope, ADR-031)                            #}
-  {# Scoped to subjects_for_macros(settings.regions).                    #}
-  {# Empty selection = fetch all subjects in selected macro-regions.     #}
-  {# ------------------------------------------------------------------ #}
-  <section id="subjects" style="margin-bottom: 40px;">
-    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Субъекты мониторинга</h2>
-    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
-      Ограничьте сбор лотов конкретными субъектами РФ. Список определяется выбранными макрорегионами.
-      Если ничего не выбрано — собираются все субъекты выбранных макрорегионов.
-    </p>
-
-    <form method="post" action="/settings/subjects">
-      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
-        {% for sid, name in available_subjects %}
-        <label style="display: inline-flex; align-items: center; gap: 6px;
-                       padding: 6px 12px; border: 1px solid var(--line); border-radius: 20px;
-                       cursor: pointer; font-size: 0.8125rem;
-                       background: {{ 'var(--accent-light, #e8f4fd)' if sid in settings.subject_site_ids else 'var(--bg)' }};">
-          <input type="checkbox" name="subject_site_ids" value="{{ sid }}"
-                 {% if sid in settings.subject_site_ids %}checked{% endif %}
-                 style="accent-color: var(--accent, #0070f3);" />
-          {{ name }}
-        </label>
-        {% endfor %}
-      </div>
-      <button class="btn btn--primary" type="submit">
-        Сохранить субъекты
-      </button>
-    </form>
-  </section>
+  {% include 'partials/_scope_and_subjects.html.jinja' %}
 
   <hr style="border: none; border-top: 1px solid var(--line); margin-bottom: 40px;" />
 

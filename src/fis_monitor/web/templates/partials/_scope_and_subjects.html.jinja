@@ -1,0 +1,128 @@
+{# ========================================================================
+   _scope_and_subjects.html.jinja — atomic block for monitoring scope.
+
+   Returned by POST /settings/regions and POST /settings/subjects so htmx
+   swaps the whole #scope-and-subjects container outerHTML — that way
+   changing the macro-region set automatically refreshes the subject chip
+   list (subjects_for_macros) without a page reload.
+
+   Context:
+     settings              — Settings instance (regions, subject_site_ids).
+     available_subjects    — list[(site_id, name)] scoped to current regions.
+     all_macro_regions     — list[(macro_id, title_nominative)] for chip render.
+     scope_error           — optional str shown above forms on validation 422.
+   ======================================================================== #}
+<div id="scope-and-subjects">
+
+  {% if scope_error %}
+  <p role="alert"
+     style="padding: 10px 14px; margin: 0 0 16px;
+            background: var(--accent-light, #fff4f4);
+            border: 1px solid var(--danger, #d33);
+            border-radius: 6px; color: var(--danger, #d33);
+            font-size: 0.875rem;">
+    {{ scope_error }}
+  </p>
+  {% endif %}
+
+  <section id="scope" style="margin-bottom: 40px;">
+    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Округа мониторинга</h2>
+    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+      Федеральные округа, из которых собираются лоты на сайте надальнийвосток.рф.
+      Должен быть выбран хотя бы один округ.
+    </p>
+
+    <form id="form-regions"
+          hx-post="/settings/regions"
+          hx-target="#scope-and-subjects"
+          hx-swap="outerHTML">
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+        {% for mid, title in all_macro_regions %}
+        <label style="display: inline-flex; align-items: center; gap: 6px;
+                       padding: 6px 12px; border: 1px solid var(--line); border-radius: 20px;
+                       cursor: pointer; font-size: 0.8125rem;
+                       background: {{ 'var(--accent-light, #e8f4fd)' if mid in settings.regions else 'var(--bg)' }};">
+          <input type="checkbox" name="region_ids" value="{{ mid }}"
+                 data-scope-checkbox="regions"
+                 {% if mid in settings.regions %}checked{% endif %}
+                 style="accent-color: var(--accent, #0070f3);" />
+          {{ title }}
+        </label>
+        {% endfor %}
+      </div>
+      <button class="btn btn--primary" type="submit"
+              data-scope-submit="regions">
+        Сохранить округа
+      </button>
+    </form>
+  </section>
+
+  <hr style="border: none; border-top: 1px solid var(--line); margin-bottom: 40px;" />
+
+  <section id="subjects" style="margin-bottom: 40px;">
+    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Регионы (субъекты РФ)</h2>
+    <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+      Конкретные субъекты РФ внутри выбранных округов. Должен быть выбран хотя бы один регион.
+      Список автоматически обновляется при изменении округов выше.
+    </p>
+
+    <form id="form-subjects"
+          hx-post="/settings/subjects"
+          hx-target="#scope-and-subjects"
+          hx-swap="outerHTML">
+      {% if available_subjects %}
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+        {% for sid, name in available_subjects %}
+        <label style="display: inline-flex; align-items: center; gap: 6px;
+                       padding: 6px 12px; border: 1px solid var(--line); border-radius: 20px;
+                       cursor: pointer; font-size: 0.8125rem;
+                       background: {{ 'var(--accent-light, #e8f4fd)' if sid in settings.subject_site_ids else 'var(--bg)' }};">
+          <input type="checkbox" name="subject_site_ids" value="{{ sid }}"
+                 data-scope-checkbox="subjects"
+                 {% if sid in settings.subject_site_ids %}checked{% endif %}
+                 style="accent-color: var(--accent, #0070f3);" />
+          {{ name }}
+        </label>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+        Сначала выберите хотя бы один округ выше.
+      </p>
+      {% endif %}
+      <button class="btn btn--primary" type="submit"
+              data-scope-submit="subjects"
+              {% if not available_subjects %}disabled{% endif %}>
+        Сохранить регионы
+      </button>
+    </form>
+  </section>
+
+  <script>
+    (function () {
+      // Disable Save buttons when their form has zero checked checkboxes.
+      // Re-runs after every htmx swap because the script lives inside the
+      // swapped fragment.
+      function syncDisabled(group) {
+        var boxes = document.querySelectorAll(
+          'input[data-scope-checkbox="' + group + '"]'
+        );
+        var btn = document.querySelector(
+          'button[data-scope-submit="' + group + '"]'
+        );
+        if (!btn) return;
+        var any = false;
+        boxes.forEach(function (b) { if (b.checked) any = true; });
+        btn.disabled = !any;
+      }
+      ['regions', 'subjects'].forEach(function (g) {
+        syncDisabled(g);
+        document
+          .querySelectorAll('input[data-scope-checkbox="' + g + '"]')
+          .forEach(function (b) {
+            b.addEventListener('change', function () { syncDisabled(g); });
+          });
+      });
+    })();
+  </script>
+</div>

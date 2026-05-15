@@ -1,8 +1,8 @@
 """Unit tests for POST /settings/subjects (ADR-031, gektar_monitor-ekb).
 
 Coverage:
-  1. POST /settings/subjects happy path → 204, config saved.
-  2. POST /settings/subjects empty list → 204 (disabling subject filter is valid).
+  1. POST /settings/subjects happy path → 200 + partial HTML, config saved.
+  2. POST /settings/subjects empty list → 422 (≥1 subject required, gektar_monitor-rsf).
   3. POST /settings/subjects out-of-scope id → 422.
   4. POST /settings/subjects does not clobber other Settings fields.
   5. GET /settings HTML includes subject chip-picker with scoped subject names.
@@ -84,8 +84,8 @@ def _make_app(
 
 
 class TestPostSubjectsHappyPath:
-    def test_returns_204_on_valid_ids(self) -> None:
-        """Valid site-ids within regions=[1] → 204."""
+    def test_returns_200_html_on_valid_ids(self) -> None:
+        """Valid site-ids within regions=[1] → 200 + partial HTML."""
         fc = FakeConfigSource(Settings(regions=[1]))
         app, _ = _make_app(fc)
         # 87 = Якутия, belongs to ДФО (macro 1)
@@ -95,7 +95,9 @@ class TestPostSubjectsHappyPath:
                 data="subject_site_ids=87&subject_site_ids=88",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
-        assert resp.status_code == 204, resp.text
+        assert resp.status_code == 200, resp.text
+        assert "text/html" in resp.headers["content-type"]
+        assert 'id="scope-and-subjects"' in resp.text
 
     def test_saves_subject_site_ids(self) -> None:
         """POST /settings/subjects stores the new ids via config_source.save()."""
@@ -110,8 +112,8 @@ class TestPostSubjectsHappyPath:
         assert len(fc.save_calls) == 1
         assert set(fc.save_calls[0].subject_site_ids) == {87, 88}
 
-    def test_empty_list_accepted(self) -> None:
-        """Empty subject_site_ids (no restriction) → 204."""
+    def test_empty_list_rejected(self) -> None:
+        """Empty subject_site_ids → 422 (at least one subject required)."""
         fc = FakeConfigSource(Settings(regions=[1]))
         app, _ = _make_app(fc)
         with TestClient(app) as client:
@@ -120,8 +122,9 @@ class TestPostSubjectsHappyPath:
                 data="",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
-        assert resp.status_code == 204, resp.text
-        assert fc.save_calls[0].subject_site_ids == []
+        assert resp.status_code == 422, resp.text
+        assert "At least one" in resp.text
+        assert fc.save_calls == []
 
     def test_does_not_clobber_other_fields(self) -> None:
         """subject_site_ids update must preserve other Settings fields."""
@@ -179,7 +182,7 @@ class TestPostSubjectsValidation:
                 data="subject_site_ids=87&subject_site_ids=27",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
-        assert resp.status_code == 204, resp.text
+        assert resp.status_code == 200, resp.text
 
 
 # ---------------------------------------------------------------------------

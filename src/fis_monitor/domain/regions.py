@@ -26,6 +26,7 @@ __all__ = [
     "REGION_BY_SLUG",
     "REGION_SLUG_BY_ID",
     "REGION_TITLE_BY_SLUG",
+    "REGION_TITLE_NOMINATIVE_BY_SLUG",
     "SUBJECTS_BY_MACRO",
     "SUBJECT_TITLE_BY_ID",
     "id_to_slug",
@@ -55,11 +56,21 @@ REGION_SLUG_BY_ID: Mapping[int, str] = MappingProxyType(
     {v: k for k, v in REGION_BY_SLUG.items()}
 )
 
-#: Slug → display name used in the UI (immutable).
+#: Slug → display name used in the UI in **instrumental** case
+#: (e.g. "Наблюдаю за <Арктикой>") — onboarding-banner phrasing.
 REGION_TITLE_BY_SLUG: Mapping[str, str] = MappingProxyType(
     {
         "dfo": "ДФО",
         "arctic": "Арктикой",
+    }
+)
+
+#: Slug → display name in **nominative** case — used for checkbox labels,
+#: section headings, and sidebar chips where a noun stands on its own.
+REGION_TITLE_NOMINATIVE_BY_SLUG: Mapping[str, str] = MappingProxyType(
+    {
+        "dfo": "ДФО",
+        "arctic": "Арктическая зона",
     }
 )
 

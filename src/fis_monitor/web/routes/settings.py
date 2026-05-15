@@ -4,9 +4,10 @@ Endpoints:
   GET  /settings              — return current Settings snapshot.
   POST /settings/smtp         — update SMTP credentials (DNS-outside-tx via SettingsService).
   POST /settings/smtp/test    — send a test email to a given recipient.
-  POST /settings/regions      — replace ``Settings.regions`` list; triggers hot-reload.
+  POST /settings/regions      — replace macro-region scope; truncates subjects + htmx partial.
   POST /settings/recipients   — replace ``Settings.notifications.email.recipients``.
-  POST /settings/subjects     — replace ``Settings.subject_site_ids`` (fetch-scope, ADR-031).
+  POST /settings/subjects     — replace ``Settings.subject_site_ids`` (fetch-scope, ADR-031);
+                                htmx partial; ≥1 subject required.
   POST /settings/schedule     — replace monitoring schedule fields (ADR-033).
 
 DI: all dependencies are injected via Depends(); routes are decoupled from
@@ -27,7 +28,12 @@ from pydantic import BaseModel, EmailStr, Field
 
 from fis_monitor.domain.errors import SmtpHostPolicyError
 from fis_monitor.domain.models import LotPublicDTO, SmtpCredentials
-from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID, subjects_for_macros
+from fis_monitor.domain.regions import (
+    REGION_BY_SLUG,
+    REGION_TITLE_NOMINATIVE_BY_SLUG,
+    SUBJECT_TITLE_BY_ID,
+    subjects_for_macros,
+)
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 from fis_monitor.web.deps import (
@@ -38,6 +44,8 @@ from fis_monitor.web.deps import (
 )
 
 __all__ = ["router"]
+
+_VALID_MACRO_IDS: frozenset[int] = frozenset(REGION_BY_SLUG.values())
 
 # ---------------------------------------------------------------------------
 # Router
@@ -65,19 +73,6 @@ class SmtpTestBody(BaseModel):
     """JSON body for POST /settings/smtp/test."""
 
     recipient: str
-
-
-class RegionsBody(BaseModel):
-    """JSON body for POST /settings/regions.
-
-    ``regions`` must be a non-empty list of valid Russian cadastral region codes
-    (1-80).  Constraints mirror ``Settings.regions`` field semantics.
-    """
-
-    regions: Annotated[
-        list[Annotated[int, Field(ge=1, le=80)]],
-        Field(min_length=1),
-    ]
 
 
 class RecipientsBody(BaseModel):
@@ -142,6 +137,24 @@ def _test_lot_fixture() -> LotPublicDTO:
 # ---------------------------------------------------------------------------
 
 
+def _scope_template_context(settings: Any) -> dict[str, Any]:
+    """Build template variables for the scope+subjects partial.
+
+    Encapsulates the derivation logic so GET /settings, POST /settings/regions
+    and POST /settings/subjects all render the same shape.
+    """
+    scoped_ids = subjects_for_macros(settings.regions)
+    available_subjects = [(sid, SUBJECT_TITLE_BY_ID[sid]) for sid in scoped_ids]
+    all_macro_regions = [
+        (REGION_BY_SLUG[slug], title)
+        for slug, title in REGION_TITLE_NOMINATIVE_BY_SLUG.items()
+    ]
+    return {
+        "available_subjects": available_subjects,
+        "all_macro_regions": all_macro_regions,
+    }
+
+
 def _prefers_html(accept: str) -> bool:
     """Return True if the Accept header prefers text/html over application/json.
 
@@ -173,12 +186,9 @@ def get_settings(
     settings = config_source.current()
     accept = request.headers.get("accept", "")
     if _prefers_html(accept):
-        scoped_ids = subjects_for_macros(settings.regions)
-        available_subjects = [(sid, SUBJECT_TITLE_BY_ID[sid]) for sid in scoped_ids]
         ctx: dict[str, Any] = {
             "settings": settings,
-            # Subjects scoped to current macro-regions (ADR-031).
-            "available_subjects": available_subjects,
+            **_scope_template_context(settings),
             # Stubs required by base.html.jinja header/partial rendering.
             "dnd": SimpleNamespace(active=False, until_hhmm=""),
             "session": SimpleNamespace(expired=False),
@@ -249,25 +259,60 @@ def post_smtp_test(
     return JSONResponse(content={"ok": result.ok, "detail": result.detail})
 
 
-@router.post("/regions")
+@router.post("/regions", response_model=None)
 def post_regions(
-    body: RegionsBody,
+    request: Request,
+    region_ids: Annotated[list[int], Form()] = [],  # noqa: B006 — FastAPI never mutates repeated-key default
     config_source: Any = Depends(get_config_source),
-) -> JSONResponse:
-    """Replace the monitored regions list.
+    templates: Jinja2Templates = Depends(get_templates),
+) -> Response:
+    """Replace the macro-regions (округа) scope.
 
-    Pattern: ``current() → model_copy(update=...) → save()``.
-    The atomic file-replace triggers a watchdog reload on the same subscriber
-    bus as manual config edits (ADR-023).
+    Accepts form-encoded repeated ``region_ids`` keys from the htmx chip form.
+    Validation:
+      - at least one region must be selected;
+      - each id must be a known macro-region (currently {1=ДФО, 2=Арктика}).
+
+    Side effect: ``subject_site_ids`` is auto-truncated to the intersection
+    with ``subjects_for_macros(new_regions)`` so the persisted subject list
+    can never reference an out-of-scope macro after the swap.
 
     Returns:
-        200 with ``{"ok": true}`` on success.
-        422 on validation failure (empty list, region out of 1-80 range).
+        200 with _scope_and_subjects.html.jinja partial; htmx swaps the whole
+        ``#scope-and-subjects`` container so the subject chips reflect the
+        new macro selection immediately.
+        422 if the selection is empty or contains unknown macro ids.
     """
+    unknown = [rid for rid in region_ids if rid not in _VALID_MACRO_IDS]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown macro-region ids: {unknown}. Allowed: {sorted(_VALID_MACRO_IDS)}",
+        )
+    if not region_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one macro-region must be selected.",
+        )
+
+    # Deduplicate while preserving submission order.
+    unique_regions = list(dict.fromkeys(region_ids))
     current = config_source.current()
-    new_settings = current.model_copy(update={"regions": list(body.regions)})
+    valid_subjects = set(subjects_for_macros(unique_regions))
+    truncated_subjects = [sid for sid in current.subject_site_ids if sid in valid_subjects]
+
+    new_settings = current.model_copy(
+        update={
+            "regions": unique_regions,
+            "subject_site_ids": truncated_subjects,
+        }
+    )
     config_source.save(new_settings)
-    return JSONResponse(content={"ok": True})
+    return templates.TemplateResponse(
+        request,
+        "partials/_scope_and_subjects.html.jinja",
+        {"settings": new_settings, **_scope_template_context(new_settings)},
+    )
 
 
 @router.post("/recipients")
@@ -294,20 +339,24 @@ def post_recipients(
     return JSONResponse(content={"ok": True})
 
 
-@router.post("/subjects", status_code=204)
+@router.post("/subjects", response_model=None)
 def post_subjects(
+    request: Request,
     subject_site_ids: Annotated[list[int], Form()] = [],  # noqa: B006 — FastAPI never mutates repeated-key default
     config_source: Any = Depends(get_config_source),
+    templates: Jinja2Templates = Depends(get_templates),
 ) -> Response:
     """Replace the fetch-scope subject filter (ADR-031).
 
-    Accepts form-encoded repeated ``subject_site_ids`` keys (htmx-friendly).
-    Each id must belong to ``subjects_for_macros(settings.regions)``; any
-    out-of-scope id → 422.  An empty list is valid (fetch all subjects).
+    Accepts form-encoded repeated ``subject_site_ids`` keys from the htmx
+    chip form. Validation:
+      - at least one subject must be selected;
+      - each id must belong to ``subjects_for_macros(current.regions)``.
 
     Returns:
-        204 No Content on success.
-        422 if any id is outside the macro-scoped subject set.
+        200 with _scope_and_subjects.html.jinja partial; htmx swaps the
+        ``#scope-and-subjects`` container.
+        422 if the selection is empty or contains out-of-scope ids.
     """
     current = config_source.current()
     valid_ids = set(subjects_for_macros(current.regions))
@@ -317,9 +366,20 @@ def post_subjects(
             status_code=422,
             detail=f"subject_site_ids out of scope for current regions: {out_of_scope}",
         )
-    new_settings = current.model_copy(update={"subject_site_ids": list(subject_site_ids)})
+    if not subject_site_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one subject must be selected.",
+        )
+
+    unique_subjects = list(dict.fromkeys(subject_site_ids))
+    new_settings = current.model_copy(update={"subject_site_ids": unique_subjects})
     config_source.save(new_settings)
-    return Response(status_code=204)
+    return templates.TemplateResponse(
+        request,
+        "partials/_scope_and_subjects.html.jinja",
+        {"settings": new_settings, **_scope_template_context(new_settings)},
+    )
 
 
 @router.post("/schedule", response_model=None)

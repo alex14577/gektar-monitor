@@ -6,16 +6,16 @@ implements save() (ADR-023: ConfigSource now includes save()).
 Anti-mock pattern: FakeConfigSource implements ALL public methods including save(),
 and a dedicated all-methods test exercises every method.
 
-Coverage:
-  1. POST /settings/regions happy path → 200 {"ok": true}.
-  2. POST /settings/regions updates regions on saved Settings.
-  3. POST /settings/regions — empty list → 422.
-  4. POST /settings/regions — region out of range (0 or 81) → 422.
-  5. POST /settings/recipients happy path → 200 {"ok": true}.
-  6. POST /settings/recipients updates recipients on saved Settings.
-  7. POST /settings/recipients — invalid email → 422.
-  8. POST /settings/recipients — empty list accepted → 200.
-  9. All fake methods exercised (anti-mock §6).
+Coverage (POST /settings/regions — htmx form, ≥1 macro-region required):
+  1. Happy path with form-encoded region_ids → 200 + partial HTML.
+  2. Saved Settings.regions matches submission (deduplicated).
+  3. subject_site_ids auto-truncated to subjects_for_macros(new_regions).
+  4. Other Settings fields preserved.
+  5. Empty selection → 422.
+  6. Unknown macro id (e.g. 99) → 422.
+  7. Duplicates collapsed.
+
+Coverage (POST /settings/recipients): unchanged JSON contract.
 """
 
 from __future__ import annotations
@@ -23,11 +23,14 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
 from fis_monitor.domain.models import Settings
-from fis_monitor.web.deps import get_config_source
+from fis_monitor.web.deps import get_config_source, get_templates
 from fis_monitor.web.routes.settings import router
+from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 
 # ---------------------------------------------------------------------------
 # Fake
@@ -65,9 +68,12 @@ def _make_app(
     fake_config: FakeConfigSource | None = None,
 ) -> tuple[FastAPI, FakeConfigSource]:
     fc = fake_config or FakeConfigSource()
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     app = FastAPI()
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(router)
     app.dependency_overrides[get_config_source] = lambda: fc
+    app.dependency_overrides[get_templates] = lambda: templates
     return app, fc
 
 
@@ -99,46 +105,66 @@ def test_all_fake_config_source_methods_exercised() -> None:
 
 
 def test_post_regions_happy_path_200() -> None:
-    """POST /settings/regions with valid regions → 200 {"ok": true}."""
+    """POST /settings/regions with valid macro ids → 200 + HTML partial."""
     app, _fc = _make_app()
     with TestClient(app, raise_server_exceptions=True) as client:
-        resp = client.post("/settings/regions", json={"regions": [10, 20, 30]})
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
+        resp = client.post(
+            "/settings/regions",
+            data={"region_ids": ["1", "2"]},
+        )
+    assert resp.status_code == 200, resp.text
+    assert "text/html" in resp.headers["content-type"]
+    assert 'id="scope-and-subjects"' in resp.text
 
 
 def test_post_regions_updates_settings() -> None:
     """POST /settings/regions stores the new regions list via config_source.save()."""
     app, fc = _make_app()
     with TestClient(app, raise_server_exceptions=True) as client:
-        client.post("/settings/regions", json={"regions": [5, 77]})
-
+        client.post(
+            "/settings/regions",
+            data={"region_ids": ["1", "2"]},
+        )
     assert len(fc.save_calls) == 1
     saved = fc.save_calls[0]
-    assert saved.regions == [5, 77]
+    assert saved.regions == [1, 2]
 
 
-def test_post_regions_calls_current_then_save() -> None:
-    """POST /settings/regions calls current() before save() (compute-and-replace)."""
+def test_post_regions_dedups_submission() -> None:
+    """Duplicate region_ids in submission collapse to a single entry."""
     app, fc = _make_app()
     with TestClient(app, raise_server_exceptions=True) as client:
-        client.post("/settings/regions", json={"regions": [1]})
+        client.post(
+            "/settings/regions",
+            data={"region_ids": ["1", "1", "2"]},
+        )
+    saved = fc.save_calls[0]
+    assert saved.regions == [1, 2]
 
-    assert fc.current_calls >= 1, "current() must be called to get baseline Settings"
-    assert len(fc.save_calls) == 1, "save() must be called once"
+
+def test_post_regions_truncates_subjects_to_new_scope() -> None:
+    """Dropping a macro auto-removes subjects that belonged only to it."""
+    # 27 (Карелия) is Arctic-only. Initial state: both macros selected, Карелия picked.
+    initial = Settings(regions=[1, 2], subject_site_ids=[27, 87])
+    app, fc = _make_app(FakeConfigSource(settings=initial))
+    with TestClient(app, raise_server_exceptions=True) as client:
+        client.post("/settings/regions", data={"region_ids": ["1"]})  # keep only ДФО
+    saved = fc.save_calls[0]
+    assert saved.regions == [1]
+    # 87 (Якутия) belongs to both → kept; 27 (Карелия) Arctic-only → dropped.
+    assert 27 not in saved.subject_site_ids
+    assert 87 in saved.subject_site_ids
 
 
 def test_post_regions_preserves_other_settings_fields() -> None:
-    """POST /settings/regions must not clobber other Settings fields."""
+    """POST /settings/regions must not clobber unrelated Settings fields."""
     initial = Settings(interval_minutes=42)
     app, fc = _make_app(FakeConfigSource(settings=initial))
     with TestClient(app, raise_server_exceptions=True) as client:
-        client.post("/settings/regions", json={"regions": [7]})
+        client.post("/settings/regions", data={"region_ids": ["1"]})
 
     saved = fc.save_calls[0]
-    assert saved.interval_minutes == 42, (
-        "interval_minutes must be preserved after regions update"
-    )
+    assert saved.interval_minutes == 42
 
 
 # ---------------------------------------------------------------------------
@@ -146,35 +172,29 @@ def test_post_regions_preserves_other_settings_fields() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_post_regions_empty_list_422() -> None:
-    """POST /settings/regions with empty list → 422 (min_length=1 violated)."""
+def test_post_regions_empty_selection_422() -> None:
+    """POST /settings/regions with zero region_ids → 422."""
     app, _ = _make_app()
     with TestClient(app, raise_server_exceptions=False) as client:
-        resp = client.post("/settings/regions", json={"regions": []})
+        resp = client.post("/settings/regions", data={})
     assert resp.status_code == 422
+    assert "At least one" in resp.text
 
 
-def test_post_regions_region_zero_422() -> None:
-    """POST /settings/regions with region=0 → 422 (ge=1 violated)."""
+def test_post_regions_unknown_macro_422() -> None:
+    """POST /settings/regions with unknown macro id (e.g. 99) → 422."""
     app, _ = _make_app()
     with TestClient(app, raise_server_exceptions=False) as client:
-        resp = client.post("/settings/regions", json={"regions": [0]})
+        resp = client.post("/settings/regions", data={"region_ids": ["99"]})
     assert resp.status_code == 422
+    assert "Unknown macro-region" in resp.text
 
 
-def test_post_regions_region_81_422() -> None:
-    """POST /settings/regions with region=81 → 422 (le=80 violated)."""
+def test_post_regions_zero_macro_422() -> None:
+    """POST /settings/regions with region_ids=0 → 422 (0 is not a valid macro)."""
     app, _ = _make_app()
     with TestClient(app, raise_server_exceptions=False) as client:
-        resp = client.post("/settings/regions", json={"regions": [81]})
-    assert resp.status_code == 422
-
-
-def test_post_regions_missing_field_422() -> None:
-    """POST /settings/regions with empty body → 422 (regions field required)."""
-    app, _ = _make_app()
-    with TestClient(app, raise_server_exceptions=False) as client:
-        resp = client.post("/settings/regions", json={})
+        resp = client.post("/settings/regions", data={"region_ids": ["0"]})
     assert resp.status_code == 422
 
 

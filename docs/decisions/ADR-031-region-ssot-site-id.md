@@ -143,3 +143,15 @@ def subjects_for_macros(macro_ids: Sequence[int]) -> tuple[int, ...]:
 - `tests/fixtures/list_region1_perpage50.html` — эмпирическое подтверждение
 - [[decisions/ADR-024-target-config-and-url-builder|ADR-024]] — url-builder design
 - [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]] — backfill trigger
+
+---
+
+## Addendum 2026-05-15 — UI invariant: `subject_site_ids` must be non-empty
+
+Семантика домена: пустой `subject_site_ids` остаётся валидной (= все субъекты
+выбранных макро). Однако веб-форма `POST /settings/subjects` теперь требует
+≥1 субъект (422 при пустой submission). Аналогично `POST /settings/regions`
+требует ≥1 макрорегион и автоматически усекает `subject_site_ids` до
+`subjects_for_macros(new_regions)`. Это UX-инвариант защищающий от состояния
+«пустой scope → пустая лента» без явного выбора пользователя; для CLI-edit
+`var/config.json` поведение не меняется.
