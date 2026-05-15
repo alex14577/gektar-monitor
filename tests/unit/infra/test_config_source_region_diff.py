@@ -284,6 +284,8 @@ class TestAuditLog:
         # No file at boot → defaults regions=[1,2].
         cfg = tmp_path / "config.json"
         src = _make_source(cfg, clock=clock, repo=repo)
+        # Clear bootstrap events emitted during __init__ (ADR-039 _bootstrap_subscriptions).
+        caplog.clear()
 
         # Write config with a region not in defaults to trigger a net-new diff.
         _write_regions(cfg, [1, 2, 5])
@@ -291,7 +293,9 @@ class TestAuditLog:
             src._do_reload()
 
         audit_msgs = [r.message for r in caplog.records if "migration_applied" in r.message]
-        assert len(audit_msgs) == 1
+        assert len(audit_msgs) == 1, (
+            f"Expected 1 audit event for net-new region 5, got {len(audit_msgs)}: {audit_msgs}"
+        )
         assert "migration_applied" in audit_msgs[0]
 
     def test_no_audit_log_on_no_diff(
