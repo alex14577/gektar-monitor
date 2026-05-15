@@ -43,7 +43,6 @@ from fis_monitor.web.deps import (
 from fis_monitor.web.rate_limit import RateLimiter
 from fis_monitor.web.routes import onboarding as onboarding_module
 from fis_monitor.web.routes.onboarding import (
-    _should_trigger_backfill,
     _validate_smtp_input,
     router,
 )
@@ -1124,53 +1123,18 @@ def test_smtp_test_rate_limiter_unknown_ip_does_not_crash() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _should_trigger_backfill — pure-function unit tests (ADR-032)
-# ---------------------------------------------------------------------------
-
-
-def test_should_trigger_backfill_all_conditions_met() -> None:
-    """All guard conditions met → returns True."""
-    lot_repo = FakeLotRepo(active_count=0)
-    settings = make_settings(regions=[1])
-    assert _should_trigger_backfill(lot_repo, settings) is True
-
-
-def test_should_trigger_backfill_count_active_nonzero() -> None:
-    """count_active() != 0 → returns False (catalogue already populated)."""
-    lot_repo = FakeLotRepo(active_count=5)
-    settings = make_settings(regions=[1])
-    assert _should_trigger_backfill(lot_repo, settings) is False
-
-
-def test_should_trigger_backfill_empty_regions() -> None:
-    """Empty regions list → returns False (nothing to backfill)."""
-    lot_repo = FakeLotRepo(active_count=0)
-    settings = make_settings(regions=[])
-    assert _should_trigger_backfill(lot_repo, settings) is False
-
-
-def test_should_trigger_backfill_empty_catalogue_and_regions() -> None:
-    """count_active() == 0 but regions also empty → returns False."""
-    lot_repo = FakeLotRepo(active_count=0)
-    settings = make_settings(regions=[])
-    assert _should_trigger_backfill(lot_repo, settings) is False
-
-
-def test_should_trigger_backfill_count_active_called() -> None:
-    """count_active() is always called (not short-circuited before repo call)."""
-    lot_repo = FakeLotRepo(active_count=0)
-    settings = make_settings(regions=[1, 2])
-    _should_trigger_backfill(lot_repo, settings)
-    assert lot_repo.count_active_calls == 1
-
-
-# ---------------------------------------------------------------------------
 # Step 4 auto-backfill trigger — integration via POST /onboarding/save?step=4
 # ---------------------------------------------------------------------------
 
 
-def test_step4_next_triggers_backfill_when_all_guards_pass() -> None:
-    """Happy path: all 3 guard conditions → supervisor.start called once for backfill-auto."""
+def test_step4_next_does_not_trigger_backfill() -> None:
+    """ADR-032 / f5u fix: backfill is NO LONGER triggered from step4.
+
+    The trigger moved to LoginService.on_login_success (composition.py) to
+    avoid the race where backfill ran before Playwright headed-login completed.
+    Step4 now only advances the FSM to COMPLETED and redirects to /.
+    supervisor.start must NOT be called regardless of guard conditions.
+    """
     sup = FakeSupervisor()
     f_lot_repo = FakeLotRepo(active_count=0)
     f_backfill = FakeBackfillService()
@@ -1187,56 +1151,6 @@ def test_step4_next_triggers_backfill_when_all_guards_pass() -> None:
 
     assert resp.status_code == 200
     assert resp.headers.get("HX-Redirect") == "/"
-    assert sup.start_call_count == 1
-    assert "backfill-auto" in sup.started
-
-
-def test_step4_next_no_trigger_when_catalogue_not_empty() -> None:
-    """count_active() != 0 → supervisor.start NOT called."""
-    sup = FakeSupervisor()
-    app, _, _, _, _ = _make_app(
-        onboarding_state=OnboardingState.RECIPIENTS_SET,
-        settings=make_settings(regions=[1]),
-        fake_lot_repo=FakeLotRepo(active_count=3),
-        supervisor=sup,
-    )
-    client = _client(app)
-
-    resp = client.post("/onboarding/save?step=4", data={"action": "next"})
-
-    assert resp.status_code == 200
+    # No backfill from step4 — trigger is now in LoginService.on_login_success.
     assert sup.start_call_count == 0
-
-
-def test_step4_next_no_trigger_when_regions_empty() -> None:
-    """Empty regions → supervisor.start NOT called."""
-    sup = FakeSupervisor()
-    app, _, _, _, _ = _make_app(
-        onboarding_state=OnboardingState.RECIPIENTS_SET,
-        settings=make_settings(regions=[]),
-        fake_lot_repo=FakeLotRepo(active_count=0),
-        supervisor=sup,
-    )
-    client = _client(app)
-
-    resp = client.post("/onboarding/save?step=4", data={"action": "next"})
-
-    assert resp.status_code == 200
-    assert sup.start_call_count == 0
-
-
-def test_step4_next_no_trigger_when_supervisor_absent() -> None:
-    """supervisor=None on app.state → graceful skip, no crash, still redirects."""
-    f_lot_repo = FakeLotRepo(active_count=0)
-    # No supervisor= kwarg → app.state.supervisor not set
-    app, _, _, _, _ = _make_app(
-        onboarding_state=OnboardingState.RECIPIENTS_SET,
-        settings=make_settings(regions=[1]),
-        fake_lot_repo=f_lot_repo,
-    )
-    client = _client(app)
-
-    resp = client.post("/onboarding/save?step=4", data={"action": "next"})
-
-    assert resp.status_code == 200
-    assert resp.headers.get("HX-Redirect") == "/"
+    assert f_backfill.start_calls == 0

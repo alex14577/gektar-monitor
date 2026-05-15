@@ -28,6 +28,7 @@ See: docs/architecture/04-composition-root.md §4.2
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 
@@ -81,6 +82,8 @@ from fis_monitor.services.onboarding import OnboardingService
 from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
+
+_log = logging.getLogger(__name__)
 
 # ADR-024: upstream (надальнийвосток.рф) uses self-signed cert in chain.
 # Suppress InsecureRequestWarning at module level — this service exclusively
@@ -370,7 +373,70 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         config_source=config_source,
     )
 
-    login = LoginService(login_session=login_session, clock=clock)
+    # Build backfill BEFORE login so the on_login_success closure can capture it.
+    backfill = BackfillService(
+        fetcher=paginated_fetcher,
+        lot_repo=lot_repo,
+        config_source=config_source,
+        monitor_cycle=monitor_cycle,
+    )
+
+    # ---------------------------------------------------------------------------
+    # on_login_success: backfill auto-trigger on headed-login completion (f5u fix).
+    #
+    # ADR-032 originally triggered backfill from onboarding step-4 completion.
+    # Prod logs showed the race: Playwright headed-login takes 10-60 s, but the
+    # trigger fired immediately — backfill ran without valid session cookies,
+    # got ParseBugErrors, produced 0 rows.  After the first monitor_cycle writes
+    # lots, count_active() > 0, and the guard blocks all future auto-backfills.
+    #
+    # Fix: trigger on *login success* (headed login only, not silent refresh).
+    # Guards remain identical: onboarding_completed AND count_active() == 0.
+    # The supervisor reference is captured lazily as a mutable cell to avoid a
+    # circular dependency (supervisor is created in app.py lifespan, after
+    # build_container returns; None-guard prevents premature invocation during
+    # test setups that skip lifespan).
+    # ---------------------------------------------------------------------------
+    _supervisor_cell: list[object] = [None]  # mutable cell; filled by app.py lifespan
+
+    def _backfill_on_login_success(_outcome: object) -> None:
+        """Auto-backfill trigger callback — called on Playwright executor thread."""
+        onboarding_state = onboarding.current()
+        from fis_monitor.domain.models import OnboardingState  # local to avoid circular
+        if onboarding_state != OnboardingState.COMPLETED:
+            _log.debug(
+                "on_login_success: onboarding not completed (state=%s) — skip backfill",
+                onboarding_state,
+            )
+            return
+        active = lot_repo.count_active()
+        if active != 0:
+            _log.debug(
+                "on_login_success: catalogue not empty (count_active=%d) — skip backfill",
+                active,
+            )
+            return
+        current_settings = config_source.current()
+        if not current_settings.regions:
+            _log.debug("on_login_success: regions empty — skip backfill")
+            return
+        sup = _supervisor_cell[0]
+        if sup is None:
+            _log.warning(
+                "on_login_success: supervisor not yet bound — backfill NOT started"
+            )
+            return
+        _log.info("on_login_success: guards passed → auto-backfill scheduled")
+        sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
+
+    login = LoginService(
+        login_session=login_session,
+        clock=clock,
+        on_login_success=_backfill_on_login_success,
+    )
+    # Expose the supervisor cell so app.py lifespan can fill it after building
+    # the supervisor. Stored on the login service instance for easy access.
+    login._supervisor_cell = _supervisor_cell  # type: ignore[attr-defined]
 
     settings_service = SettingsService(
         smtp_creds_repo=smtp_creds_repo,
@@ -401,13 +467,6 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     lot_user_state = LotUserStateService(
         lot_repo=lot_repo,
         user_state_repo=user_state_repo,
-    )
-
-    backfill = BackfillService(
-        fetcher=paginated_fetcher,
-        lot_repo=lot_repo,
-        config_source=config_source,
-        monitor_cycle=monitor_cycle,
     )
 
     catchup_dismiss = CatchupDismissService(state_repo=settings_repo, clock=clock)

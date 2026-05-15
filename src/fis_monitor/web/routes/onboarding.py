@@ -28,11 +28,7 @@ import contextlib
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from fis_monitor.domain.interfaces import LotRepository
-    from fis_monitor.services.backfill import BackfillService
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -48,9 +44,7 @@ from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 from fis_monitor.web._helpers import client_ip
 from fis_monitor.web.deps import (
-    get_backfill,
     get_config_source,
-    get_lot_repo,
     get_onboarding,
     get_settings_service,
     get_smtp_test,
@@ -713,33 +707,21 @@ def _handle_step3_skip(svc: OnboardingService) -> HTMLResponse:
     return _hx_redirect("/onboarding/test-email")
 
 
-def _should_trigger_backfill(
-    lot_repo: LotRepository,
-    settings: Settings,
-) -> bool:
-    """Return True if all guard conditions for auto-backfill are met (ADR-032).
-
-    Three guards must all be true:
-    1. No lots in the catalogue yet — avoid duplicate backfill if user re-onboards.
-    2. At least one region configured — backfilling with an empty scope is a no-op.
-    3. (Single-flight) BackfillService.start() is its own idempotency gate; no
-       duplicate guard needed here.
-    """
-    if lot_repo.count_active() != 0:
-        return False
-    return bool(settings.regions)
-
-
 def _handle_step4_next(
     request: Request,
     form: dict[str, Any],
     svc: OnboardingService,
     cfg: ConfigSource,
     templates: Jinja2Templates,
-    lot_repo: LotRepository | None = None,
-    backfill: BackfillService | None = None,
 ) -> HTMLResponse:
-    """Handle step 4 action=next: advance to COMPLETED, then maybe auto-backfill."""
+    """Handle step 4 action=next: advance to COMPLETED.
+
+    Auto-backfill is NO LONGER triggered here (ADR-032 / f5u race-fix).
+    The trigger was moved to LoginService.on_login_success — the backfill
+    now starts only after Playwright headed-login completes successfully,
+    guaranteeing valid session cookies are in place before the first HTTP
+    scrape.  See composition.py ``_backfill_on_login_success`` for guards.
+    """
     try:
         svc.advance(OnboardingState.RECIPIENTS_SET, OnboardingState.COMPLETED)
     except InvalidTransitionError as exc:
@@ -752,19 +734,6 @@ def _handle_step4_next(
                 " Отправьте тестовое письмо или выберите «Пропустить»."
             ),
         )
-
-    # Trigger auto-backfill after successful onboarding completion (ADR-032).
-    # Placed here (orchestration layer) to avoid coupling OnboardingService to
-    # BackfillService (domain must not depend on infra services).
-    supervisor = getattr(getattr(request.app, "state", None), "supervisor", None)
-    if (
-        supervisor is not None
-        and lot_repo is not None
-        and backfill is not None
-        and _should_trigger_backfill(lot_repo, cfg.current())
-    ):
-        supervisor.start("backfill-auto", lambda stop: backfill.start(stop))
-        _log.info("onboarding: completed → auto-backfill scheduled")
 
     return _hx_redirect("/")
 
@@ -783,8 +752,6 @@ async def post_onboarding_save(
     settings_svc: SettingsService = Depends(get_settings_service),
     smtp_test_svc: SmtpTestService = Depends(get_smtp_test),
     templates: Jinja2Templates = Depends(get_templates),
-    lot_repo: LotRepository = Depends(get_lot_repo),
-    backfill: BackfillService = Depends(get_backfill),
 ) -> HTMLResponse:
     """Dispatcher for all wizard POST submissions.
 
@@ -813,7 +780,7 @@ async def post_onboarding_save(
     elif key == (3, "skip"):
         return _handle_step3_skip(svc)
     elif key == (4, "next"):
-        return _handle_step4_next(request, form, svc, cfg, templates, lot_repo, backfill)  # type: ignore[arg-type]
+        return _handle_step4_next(request, form, svc, cfg, templates)  # type: ignore[arg-type]
     else:
         raise HTTPException(
             status_code=400,

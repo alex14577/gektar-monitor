@@ -11,6 +11,12 @@ Design:
     so the service can submit blocking I/O to a dedicated thread pool.
   - ``cancel_active_job()``: idempotent, calls ``login_session.cancel()``.
   - ``status()``: returns ``LoginStatus(running, last_outcome)`` without blocking.
+  - ``on_login_success``: optional callback invoked (on executor thread) when
+    ``open_headed_login`` completes with ``success=True``.  Used by the
+    composition root to wire the backfill auto-trigger (ADR-032 / f5u fix):
+    the callback runs the guard checks and starts backfill if appropriate.
+    ``start_refresh`` (silent cookie refresh) does NOT trigger this callback —
+    only a full headed login carries the "user is now authenticated" semantics.
 
 Thread-safety:
   - ``_lock`` guards the single-flight invariant.
@@ -21,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -91,6 +98,13 @@ class LoginService:
         clock: Wall-clock / monotonic time source.
         executor: Optional ``ThreadPoolExecutor`` for running the blocking
             ``open_headed_login`` call. Bound via ``bind_executor()`` in lifespan.
+        on_login_success: Optional callback invoked (on the executor thread)
+            when ``start_login()`` completes with ``outcome.success is True``.
+            NOT called for ``start_refresh()`` — only a full headed login
+            carries "user is now authenticated" semantics.
+            The callback receives the ``LoginOutcome`` and must not block
+            the executor thread for more than a few milliseconds (schedule
+            I/O-bound work in its own thread if needed).
     """
 
     def __init__(
@@ -99,10 +113,12 @@ class LoginService:
         login_session: LoginSession,
         clock: Clock,
         executor: ThreadPoolExecutor | None = None,
+        on_login_success: Callable[[LoginOutcome], None] | None = None,
     ) -> None:
         self._session = login_session
         self._clock = clock
         self._executor: ThreadPoolExecutor | None = executor
+        self._on_login_success = on_login_success
 
         # Single-flight lock: held for the duration of the login job.
         self._lock = threading.Lock()
@@ -151,7 +167,9 @@ class LoginService:
                 self._active_future = future
 
             # Attach a callback to release the lock and record the outcome.
-            future.add_done_callback(self._on_done)
+            # Use _on_login_done (not _on_done) so the on_login_success hook
+            # fires only for headed logins, not for silent refresh (ADR-032/f5u).
+            future.add_done_callback(self._on_login_done)
 
         except Exception:
             self._lock.release()
@@ -271,3 +289,30 @@ class LoginService:
         except RuntimeError:
             # Lock was not held — shouldn't happen, but guard defensively.
             _log.warning("LoginService._on_done: lock.release() raised RuntimeError")
+
+    def _on_login_done(self, future: Future[LoginOutcome]) -> None:
+        """Future completion callback for headed logins only.
+
+        Delegates to ``_on_done`` for state management, then fires the
+        ``on_login_success`` hook when the outcome is successful.  This
+        callback is attached only by ``start_login()`` — ``start_refresh()``
+        uses ``_on_done`` directly, so the hook is NOT called for silent
+        cookie refreshes (correct per ADR-032 / f5u race-condition fix).
+
+        The lock is already released inside ``_on_done`` before the hook
+        runs, so a hook that calls ``start_login()`` again would succeed
+        (though that would be an unusual usage).
+        """
+        self._on_done(future)
+
+        # Fire the success hook after state is recorded and lock is released.
+        cb = self._on_login_success
+        if cb is not None:
+            try:
+                outcome = future.result()
+                if outcome.success:
+                    cb(outcome)
+            except Exception:
+                _log.exception(
+                    "LoginService._on_login_done: on_login_success hook raised"
+                )

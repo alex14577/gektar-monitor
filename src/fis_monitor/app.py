@@ -235,6 +235,14 @@ async def _lifespan_impl(
         app.state.supervisor = supervisor
         logger.info("lifespan: supervisor started (full-scan, monitor-cycle, notifier)")
 
+        # Wire supervisor into the on_login_success backfill-trigger closure (f5u fix).
+        # The cell was created in build_container() before the supervisor existed;
+        # now that both are live we inject the supervisor so the closure can start
+        # "backfill-auto" when headed-login completes (ADR-032 / f5u).
+        _cell = getattr(container.services.login, "_supervisor_cell", None)
+        if _cell is not None:
+            _cell[0] = supervisor
+
         yield
 
     finally:
