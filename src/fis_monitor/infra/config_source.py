@@ -205,6 +205,9 @@ class WatchdogConfigSource:
         self.last_reload_at: datetime | None = None
         self.last_error_at: datetime | None = None
 
+        # Seed region_subscriptions for any startup regions not yet recorded (ADR-039).
+        self._bootstrap_subscriptions()
+
         # Start watchdog observer on the *directory* (not the file).
         handler = _ConfigFileEventHandler(
             target_name=path.name,
@@ -324,6 +327,24 @@ class WatchdogConfigSource:
             logger.debug(
                 "config_source: region %d removed from subscription tracking", region_id
             )
+
+    def _bootstrap_subscriptions(self) -> None:
+        """Seed region_subscriptions for startup regions absent from the DB (ADR-039).
+
+        Runs once in __init__ after the initial config is loaded.  Only calls
+        set_if_absent for regions with no existing record — idempotent on restart.
+        """
+        if self._region_subs_repo is None:
+            return
+        now = self._clock.now()
+        for region_id in sorted(self._current.regions):
+            if self._region_subs_repo.get_subscribed_at(region_id) is None:
+                self._region_subs_repo.set_if_absent(region_id, now)
+                log_audit(
+                    "subscribed_at.migration_applied",
+                    region_id=region_id,
+                    subscribed_at=now.isoformat(),
+                )
 
     # ------------------------------------------------------------------
     # Internal — env overrides
