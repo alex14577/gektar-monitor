@@ -8,14 +8,6 @@
       hx-target="#feed"
       hx-swap="outerHTML">
 
-  <div class="sidebar__group" style="border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px;">
-    <p class="sidebar__h">Область мониторинга</p>
-    <a class="sidebar__watched" href="/settings#scope" title="Изменить в Настройках">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-      {{ scope.macro_regions | join(', ') }}
-    </a>
-  </div>
-
   <div class="sidebar__group">
     <p class="sidebar__h">Субъект РФ</p>
     <button class="select" type="button"
