@@ -74,8 +74,15 @@ class PaginatedListFetcher:
         stop_event: threading.Event,
         *,
         sleep_between_pages: float = 2.0,
+        subject_site_ids: tuple[int, ...] = (),
     ) -> Iterator[ParsedListRow]:
         """Yield every ``ParsedListRow`` from pages 1..N for ``region``.
+
+        *region* is a macro_id (1=ДФО, 2=Арктика) — contract unchanged per ADR-031.
+
+        *subject_site_ids* is forwarded to ``lot_list_url`` when non-empty to
+        narrow the fetch scope to specific subjects within the macro-region
+        (``Settings.subject_site_ids``).  Empty = fetch all subjects.
 
         Stops when:
           - the parser returns an empty list (end of catalogue), or
@@ -109,7 +116,9 @@ class PaginatedListFetcher:
                 )
                 return
 
-            url = self._url_builder.lot_list_url(region=region, page=page)
+            url = self._url_builder.lot_list_url(
+                region=region, page=page, subject_site_ids=subject_site_ids
+            )
             try:
                 response = self._http.get(url, headers=_PJAX_HEADERS)
             except UpstreamError:

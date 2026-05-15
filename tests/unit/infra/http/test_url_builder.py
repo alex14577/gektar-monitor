@@ -4,10 +4,11 @@ Tests:
 - default base_url produces correct lot_list_url for a region
 - custom base_url substitutes correctly
 - lot_detail_url produces correct URL for a lot_id
-- region=1 (int) formats correctly (not "[1]" etc.)
+- region=1 (int) formats correctly via macro-region parameter (ADR-031)
 - frozen dataclass rejects attribute mutation
 - default sort=-DATE_CREATE is appended raw (RFC 3986 unreserved chars)
 - custom sort=-DATE_UPDATE is substituted correctly
+- subject_site_ids non-empty appends FreeLotSearch[rfSubjectId][] params
 """
 from __future__ import annotations
 
@@ -22,53 +23,73 @@ _CUSTOM_BASE = "http://localhost:8765"
 
 
 class TestLotListUrl:
-    """TorgiUrlBuilder.lot_list_url produces correct percent-encoded URLs."""
+    """TorgiUrlBuilder.lot_list_url produces correct URLs."""
 
-    def test_default_base_url_region_27(self) -> None:
+    def test_default_base_url_region_1(self) -> None:
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
-        url = builder.lot_list_url(region=27)
+        url = builder.lot_list_url(region=1)
         assert url == (
             "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai"
             "/cabinet/free-lot"
-            "?FreeLotSearch%5BrfSubjectId%5D%5B%5D=27&use_filter_pocket=1&sort=-DATE_CREATE"
+            "?region=1&use_filter_pocket=1&sort=-DATE_CREATE"
         )
 
     def test_custom_base_url(self) -> None:
         builder = TorgiUrlBuilder(base_url=_CUSTOM_BASE)
-        url = builder.lot_list_url(region=27)
+        url = builder.lot_list_url(region=1)
         assert url == (
             "http://localhost:8765"
             "/cabinet/free-lot"
-            "?FreeLotSearch%5BrfSubjectId%5D%5B%5D=27&use_filter_pocket=1&sort=-DATE_CREATE"
+            "?region=1&use_filter_pocket=1&sort=-DATE_CREATE"
         )
 
-    def test_region_1_formats_as_scalar(self) -> None:
-        """region=1 must appear as '1', not '[1]' or 'region=1&...' etc."""
+    def test_region_param_uses_macro_id(self) -> None:
+        """region= macro-param must appear; old rfSubjectId syntax must not (ADR-031)."""
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
         url = builder.lot_list_url(region=1)
-        assert "FreeLotSearch%5BrfSubjectId%5D%5B%5D=1" in url
-        assert "[1]" not in url
-        assert "region=1" not in url  # no old-style key
+        assert "region=1" in url
+        # The old field is gone from the base query; it only appears when
+        # subject_site_ids is non-empty.
+        assert "FreeLotSearch%5BrfSubjectId%5D%5B%5D=1" not in url
 
     def test_use_filter_pocket_present(self) -> None:
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
-        url = builder.lot_list_url(region=27)
+        url = builder.lot_list_url(region=1)
         assert "use_filter_pocket=1" in url
 
     def test_default_sort_is_date_create_desc(self) -> None:
         """Default sort=DEFAULT_LIST_SORT ("-DATE_CREATE") appears raw in URL."""
         assert DEFAULT_LIST_SORT == "-DATE_CREATE"
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
-        url = builder.lot_list_url(region=27)
-        # "-" and "_" are RFC 3986 unreserved chars — no encoding needed.
+        url = builder.lot_list_url(region=1)
         assert "sort=-DATE_CREATE" in url
 
     def test_custom_sort_date_update(self) -> None:
         """Custom sort='-DATE_UPDATE' substitutes correctly."""
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
-        url = builder.lot_list_url(region=5, sort="-DATE_UPDATE")
+        url = builder.lot_list_url(region=2, sort="-DATE_UPDATE")
         assert "sort=-DATE_UPDATE" in url
         assert "DATE_CREATE" not in url
+
+    def test_subject_site_ids_appended_when_non_empty(self) -> None:
+        """Non-empty subject_site_ids appends FreeLotSearch[rfSubjectId][] params."""
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=1, subject_site_ids=(88, 89))
+        assert "region=1" in url
+        assert "FreeLotSearch%5BrfSubjectId%5D%5B%5D=88" in url
+        assert "FreeLotSearch%5BrfSubjectId%5D%5B%5D=89" in url
+
+    def test_subject_site_ids_empty_no_rfsubjectid_param(self) -> None:
+        """Empty subject_site_ids (default) must not produce rfSubjectId params."""
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=1)
+        assert "rfSubjectId" not in url
+        assert "FreeLotSearch" not in url
+
+    def test_region_2_arctic(self) -> None:
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=2)
+        assert "region=2" in url
 
 
 class TestLotDetailUrl:

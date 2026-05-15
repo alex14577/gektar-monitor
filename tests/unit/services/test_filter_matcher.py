@@ -68,47 +68,49 @@ class TestRfSubjectFilterMatcher:
 
     def test_empty_filter_passes_all(self) -> None:
         """Empty rf_subjects → no filter set → pass everything through."""
-        lot = _make_lot("Хабаровский край")  # rf_subject id=27
+        lot = _make_lot("Хабаровский край")  # site-id=89
         filters = FiltersConfig(rf_subjects=[])
         assert self.matcher.matches(lot, filters) is True
 
     def test_matching_region_passes(self) -> None:
-        """Lot whose region name maps to an id in rf_subjects → True."""
-        lot = _make_lot("Хабаровский край")  # id=27
-        filters = FiltersConfig(rf_subjects=[27, 50])
+        """Lot whose region name maps to a site-id in rf_subjects → True."""
+        lot = _make_lot("Хабаровский край")  # site-id=89
+        filters = FiltersConfig(rf_subjects=[89, 88])
         assert self.matcher.matches(lot, filters) is True
 
     def test_non_matching_region_blocked(self) -> None:
-        """Lot whose region maps to an id NOT in rf_subjects → False."""
-        lot = _make_lot("Хабаровский край")  # id=27
-        filters = FiltersConfig(rf_subjects=[77, 50])  # Москва + Московская
+        """Lot whose region maps to a site-id NOT in rf_subjects → False."""
+        lot = _make_lot("Хабаровский край")  # site-id=89
+        filters = FiltersConfig(rf_subjects=[88, 90])  # Приморский + Амурская
         assert self.matcher.matches(lot, filters) is False
 
     def test_unknown_region_name_passes(self) -> None:
-        """Region name not in the hardcoded map → fail-open (True).
+        """Region name not in the SSOT map → fail-open (True).
 
         This ensures new upstream regions are never silently dropped
-        when the mapping table lags behind site updates.
+        when the SSOT lags behind site updates.
         """
         lot = _make_lot("Несуществующий край")
-        filters = FiltersConfig(rf_subjects=[1, 2, 3])
+        filters = FiltersConfig(rf_subjects=[88, 89, 90])
         assert self.matcher.matches(lot, filters) is True
 
     @pytest.mark.parametrize("region_name,region_id", [
-        ("Москва", 77),
-        ("Санкт-Петербург", 78),
-        ("Краснодарский край", 23),
-        ("Московская область", 50),
+        ("Приморский край", 88),
+        ("Хабаровский край", 89),
+        ("Амурская область", 90),
+        ("Республика Саха (Якутия)", 87),
+        ("Республика Карелия", 27),
+        ("Мурманская область", 34),
     ])
     def test_known_regions_correct_id_mapping(
         self, region_name: str, region_id: int
     ) -> None:
-        """Spot-check that well-known region names map to their correct IDs."""
+        """Spot-check that known site-id region names map to their correct IDs."""
         lot = _make_lot(region_name)
         # Filter includes only the correct id → should pass.
         assert self.matcher.matches(lot, FiltersConfig(rf_subjects=[region_id])) is True
         # Filter excludes the id → should block.
-        other_id = region_id + 1 if region_id < 89 else region_id - 1
+        other_id = region_id + 1 if region_id < 96 else region_id - 1
         assert self.matcher.matches(lot, FiltersConfig(rf_subjects=[other_id])) is False
 
 

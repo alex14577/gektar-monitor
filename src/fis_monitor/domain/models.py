@@ -471,6 +471,11 @@ class Settings(BaseModel):
     interval_minutes: Annotated[int, Field(ge=0, le=60)] = 1
     timezone: str = "Europe/Moscow"
     regions: list[int] = Field(default_factory=lambda: [1, 2])
+    # fetch-scope subject filter: site-id values (72–96) per ADR-031.
+    # Empty = fetch all subjects within the selected macro-regions (default).
+    # Non-empty = also send FreeLotSearch[rfSubjectId][] to narrow fetch scope.
+    # Distinct from FiltersConfig.rf_subjects which is a notify-time filter.
+    subject_site_ids: list[int] = Field(default_factory=list)
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     ui: UIConfig = Field(default_factory=UIConfig)

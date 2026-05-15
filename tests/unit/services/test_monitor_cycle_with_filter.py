@@ -225,10 +225,10 @@ class TestMonitorCycleWithFilter:
 
     def test_new_lot_outside_filter_suppressed(self) -> None:
         """was_new=True lot from a filtered-out region → no publish, no dispatch."""
-        # Хабаровский край = id 27; filter allows only Москва (77)
+        # Хабаровский край = site-id 89; filter allows only Приморский (88)
         lot = _make_lot(1, "Хабаровский край")
         settings = Settings(
-            filters=FiltersConfig(rf_subjects=[77]),
+            filters=FiltersConfig(rf_subjects=[88]),
         )
         svc, dispatcher, event_bus = _build_service(
             [lot], was_new_for={1}, settings=settings
@@ -243,10 +243,10 @@ class TestMonitorCycleWithFilter:
 
     def test_new_lot_inside_filter_passes(self) -> None:
         """was_new=True lot whose region IS in rf_subjects → both called."""
-        # Хабаровский край = id 27; filter includes 27
+        # Хабаровский край = site-id 89; filter includes 89
         lot = _make_lot(1, "Хабаровский край")
         settings = Settings(
-            filters=FiltersConfig(rf_subjects=[27, 50]),
+            filters=FiltersConfig(rf_subjects=[89, 88]),
         )
         svc, dispatcher, event_bus = _build_service(
             [lot], was_new_for={1}, settings=settings
@@ -281,19 +281,19 @@ class TestMonitorCycleWithFilter:
 
     def test_multiple_lots_only_matching_region_emits(self) -> None:
         """Two new lots from different regions; filter allows only one."""
-        lot_khabarovsk = _make_lot(1, "Хабаровский край")  # id=27, filtered out
-        lot_moscow = _make_lot(2, "Москва")  # id=77, allowed
+        lot_khabarovsk = _make_lot(1, "Хабаровский край")  # site-id=89, filtered out
+        lot_primorsky = _make_lot(2, "Приморский край")    # site-id=88, allowed
 
-        settings = Settings(filters=FiltersConfig(rf_subjects=[77]))
+        settings = Settings(filters=FiltersConfig(rf_subjects=[88]))
         svc, dispatcher, event_bus = _build_service(
-            [lot_khabarovsk, lot_moscow],
+            [lot_khabarovsk, lot_primorsky],
             was_new_for={1, 2},
             settings=settings,
         )
 
         svc.run_cycle(_REGION)
 
-        # Only Moscow lot dispatched
+        # Only Primorsky lot dispatched
         assert len(dispatcher.dispatch_calls) == 1
         assert dispatcher.dispatch_calls[0].id == 2
 
@@ -304,7 +304,7 @@ class TestMonitorCycleWithFilter:
 
     def test_not_new_lots_not_dispatched_regardless(self) -> None:
         """was_new=False (existing lot, no changes) → dispatch never called regardless of filter."""
-        lot = _make_lot(1, "Москва")
+        lot = _make_lot(1, "Приморский край")
         settings = Settings(filters=FiltersConfig(rf_subjects=[]))  # pass-through
         svc, dispatcher, event_bus = _build_service(
             [lot], was_new_for=set(), settings=settings  # not new

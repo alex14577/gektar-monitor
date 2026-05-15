@@ -9,10 +9,13 @@ from fis_monitor.domain.regions import (
     REGION_BY_SLUG,
     REGION_SLUG_BY_ID,
     REGION_TITLE_BY_SLUG,
+    SUBJECT_TITLE_BY_ID,
+    SUBJECTS_BY_MACRO,
     id_to_slug,
     ids_to_slugs,
     slug_to_id,
     slugs_to_ids,
+    subjects_for_macros,
 )
 
 
@@ -104,6 +107,63 @@ class TestSlugsToIds:
     def test_unknown_raises_key_error(self) -> None:
         with pytest.raises(KeyError):
             slugs_to_ids(["dfo", "nonexistent"])
+
+
+class TestSubjectConstants:
+    """Tests for SUBJECTS_BY_MACRO, SUBJECT_TITLE_BY_ID, and subjects_for_macros."""
+
+    def test_subjects_by_macro_immutable(self) -> None:
+        with pytest.raises(TypeError):
+            SUBJECTS_BY_MACRO[999] = (1,)  # type: ignore[index]
+
+    def test_subject_title_by_id_immutable(self) -> None:
+        with pytest.raises(TypeError):
+            SUBJECT_TITLE_BY_ID[999] = "test"  # type: ignore[index]
+
+    def test_subjects_by_macro_dfo_has_11_entries(self) -> None:
+        assert len(SUBJECTS_BY_MACRO[1]) == 11
+
+    def test_subjects_by_macro_arctic_has_10_entries(self) -> None:
+        assert len(SUBJECTS_BY_MACRO[2]) == 10
+
+    def test_subject_title_by_id_has_19_entries(self) -> None:
+        # 11 ДФО + 10 Арктика - 2 shared (87, 96) = 19 unique
+        assert len(SUBJECT_TITLE_BY_ID) == 19
+
+    def test_subjects_for_macros_dfo(self) -> None:
+        result = subjects_for_macros([1])
+        assert set(result) == set(SUBJECTS_BY_MACRO[1])
+        assert len(result) == 11
+
+    def test_subjects_for_macros_arctic(self) -> None:
+        result = subjects_for_macros([2])
+        assert set(result) == set(SUBJECTS_BY_MACRO[2])
+        assert len(result) == 10
+
+    def test_subjects_for_macros_both_deduplicates(self) -> None:
+        """87 (Якутия) and 96 (Чукотка) appear in both — union must be 19 unique."""
+        result = subjects_for_macros([1, 2])
+        assert len(result) == 19
+        # Dedup check: no duplicates in tuple
+        assert len(set(result)) == len(result)
+        # Both shared ids present exactly once
+        assert result.count(87) == 1
+        assert result.count(96) == 1
+
+    def test_subjects_for_macros_unknown_silently_skipped(self) -> None:
+        assert subjects_for_macros([999]) == ()
+
+    def test_subjects_for_macros_empty(self) -> None:
+        assert subjects_for_macros([]) == ()
+
+    def test_subjects_for_macros_returns_tuple(self) -> None:
+        result = subjects_for_macros([1])
+        assert isinstance(result, tuple)
+
+    def test_all_subject_ids_in_title_map(self) -> None:
+        """Every site-id in SUBJECTS_BY_MACRO must have a title entry."""
+        all_ids = {sid for sids in SUBJECTS_BY_MACRO.values() for sid in sids}
+        assert all_ids == set(SUBJECT_TITLE_BY_ID.keys())
 
 
 class TestIdsToSlugs:

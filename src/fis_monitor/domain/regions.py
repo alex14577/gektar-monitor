@@ -18,7 +18,7 @@ Design constraints
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
 __all__ = [
@@ -26,10 +26,13 @@ __all__ = [
     "REGION_BY_SLUG",
     "REGION_SLUG_BY_ID",
     "REGION_TITLE_BY_SLUG",
+    "SUBJECTS_BY_MACRO",
+    "SUBJECT_TITLE_BY_ID",
     "id_to_slug",
     "ids_to_slugs",
     "slug_to_id",
     "slugs_to_ids",
+    "subjects_for_macros",
 ]
 
 # ---------------------------------------------------------------------------
@@ -60,11 +63,6 @@ REGION_TITLE_BY_SLUG: Mapping[str, str] = MappingProxyType(
     }
 )
 
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
-
-
 def slug_to_id(slug: str) -> int:
     """Convert a region slug to its domain integer ID.
 
@@ -83,6 +81,62 @@ def id_to_slug(id_: int) -> str | None:
     gracefully instead of crashing.
     """
     return REGION_SLUG_BY_ID.get(id_)
+
+
+# ---------------------------------------------------------------------------
+# Subject (site-id) constants — SSOT per ADR-031
+# ---------------------------------------------------------------------------
+
+# site-id values per macro-region as observed in the select element of the
+# FIS auction platform HTML.  87 (Якутия) and 96 (Чукотка) appear in both
+# ДФО and Арктика because they straddle both administrative groupings on the
+# site.
+SUBJECTS_BY_MACRO: Mapping[int, tuple[int, ...]] = MappingProxyType({
+    1: (72, 85, 87, 88, 89, 90, 91, 93, 94, 95, 96),   # ДФО
+    2: (27, 28, 29, 30, 34, 68, 69, 76, 87, 96),         # Арктика
+})
+
+#: site-id → display name as it appears in lot-list HTML (immutable).
+SUBJECT_TITLE_BY_ID: Mapping[int, str] = MappingProxyType({
+    27: "Республика Карелия",
+    28: "Республика Коми",
+    29: "Архангельская область",
+    30: "Ненецкий автономный округ",
+    34: "Мурманская область",
+    68: "Ханты-Мансийский автономный округ",
+    69: "Ямало-Ненецкий автономный округ",
+    72: "Республика Бурятия",
+    76: "Красноярский край",
+    85: "Забайкальский край",
+    87: "Республика Саха (Якутия)",
+    88: "Приморский край",
+    89: "Хабаровский край",
+    90: "Амурская область",
+    91: "Камчатский край",
+    93: "Магаданская область",
+    94: "Сахалинская область",
+    95: "Еврейская автономная область",
+    96: "Чукотский автономный округ",
+})
+
+
+def subjects_for_macros(macro_ids: Sequence[int]) -> tuple[int, ...]:
+    """Return a deduplicated union of subject site-ids for the given macro_ids.
+
+    Unknown macro_ids are silently skipped (mirrors ``id_to_slug`` leniency).
+    Order follows insertion order of macro_ids × their subject tuples; 87/96
+    appear once even when both macro-regions are requested.
+    """
+    seen: dict[int, None] = {}
+    for mid in macro_ids:
+        for sid in SUBJECTS_BY_MACRO.get(mid, ()):
+            seen[sid] = None
+    return tuple(seen)
+
+
+# ---------------------------------------------------------------------------
+# Region helper functions
+# ---------------------------------------------------------------------------
 
 
 def slugs_to_ids(slugs: list[str]) -> list[int]:
