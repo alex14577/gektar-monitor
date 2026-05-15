@@ -1,9 +1,14 @@
 # ADR-028 — Paginated Catalogue Backfill
 
-**Status**: Accepted  
-**Date**: 2026-05-15  
-**Deciders**: Backend Architect  
+**Status**: Accepted (Auto-trigger section superseded by ADR-032)
+**Date**: 2026-05-15
+**Deciders**: Backend Architect
 **Tags**: backfill, pagination, catalogue, cold-start
+
+> **Note**: The «Auto-trigger heuristic» section below is superseded by
+> [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]]. Trigger has been
+> moved from `lifespan` to `_handle_step4_next` (onboarding completion handler).
+> All other sections of this ADR remain in effect.
 
 ---
 

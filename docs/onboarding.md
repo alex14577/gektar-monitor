@@ -140,7 +140,8 @@ Step handlers:
 - Step 2 `skip`: `skip_email()` → `advance(REGIONS_SET, SMTP_CONFIGURED)` → `advance(SMTP_CONFIGURED, RECIPIENTS_SET)`.
 - Step 3 `next`: валидирует email(s) → `ConfigSource.save(recipients)` → опц. `SmtpTestService.test_send()` → `advance(SMTP_CONFIGURED, RECIPIENTS_SET)`.
 - Step 3 `skip`: `skip_email()` → `advance(SMTP_CONFIGURED, RECIPIENTS_SET)`.
-- Step 4 `next`: `advance(RECIPIENTS_SET, COMPLETED)` → `HX-Redirect: /`.
+- Step 4 `next`: `advance(RECIPIENTS_SET, COMPLETED)` → auto-backfill trigger (если `count_active()==0` AND `settings.regions != []`) → `HX-Redirect: /`.
+  Auto-backfill: спавнит supervised thread `backfill-auto` через `BackfillService.start()`. Single-flight — повторный вызов возвращает `False`, без паники. См. [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]].
 
 ### `POST /onboarding/smtp-test`
 

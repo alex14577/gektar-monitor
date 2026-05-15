@@ -21,6 +21,10 @@
 - **user-state table** — Таблица БД с пользовательскими данными, которые нельзя терять: отправленные уведомления, `last_known_id`, настройки. См. [[db/schema|db/schema.sql]].
 - **early-exit** — Алгоритм обхода ленты: сортировать по `DATE_CREATE DESC`, останавливаться на первом известном ID. См. [[parser/sort-strategy]].
 - **monitor-cycle** — Один проход мониторинга: получить первую страницу, найти новые ID, поставить их в enrichment.
+- **macro-region (макрорегион)** — Укрупнённая географическая зона сайта `надальнийвосток.рф`. Используется как параметр `region=` в URL. Два значения: 1=ДФО, 2=Арктика. Хранится в `Settings.regions`. Не то же самое что субъект (site-id). См. [[decisions/ADR-031-region-ssot-site-id|ADR-031]].
+- **subject (site-id)** — Внутренний целочисленный идентификатор субъекта РФ на сайте `надальнийвосток.рф`. Диапазон 27–96. Не совпадает с OKTMO-кодами. Отражён в `domain/regions.py::SUBJECT_TITLE_BY_ID`. Используется в `<select name="FreeLotSearch[rfSubjectId][]">`. Хранится в `Settings.subject_site_ids` (fetch-scope). Не путать с `FiltersConfig.rf_subjects` (notify-time OKTMO-фильтр). См. [[decisions/ADR-031-region-ssot-site-id|ADR-031]].
+- **backfill auto-trigger** — Автоматический запуск `BackfillService` после завершения онбординга (step 4), при условии пустого каталога и непустого списка регионов. Обеспечивает первичное наполнение БД без ручного запроса. См. [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]].
+- **monitor schedule** — Набор настроек периодичности мониторинга: `interval_minutes` (пауза между циклами, 0=непрерывно), `monitoring.full_scan_time` (время суточного full-scan, формат HH:MM), `monitoring.full_scan_l2_priority_days` (возраст лотов для L2-верификации). Редактируется через `POST /settings/schedule`. См. [[decisions/ADR-033-web-editable-schedule|ADR-033]].
 
 ## Статические ресурсы и безопасность
 

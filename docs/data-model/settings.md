@@ -75,7 +75,12 @@ class Settings(BaseModel):
     mode: Literal["local", "server"] = "local"
     interval_minutes: int = Field(1, ge=0, le=60)  # 0 = непрерывно (без пауз между циклами), 1 = по умолчанию (1 минута между циклами)
     timezone: str = "Europe/Moscow"
-    regions: list[int] = Field(default_factory=lambda: [1, 2])  # 1=ДФО, 2=Арктика
+    regions: list[int] = Field(default_factory=lambda: [1, 2])  # 1=ДФО, 2=Арктика (macro-ids)
+    subject_site_ids: list[int] = Field(default_factory=list)
+    # fetch-scope: site-id субъектов (27–96, domain/regions.py::SUBJECT_TITLE_BY_ID).
+    # Пустой список = тянуть всё из выбранных макрорегионов (поведение по умолчанию).
+    # Непустой список = rfSubjectId[] добавляется к URL запроса (уточняющий фильтр).
+    # ADR-031: отличается от FiltersConfig.rf_subjects (notify-time, OKTMO-коды).
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
