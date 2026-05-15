@@ -104,7 +104,10 @@ async def onboarding_gate(request: Request, call_next):
 ### `regions_set → smtp_configured`
 - Источник входа A: `POST /onboarding/smtp/test` → если `NotifyResult.ok` → `advance()`.
 - Источник входа B: `POST /onboarding/smtp/skip` → `skip_email() → advance()`.
-- Guard: `smtp_test_last_result.ok` (хранится в `state` key `smtp_test_last_result_ok`, TTL 5 мин) **OR** `email_skipped`.
+- Guard: `_smtp_test_ok_within_ttl(now)` **OR** `email_skipped`.
+  - `_smtp_test_ok_within_ttl` читает `smtp_test_last_result_ok == "true"` **И** парсит `smtp_test_last_result_at` (ISO-8601 UTC), сравнивает с `now`. TTL константа `_SMTP_TEST_OK_TTL = timedelta(minutes=5)`.
+  - Fail-closed: отсутствующий или malformed `smtp_test_last_result_at` → False (guard не проходит).
+  - Реализация: `OnboardingService._smtp_test_ok_within_ttl()` (`services/onboarding.py`).
 
 ### `smtp_configured → recipients_set`
 - Источник входа: `POST /onboarding/recipients` с `{"recipients": ["a@b"]}`.

@@ -3,11 +3,14 @@
 Fakes:
 - FakeSettingsRepository: in-memory dict, tracks all method calls.
 - FakeConfigSource: returns a fixed Settings snapshot.
+- FakeClock: deterministic clock for TTL tests.
 
 All fake methods are invoked in at least one test (not just isinstance checked).
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -20,6 +23,7 @@ from fis_monitor.domain.models import (
 )
 from fis_monitor.services.onboarding import (
     KEY_EMAIL_SKIPPED,
+    KEY_SMTP_TEST_AT,
     KEY_SMTP_TEST_OK,
     KEY_TEST_EMAIL_OK,
     OnboardingService,
@@ -82,9 +86,24 @@ class FakeConfigSource:
         raise NotImplementedError("subscribe not used in unit tests")
 
 
+class FakeClock:
+    """Deterministic clock for tests — returns a fixed ``now``."""
+
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+
+    def now(self) -> datetime:
+        return self._now
+
+    def monotonic(self) -> float:  # pragma: no cover — not used in onboarding
+        return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_BASE_NOW = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _settings(
@@ -106,11 +125,24 @@ def _service(
     store: dict[str, str] | None = None,
     regions: list[int] | None = None,
     recipients: list[str] | None = None,
+    clock: FakeClock | None = None,
 ) -> tuple[OnboardingService, FakeSettingsRepository, FakeConfigSource]:
     repo = FakeSettingsRepository(onboarding_state=state, store=store)
     cfg = FakeConfigSource(_settings(regions=regions, recipients=recipients))
-    svc = OnboardingService(settings_repo=repo, config_source=cfg)
+    svc = OnboardingService(
+        settings_repo=repo,
+        config_source=cfg,
+        clock=clock or FakeClock(_BASE_NOW),
+    )
     return svc, repo, cfg
+
+
+def _smtp_store(*, at: datetime) -> dict[str, str]:
+    """Build a store dict with smtp_test_ok=true and given timestamp."""
+    return {
+        KEY_SMTP_TEST_OK: "true",
+        KEY_SMTP_TEST_AT: at.isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -138,13 +170,14 @@ class TestAdvanceLegalTransitions:
     def test_regions_set_to_smtp_configured_via_smtp_test_ok(self) -> None:
         svc, repo, _ = _service(
             state=OnboardingState.REGIONS_SET,
-            store={KEY_SMTP_TEST_OK: "true"},
+            store=_smtp_store(at=_BASE_NOW),
         )
         svc.advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
         assert repo._onboarding == OnboardingState.SMTP_CONFIGURED
         assert OnboardingState.SMTP_CONFIGURED in repo.set_onboarding_calls
-        # get() was called for the smtp key
+        # get() was called for both smtp keys
         assert KEY_SMTP_TEST_OK in repo.get_calls
+        assert KEY_SMTP_TEST_AT in repo.get_calls
 
     def test_smtp_configured_to_recipients_set(self) -> None:
         svc, repo, cfg = _service(
@@ -172,7 +205,7 @@ class TestAdvanceIllegalTransitions:
         """not_started → smtp_configured skips regions_set — must raise."""
         svc, _, _ = _service(
             state=OnboardingState.NOT_STARTED,
-            store={KEY_SMTP_TEST_OK: "true"},
+            store=_smtp_store(at=_BASE_NOW),
         )
         with pytest.raises(InvalidTransitionError) as exc_info:
             svc.advance(OnboardingState.NOT_STARTED, OnboardingState.SMTP_CONFIGURED)
@@ -251,6 +284,61 @@ class TestEmailSkipped:
                 svc.skip_email()
 
 
+class TestSmtpTestTtl:
+    """TTL enforcement in the SMTP_CONFIGURED guard."""
+
+    def test_smtp_ok_at_now_passes(self) -> None:
+        """smtp_test recorded at exactly now — within TTL → guard passes."""
+        clock = FakeClock(_BASE_NOW)
+        svc, repo, _ = _service(
+            state=OnboardingState.REGIONS_SET,
+            store=_smtp_store(at=_BASE_NOW),
+            clock=clock,
+        )
+        assert svc.can_advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+        assert KEY_SMTP_TEST_AT in repo.get_calls
+
+    def test_smtp_ok_within_ttl_passes(self) -> None:
+        """smtp_test recorded 4 minutes ago — still within 5-minute TTL → passes."""
+        recorded_at = _BASE_NOW - timedelta(minutes=4)
+        clock = FakeClock(_BASE_NOW)
+        svc, _, _ = _service(
+            state=OnboardingState.REGIONS_SET,
+            store=_smtp_store(at=recorded_at),
+            clock=clock,
+        )
+        assert svc.can_advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+
+    def test_smtp_ok_expired_ttl_fails(self) -> None:
+        """smtp_test recorded 6 minutes ago — TTL expired → guard fails."""
+        recorded_at = _BASE_NOW - timedelta(minutes=6)
+        clock = FakeClock(_BASE_NOW)
+        svc, _, _ = _service(
+            state=OnboardingState.REGIONS_SET,
+            store=_smtp_store(at=recorded_at),
+            clock=clock,
+        )
+        assert not svc.can_advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+
+    def test_smtp_ok_malformed_timestamp_fails(self) -> None:
+        """Malformed smtp_test_last_result_at → fail-closed → guard fails."""
+        store = {KEY_SMTP_TEST_OK: "true", KEY_SMTP_TEST_AT: "not-a-date"}
+        svc, _, _ = _service(
+            state=OnboardingState.REGIONS_SET,
+            store=store,
+        )
+        assert not svc.can_advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+
+    def test_email_skipped_bypasses_ttl_check(self) -> None:
+        """email_skipped=true bypasses TTL entirely — no smtp keys needed."""
+        # No smtp keys at all in store
+        svc, _, _ = _service(
+            state=OnboardingState.REGIONS_SET,
+            store={KEY_EMAIL_SKIPPED: "true"},
+        )
+        assert svc.can_advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
+
+
 class TestUrlForCurrentStep:
     @pytest.mark.parametrize(
         ("state", "expected_url"),
@@ -276,18 +364,23 @@ class TestFakeMethodCoverage:
         """Single scenario that touches get, set, get_onboarding, set_onboarding."""
         repo = FakeSettingsRepository(
             onboarding_state=OnboardingState.REGIONS_SET,
-            store={KEY_SMTP_TEST_OK: "true"},
+            store=_smtp_store(at=_BASE_NOW),
         )
         cfg = FakeConfigSource(_settings(regions=[1]))
-        svc = OnboardingService(settings_repo=repo, config_source=cfg)
+        svc = OnboardingService(
+            settings_repo=repo,
+            config_source=cfg,
+            clock=FakeClock(_BASE_NOW),
+        )
 
         # get_onboarding: current() → advance() step 1
-        # get: can_advance → _guard_satisfied → repo.get(KEY_SMTP_TEST_OK)
+        # get: can_advance → _guard_satisfied → repo.get(KEY_SMTP_TEST_OK) + KEY_SMTP_TEST_AT
         # set_onboarding: advance() step 3
         svc.advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
 
         assert repo.get_onboarding_calls >= 1
         assert KEY_SMTP_TEST_OK in repo.get_calls
+        assert KEY_SMTP_TEST_AT in repo.get_calls
         assert OnboardingState.SMTP_CONFIGURED in repo.set_onboarding_calls
 
         # set: skip_email
@@ -296,6 +389,7 @@ class TestFakeMethodCoverage:
                 onboarding_state=OnboardingState.SMTP_CONFIGURED,
             ),
             config_source=cfg,
+            clock=FakeClock(_BASE_NOW),
         )
         repo2 = svc2._repo  # type: ignore[attr-defined]
         svc2.skip_email()

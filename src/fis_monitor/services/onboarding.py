@@ -11,16 +11,23 @@ See docs/onboarding.md and docs/decisions/ADR-018-onboarding-fsm-server-enforced
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from fis_monitor.domain.errors import InvalidTransitionError
-from fis_monitor.domain.interfaces import ConfigSource, SettingsRepository
+from fis_monitor.domain.interfaces import Clock, ConfigSource, SettingsRepository
 from fis_monitor.domain.models import OnboardingState
+from fis_monitor.infra.clock import SystemClock
 
 # ---------------------------------------------------------------------------
 # Module-level key constants — single source of truth for state.db key names
 # ---------------------------------------------------------------------------
 KEY_EMAIL_SKIPPED = "email_skipped"
 KEY_SMTP_TEST_OK = "smtp_test_last_result_ok"
+KEY_SMTP_TEST_AT = "smtp_test_last_result_at"
 KEY_TEST_EMAIL_OK = "onboarding_test_email_ok"
+
+# Guard TTL: smtp_test_last_result_ok is only considered fresh within this window.
+_SMTP_TEST_OK_TTL = timedelta(minutes=5)
 
 # ---------------------------------------------------------------------------
 # Valid sequential transition chain
@@ -62,9 +69,12 @@ class OnboardingService:
         self,
         settings_repo: SettingsRepository,
         config_source: ConfigSource,
+        *,
+        clock: Clock | None = None,
     ) -> None:
         self._repo = settings_repo
         self._config = config_source
+        self._clock: Clock = clock if clock is not None else SystemClock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -159,12 +169,32 @@ class OnboardingService:
     def _is_email_skipped(self) -> bool:
         return self._repo.get(KEY_EMAIL_SKIPPED) == "true"
 
+    def _smtp_test_ok_within_ttl(self, now: datetime) -> bool:
+        """Return True iff smtp_test_last_result_ok is «true» AND was recorded within TTL.
+
+        Fail-closed: missing or malformed ``smtp_test_last_result_at`` → False.
+        TTL window: ``_SMTP_TEST_OK_TTL`` (5 minutes).
+        """
+        if self._repo.get(KEY_SMTP_TEST_OK) != "true":
+            return False
+        raw_at = self._repo.get(KEY_SMTP_TEST_AT)
+        if not raw_at:
+            return False
+        try:
+            recorded_at = datetime.fromisoformat(raw_at)
+        except ValueError:
+            return False
+        # Normalise: if stored value is naive, treat as UTC (defence-in-depth).
+        if recorded_at.tzinfo is None:
+            recorded_at = recorded_at.replace(tzinfo=UTC)
+        return (now - recorded_at) <= _SMTP_TEST_OK_TTL
+
     def _guard_satisfied(self, to_state: OnboardingState) -> bool:
         """Return True iff the guard condition for entering ``to_state`` is met.
 
         Guards (docs/onboarding.md):
         - REGIONS_SET:    len(settings.regions) > 0
-        - SMTP_CONFIGURED: smtp_test_last_result_ok OR email_skipped
+        - SMTP_CONFIGURED: smtp_test_ok_within_ttl OR email_skipped
         - RECIPIENTS_SET: len(recipients) > 0 OR email_skipped
         - COMPLETED:      onboarding_test_email_ok OR email_skipped
         """
@@ -175,8 +205,7 @@ class OnboardingService:
             return len(settings.regions) > 0
 
         if to_state is OnboardingState.SMTP_CONFIGURED:
-            smtp_ok = self._repo.get(KEY_SMTP_TEST_OK) == "true"
-            return smtp_ok or skipped
+            return self._smtp_test_ok_within_ttl(self._clock.now()) or skipped
 
         if to_state is OnboardingState.RECIPIENTS_SET:
             has_recipients = len(settings.notifications.email.recipients) > 0
