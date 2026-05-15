@@ -587,3 +587,24 @@ class TestHtmlSseEncoding:
             if r.message == "sse_encoder.unknown_fragment_template"
         ]
         assert warning_records, "Encoder must log a warning for unsupported fragment_template"
+
+    def test_poster_shows_published_at_human(self) -> None:
+        """Poster renders lot.date_create via published_at_human in the «Появился» cell."""
+        from datetime import UTC, datetime
+
+        pub_dt = datetime(2026, 3, 14, 9, 5, tzinfo=UTC)
+        lot_new = _make_lot_new(lot_id=7)
+        object.__setattr__(lot_new.lot, "date_create", pub_dt)
+
+        streamer = _make_finite_streamer([lot_new])
+        templates = build_templates()
+        streamer.bind_event_encoder(make_html_sse_encoder(templates.env))
+
+        client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
+        with client.stream("GET", "/events") as resp:
+            chunks = list(resp.iter_bytes(chunk_size=4096))
+
+        payload = b"".join(chunks).decode()
+        assert "14.03.2026 09:05" in payload, (
+            "Poster must render lot.date_create as published_at_human inside «Появился» <dd>"
+        )

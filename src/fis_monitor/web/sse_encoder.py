@@ -192,6 +192,11 @@ class LotViewModel:
         return self._dto.first_seen.strftime("%d.%m.%Y %H:%M")
 
     @property
+    def published_at_human(self) -> str:
+        """Site-side publication date — when the lot appeared on the FIS site."""
+        return self._dto.date_create.strftime("%d.%m.%Y %H:%M")
+
+    @property
     def temp(self) -> str:
         """Freshness tier for CSS class (maps freshness → temp value)."""
         return self._dto.freshness  # "hot" / "warm" / "cool" / "cold"
