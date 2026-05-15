@@ -41,26 +41,43 @@ logger = logging.getLogger(__name__)
 # Status snapshot (immutable, JSON-serialisable via dataclass)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class BackfillStatus:
     """Point-in-time snapshot of backfill progress.
 
     All fields are JSON-serialisable primitives so routes can return them
     directly without a separate Pydantic model.
+
+    ``status`` is a string discriminant for the UI:
+      ``"idle"``    — no backfill has run or none is currently active.
+      ``"running"`` — a backfill thread is active right now.
+      ``"done"``    — the most recent run completed (``running=False`` but
+                      ``started_at`` is non-None).
+
+    ``total_pages_seen`` is the cumulative count of pages fetched across all
+    regions in the current (or last) run.
+
+    ``updated_at`` is the ISO-8601 UTC timestamp of the last progress update;
+    ``None`` when no run has ever occurred.
     """
 
     running: bool
+    status: str  # "idle" | "running" | "done"
     current_region: int | None
     current_page: int | None
     lots_seen: int
     regions_done: int
     regions_total: int
+    total_pages_seen: int
     started_at: str | None  # ISO-8601 UTC, or None when not running
+    updated_at: str | None  # ISO-8601 UTC of last progress update
 
 
 # ---------------------------------------------------------------------------
 # Internal mutable progress state (guarded by BackfillService._lock)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _Progress:
@@ -70,12 +87,16 @@ class _Progress:
     lots_seen: int = 0
     regions_done: int = 0
     regions_total: int = 0
+    total_pages_seen: int = 0
     started_at: datetime | None = None
+    updated_at: datetime | None = None
+    done: bool = False  # True after a successful (non-cancelled) finish
 
 
 # ---------------------------------------------------------------------------
 # Protocol for PaginatedListFetcher (avoids circular import in tests)
 # ---------------------------------------------------------------------------
+
 
 class _PaginatedListFetcherProto(Protocol):
     def iterate(
@@ -93,6 +114,7 @@ class _PaginatedListFetcherProto(Protocol):
 # ---------------------------------------------------------------------------
 # BackfillService
 # ---------------------------------------------------------------------------
+
 
 class BackfillService:
     """Single-flight paginated backfill across all configured regions.
@@ -175,14 +197,23 @@ class BackfillService:
         """Return a consistent snapshot of current backfill progress."""
         with self._progress_lock:
             p = self._progress
+            if p.running:
+                status_str = "running"
+            elif p.done:
+                status_str = "done"
+            else:
+                status_str = "idle"
             return BackfillStatus(
                 running=p.running,
+                status=status_str,
                 current_region=p.current_region,
                 current_page=p.current_page,
                 lots_seen=p.lots_seen,
                 regions_done=p.regions_done,
                 regions_total=p.regions_total,
+                total_pages_seen=p.total_pages_seen,
                 started_at=p.started_at.isoformat() if p.started_at else None,
+                updated_at=p.updated_at.isoformat() if p.updated_at else None,
             )
 
     def cancel(self) -> None:
@@ -231,6 +262,7 @@ class BackfillService:
                 running=True,
                 regions_total=len(regions),
                 started_at=now,
+                updated_at=now,
             )
 
         logger.info("backfill: starting across %d region(s)", len(regions))
@@ -251,6 +283,15 @@ class BackfillService:
                 self._progress.current_region = None
                 self._progress.current_page = None
 
+        # Mark done (normal completion only — cancel keeps done=False so the UI
+        # can distinguish a successful finish from an interrupted one).
+        # stop is a combined event (internal cancel OR external shutdown); we
+        # only set done=True when it was NOT fired — i.e. natural completion.
+        if not stop.is_set():
+            with self._progress_lock:
+                self._progress.done = True
+                self._progress.updated_at = datetime.now(UTC)
+
         # Signal the stop-watcher thread to exit on normal completion.
         # Without this, the watcher spins forever waiting for `combined` to be
         # set, since neither `internal` nor `external` is set on a clean finish.
@@ -270,6 +311,8 @@ class BackfillService:
         def _on_page(page_num: int, items_count: int) -> None:
             with self._progress_lock:
                 self._progress.current_page = page_num
+                self._progress.total_pages_seen += 1
+                self._progress.updated_at = datetime.now(UTC)
 
         # Count rows processed for diagnostic logging.
         rows_processed = 0

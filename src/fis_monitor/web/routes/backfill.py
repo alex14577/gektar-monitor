@@ -67,13 +67,16 @@ def backfill_status(
     """
     snap: BackfillStatus = svc.status()
     return {
+        "status": snap.status,
         "running": snap.running,
         "current_region": snap.current_region,
         "current_page": snap.current_page,
         "lots_seen": snap.lots_seen,
         "regions_done": snap.regions_done,
         "regions_total": snap.regions_total,
+        "total_pages_seen": snap.total_pages_seen,
         "started_at": snap.started_at,
+        "updated_at": snap.updated_at,
     }
 
 
