@@ -35,7 +35,7 @@ from fis_monitor.domain.models import ParsedListRow
 # Markers that identify an ESIA (Gosuslugi) login-redirect response.
 # The site returns HTTP 200 with a login page when the session cookie is expired.
 #
-# Detection strategy — two independent signals (OR-logic, defense-in-depth):
+# Detection strategy — three independent signals (OR-logic, defense-in-depth):
 #
 # Signal 1 — <title> tag.
 #   ESIA redirect pages carry a distinctive title not present on normal lot-list
@@ -44,17 +44,30 @@ from fis_monitor.domain.models import ParsedListRow
 #
 # Signal 2 — ESIA URL inside <head> meta/script tags.
 #   Some ESIA redirect variants embed a <meta http-equiv="refresh" content="0; url=...
-#   esia.gosuslugi.ru/..."> or a <script> redirect in the <head>.  Searching only
-#   the <head> avoids false positives from esia.gosuslugi.ru links in the site
-#   navigation that appear on normal lot-list pages.
+#   esia.gosuslugi.ru/..."> or a <script> redirect in the <head>.  The <script>
+#   check uses the raw tag HTML (node.html), which covers both src= attributes and
+#   inline JS such as ``window.location='https://esia.gosuslugi.ru/...'``.
+#   Searching only the <head> avoids false positives from esia.gosuslugi.ru links
+#   in the site navigation that appear on normal lot-list pages.
 #
-# Example redirect page (signal 2):
+# Example redirect pages (signal 2):
 #   <head>
 #     <title>Переадресация...</title>
 #     <meta http-equiv="refresh" content="0; url=https://esia.gosuslugi.ru/login/"/>
 #   </head>
 #
-# Either signal firing → SessionExpiredError (re-auth required).
+#   <head>
+#     <title>Переадресация...</title>
+#     <script>window.location='https://esia.gosuslugi.ru/login/';</script>
+#   </head>
+#
+# Signal 3 — <form action="https://esia.gosuslugi.ru/..."> anywhere in the document.
+#   Some POST-based ESIA flows render a form that auto-submits to the login endpoint.
+#   This appears in the <body>, so it is not covered by the <head>-scoped Signal 2.
+#   We check only <form> elements (not all body links) to avoid false positives from
+#   the esia.gosuslugi.ru navigation links that appear on normal lot-list pages.
+#
+# Any signal firing → SessionExpiredError (re-auth required).
 _ESIA_HOST_MARKER = "esia.gosuslugi.ru"
 _ESIA_TITLE_MARKERS = ("Портал государственных услуг", "Госуслуги")
 
@@ -157,7 +170,18 @@ class SelectolaxListParser:
                 if _head_signal:
                     break
 
-        if _title_signal or _head_signal:
+        # Signal 3: <form action="https://esia.gosuslugi.ru/..."> anywhere in the
+        # document.  POST-based ESIA flows render an auto-submitting form whose
+        # action attribute points to the login endpoint.  The form lives in the
+        # <body>, so it is not reachable by the <head>-scoped Signal 2.  We search
+        # all <form> tags rather than the full HTML text to avoid false positives
+        # from esia.gosuslugi.ru registration links in the site navigation.
+        _form_signal = any(
+            _ESIA_HOST_MARKER in (node.attributes.get("action") or "")
+            for node in tree.css("form")
+        )
+
+        if _title_signal or _head_signal or _form_signal:
             raise SessionExpiredError(
                 "Session expired: response contains ESIA login-page markers"
             )

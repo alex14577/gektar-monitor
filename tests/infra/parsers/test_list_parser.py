@@ -481,3 +481,104 @@ def test_esia_body_link_does_not_raise_session_expired(
     """
     rows = parser.parse(_ESIA_BODY_LINK_ONLY_HTML)
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# 14. ESIA head-signal (Signal 2) — inline script window.location in <head>
+# ---------------------------------------------------------------------------
+
+# ESIA redirect page where title is neutral and <head> contains an inline
+# <script> with window.location='https://esia.gosuslugi.ru/...'.
+# Signal 2 uses node.html (full raw tag HTML) so it catches both src= attributes
+# and inline JS content — this test documents and locks that invariant.
+_ESIA_HEAD_SCRIPT_INLINE_HTML = """\
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Переадресация...</title>
+  <script>window.location='https://esia.gosuslugi.ru/login/';</script>
+</head>
+<body>
+  <p>Перенаправление на портал авторизации...</p>
+</body>
+</html>
+"""
+
+
+def test_esia_head_inline_script_window_location_raises_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """Signal 2 (inline script): window.location pointing to esia.gosuslugi.ru
+    inside a <head> <script> tag must raise SessionExpiredError.
+
+    node.html returns the full raw tag HTML including inline content, so
+    the esia.gosuslugi.ru string is found without any extra logic.
+    """
+    with pytest.raises(SessionExpiredError):
+        parser.parse(_ESIA_HEAD_SCRIPT_INLINE_HTML)
+
+
+# ---------------------------------------------------------------------------
+# 15. ESIA form-signal detection (Signal 3) — <form action> in <body>
+# ---------------------------------------------------------------------------
+
+# ESIA redirect page where title is neutral, no <head> meta/script markers,
+# but <body> contains an auto-submitting form whose action points to ESIA.
+# Signal 3 must fire alone.
+_ESIA_FORM_ACTION_HTML = """\
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Переадресация...</title>
+</head>
+<body>
+  <form action="https://esia.gosuslugi.ru/login/oauth2/ac" method="POST">
+    <input type="hidden" name="client_id" value="torgi"/>
+    <input type="hidden" name="redirect_uri" value="https://torgi.gov.ru/callback"/>
+  </form>
+  <script>document.forms[0].submit();</script>
+</body>
+</html>
+"""
+
+# Normal page: form points to an internal URL — must NOT trigger Signal 3.
+_NORMAL_PAGE_WITH_INTERNAL_FORM_HTML = """\
+<!DOCTYPE html>
+<html>
+<head><title>Список свободных лотов</title></head>
+<body>
+  <form action="/cabinet/free-lot" method="GET">
+    <input type="text" name="q"/>
+    <button type="submit">Найти</button>
+  </form>
+  <table>
+    <tbody>
+    </tbody>
+  </table>
+</body>
+</html>
+"""
+
+
+def test_esia_form_action_raises_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """Signal 3: <form action='https://esia.gosuslugi.ru/...'> must raise
+    SessionExpiredError even when title and <head> contain no ESIA markers.
+
+    Covers POST-based ESIA flows that render an auto-submitting form in the body.
+    """
+    with pytest.raises(SessionExpiredError):
+        parser.parse(_ESIA_FORM_ACTION_HTML)
+
+
+def test_normal_internal_form_does_not_raise_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """A form with an internal (non-ESIA) action must NOT trigger SessionExpiredError.
+
+    Verifies that Signal 3 is scoped to forms whose action contains
+    esia.gosuslugi.ru, not all forms.
+    """
+    rows = parser.parse(_NORMAL_PAGE_WITH_INTERNAL_FORM_HTML)
+    assert rows == []
