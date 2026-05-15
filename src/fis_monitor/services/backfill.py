@@ -86,6 +86,7 @@ class _PaginatedListFetcherProto(Protocol):
         sleep_between_pages: float,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_callback: object = None,
     ) -> object: ...  # returns Iterator[ParsedListRow]
 
 
@@ -264,7 +265,11 @@ class BackfillService:
 
         with self._progress_lock:
             self._progress.current_region = region
-            self._progress.current_page = 1
+            self._progress.current_page = None
+
+        def _on_page(page_num: int, items_count: int) -> None:
+            with self._progress_lock:
+                self._progress.current_page = page_num
 
         # Count rows processed for diagnostic logging.
         rows_processed = 0
@@ -274,6 +279,7 @@ class BackfillService:
             stop,
             sleep_between_pages=self._sleep_between_pages,
             per_page=50,  # ADR-036: full walk with explicit page size
+            page_callback=_on_page,
         ):
             if stop.is_set():
                 break

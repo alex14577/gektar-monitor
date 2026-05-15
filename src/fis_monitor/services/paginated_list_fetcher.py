@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Protocol
 
 from fis_monitor.domain.errors import ParseBugError, UpstreamError
@@ -76,6 +76,7 @@ class PaginatedListFetcher:
         sleep_between_pages: float = 2.0,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_callback: Callable[[int, int], None] | None = None,
     ) -> Iterator[ParsedListRow]:
         """Yield every ``ParsedListRow`` from pages 1..N for ``region``.
 
@@ -102,6 +103,12 @@ class PaginatedListFetcher:
         ``UpstreamError`` or ``ParseBugError`` from any page ends iteration
         for that region — yielding partial results would corrupt BackfillService
         coverage tracking.
+
+        *page_callback*, if supplied, is called **before** yielding the first
+        row of each page as ``page_callback(page_num, items_count)``.  This
+        lets callers (e.g. ``BackfillService``) track the current page without
+        maintaining a parallel counter.  The callback runs synchronously in the
+        iterator's thread; it must not block.
         """
         page = 1
         pages_walked = 0
@@ -179,10 +186,12 @@ class PaginatedListFetcher:
                 page,
                 len(rows),
             )
+            if page_callback is not None:
+                page_callback(page, len(rows))
             yield from rows
 
             pages_walked += 1
-            # ADR-036: max_pages caps the walk for callers that want a bounded scan; None = unbounded.
+            # ADR-036: max_pages caps the walk for bounded scan; None = unbounded.
             if max_pages is not None and pages_walked >= max_pages:
                 return
 

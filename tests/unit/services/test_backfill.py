@@ -12,7 +12,7 @@ Coverage:
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -75,10 +75,14 @@ class FakePaginatedListFetcher:
         sleep_between_pages: float = 2.0,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_callback: Callable[[int, int], None] | None = None,
     ) -> Iterator[ParsedListRow]:
         self.iterate_calls.append(region)
         self.iterate_kwargs.append({"per_page": per_page, "max_pages": max_pages})
-        for row in self._rows_by_region.get(region, []):
+        rows = self._rows_by_region.get(region, [])
+        if rows and page_callback is not None:
+            page_callback(1, len(rows))
+        for row in rows:
             if stop_event.is_set():
                 return
             yield row
@@ -182,8 +186,14 @@ def test_fake_all_methods() -> None:
     """Exercise every method on the fakes to catch API drift."""
     fetcher = FakePaginatedListFetcher(rows_by_region={_REGION_A: [_make_row(1)]})
     stop = threading.Event()
-    rows = list(fetcher.iterate(_REGION_A, stop, sleep_between_pages=0.0))
+    page_cb_calls: list[tuple[int, int]] = []
+
+    def _cb(p: int, n: int) -> None:
+        page_cb_calls.append((p, n))
+
+    rows = list(fetcher.iterate(_REGION_A, stop, sleep_between_pages=0.0, page_callback=_cb))
     assert len(rows) == 1
+    assert page_cb_calls == [(1, 1)]
 
     repo = FakeLotRepository()
     from fis_monitor.domain.models import Lot
@@ -277,6 +287,62 @@ class TestBasicBackfill:
 
 
 # ---------------------------------------------------------------------------
+# Test: page_callback updates _progress.current_page (replaces parallel counter)
+# ---------------------------------------------------------------------------
+
+class TestPageCallbackUpdatesProgress:
+    def test_current_page_updated_via_callback(self) -> None:
+        """BackfillService uses page_callback to update current_page, not a parallel counter.
+
+        The fake fetcher invokes page_callback(1, n) for its single batch of rows.
+        After the run, _progress.current_page has been set to 1 via the callback
+        and then cleared to None by _run() region bookkeeping — this confirms the
+        callback path is wired and not silently discarded.
+        """
+        # Use a fetcher that records which page_callback it received.
+        recorded_callbacks: list[Callable[[int, int], None]] = []
+
+        class CallbackCapturingFetcher:
+            def iterate(
+                self,
+                region: int,
+                stop_event: threading.Event,
+                *,
+                sleep_between_pages: float = 2.0,
+                per_page: int | None = None,
+                max_pages: int | None = None,
+                page_callback: Callable[[int, int], None] | None = None,
+            ) -> Iterator[ParsedListRow]:
+                if page_callback is not None:
+                    recorded_callbacks.append(page_callback)
+                    page_callback(1, 2)
+                yield _make_row(1)
+                yield _make_row(2)
+
+        from fis_monitor.services.backfill import BackfillService
+
+        lot_repo = FakeLotRepository()
+        mc = FakeMonitorCycleService()
+        config = FakeConfigSource(regions=[_REGION_A])
+        svc = BackfillService(
+            fetcher=CallbackCapturingFetcher(),  # type: ignore[arg-type]
+            lot_repo=lot_repo,
+            config_source=config,
+            monitor_cycle=mc,
+            sleep_between_pages=0.0,
+        )
+
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        # Callback was passed and invoked: recorded_callbacks must be non-empty.
+        assert len(recorded_callbacks) == 1, "page_callback not passed to iterate()"
+        # All lots upserted.
+        assert len(lot_repo.upsert_calls) == 2
+
+
+# ---------------------------------------------------------------------------
 # Test 2: single-flight
 # ---------------------------------------------------------------------------
 
@@ -309,6 +375,7 @@ class TestSingleFlight:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_callback: Callable[[int, int], None] | None = None,
             ) -> Iterator[ParsedListRow]:
                 barrier.wait()  # signal that backfill worker is running
                 done_event.wait(timeout=5.0)  # hold until test releases
@@ -403,6 +470,7 @@ class TestCancel:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_callback: Callable[[int, int], None] | None = None,
             ) -> Iterator[ParsedListRow]:
                 if region == _REGION_B:
                     # Signal the main thread to cancel

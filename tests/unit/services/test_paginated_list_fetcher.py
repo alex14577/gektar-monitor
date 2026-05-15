@@ -366,3 +366,61 @@ class TestPerPageForwarding:
         list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0, per_page=None))
 
         assert "per-page" not in http.calls[0]
+
+
+# ---------------------------------------------------------------------------
+# Test 9: page_callback — called with correct page_num and items_count
+# ---------------------------------------------------------------------------
+
+class TestPageCallback:
+    def test_callback_called_per_page_with_correct_args(self) -> None:
+        """page_callback receives (page_num, items_count) for each non-empty page."""
+        rows_p1 = [_make_row(1), _make_row(2)]
+        rows_p2 = [_make_row(3)]
+        rows_p3: list[ParsedListRow] = []
+
+        parser = FakeListParser([rows_p1, rows_p2, rows_p3])
+        http = FakeHttpClient(["<p1/>", "<p2/>", "<p3/>"])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        recorded: list[tuple[int, int]] = []
+
+        def _cb(p: int, n: int) -> None:
+            recorded.append((p, n))
+
+        list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0, page_callback=_cb))
+
+        # page 1: 2 rows, page 2: 1 row; empty page 3 never triggers callback
+        assert recorded == [(1, 2), (2, 1)]
+
+    def test_callback_not_called_on_empty_first_page(self) -> None:
+        """page_callback is NOT invoked when first page is empty (no rows to yield)."""
+        parser = FakeListParser([[]])
+        http = FakeHttpClient(["<empty/>"])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        recorded: list[tuple[int, int]] = []
+
+        def _cb2(p: int, n: int) -> None:
+            recorded.append((p, n))
+
+        list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0, page_callback=_cb2))
+
+        assert recorded == []
+
+    def test_callback_none_by_default(self) -> None:
+        """Omitting page_callback (default None) does not raise — existing callers unaffected."""
+        rows_p1 = [_make_row(1)]
+        parser = FakeListParser([rows_p1, []])
+        http = FakeHttpClient(["<p1/>", "<p2/>"])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        # No page_callback argument — must not raise
+        result = list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0))
+        assert [r.id for r in result] == [1]
