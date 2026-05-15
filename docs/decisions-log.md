@@ -40,6 +40,7 @@
 - [[decisions/ADR-026-distribution-packaging-pyinstaller|ADR-026]] — Distribution packaging: PyInstaller --onedir + bundled Chromium, build-on-target strategy
 - [[decisions/ADR-027-silent-cookie-refresh|ADR-027]] — Silent cookie refresh: headless Playwright `silent_refresh()` для продления сессии без интерактивного логина (shared `_lock`, 30s deadline, `needs_manual_login` enum value)
 - [[decisions/ADR-028-paginated-catalogue-backfill|ADR-028]] — Paginated catalogue backfill: `PaginatedListFetcher` + `BackfillService` + auto-trigger heuristic (empty DB) + single-flight across auto/manual + notify caller-side
+- [[decisions/ADR-029-vendor-htmx-no-cdn|ADR-029]] — Vendor htmx locally (no CDN for JS assets): supply-chain mitigation F-03; htmx 1.9.12 + ext/sse.js in `static/vendor/htmx-1.9.12/`
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

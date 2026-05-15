@@ -27,9 +27,9 @@
 
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', path='/favicon.svg') }}" />
 
-  {# HTMX + SSE extension. Replace pinned versions when bundling locally. #}
-  <script defer src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script defer src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js"></script>
+  {# HTMX + SSE extension — vendored locally (supply-chain mitigation ADR-029). #}
+  <script defer src="{{ url_for('static', path='/vendor/htmx-1.9.12/htmx.min.js') }}"></script>
+  <script defer src="{{ url_for('static', path='/vendor/htmx-1.9.12/ext/sse.js') }}"></script>
 </head>
 <body>
 
