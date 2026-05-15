@@ -36,7 +36,7 @@ from typing import Any
 from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
 
 from fis_monitor.domain.errors import BusyError
-from fis_monitor.domain.interfaces import Clock
+from fis_monitor.domain.interfaces import Clock, CookieStore
 from fis_monitor.domain.models import LoginErrorHint, LoginOutcome
 
 __all__ = ["PlaywrightLoginSession"]
@@ -87,11 +87,13 @@ class PlaywrightLoginSession:
         *,
         allowed_hosts: Sequence[str],
         clock: Clock,
+        cookie_store: CookieStore | None = None,
         playwright_factory: Callable[[], Any] = sync_playwright,
     ) -> None:
         self._profile_dir = profile_dir
         self._allowed_hosts: frozenset[str] = frozenset(allowed_hosts)
         self._clock = clock
+        self._cookie_store = cookie_store
         self._playwright_factory = playwright_factory
 
         # Single-flight lock: acquired before starting, released in finally.
@@ -291,8 +293,11 @@ class PlaywrightLoginSession:
                 success=False, cookies_updated=False, error="needs_manual_login"
             )
 
+        # Export cookies to CookieStore so requests.Session picks up refreshed
+        # session cookies immediately (same bridge as open_headed_login).
+        cookies_updated = self._export_cookies(context)
         _log.info("PlaywrightLoginSession: silent refresh succeeded")
-        return LoginOutcome(success=True, cookies_updated=True, error=None)
+        return LoginOutcome(success=True, cookies_updated=cookies_updated, error=None)
 
     def _run_login(self, *, deadline: float) -> LoginOutcome:
         """Core login flow — called with ``_lock`` already held."""
@@ -419,8 +424,49 @@ class PlaywrightLoginSession:
             return outcome
 
         # Success: let Playwright persist the context (cookies saved to profile).
+        # Export cookies to the injected CookieStore so that requests.Session
+        # carries valid session cookies for subsequent scraping requests.
+        cookies_updated = self._export_cookies(context)
         _log.info("PlaywrightLoginSession: login succeeded")
-        return LoginOutcome(success=True, cookies_updated=True, error=None)
+        return LoginOutcome(success=True, cookies_updated=cookies_updated, error=None)
+
+    def _export_cookies(self, context: BrowserContext) -> bool:
+        """Export current Playwright context cookies to the injected CookieStore.
+
+        Called after every successful ``open_headed_login`` and
+        ``silent_refresh``, while ``browser`` is still open (before
+        ``browser.close()`` in the ``finally`` block).  The CookieStore
+        implementation (``RequestsCookieStore``) translates the dicts into
+        ``requests.Session`` cookies so subsequent HTTP scraping requests
+        carry valid session cookies.
+
+        No-op when ``cookie_store`` is ``None`` (backwards-compatible default).
+
+        Args:
+            context: The active Playwright ``BrowserContext`` from which
+                ``context.cookies()`` is read.
+
+        Returns:
+            ``True`` if cookies were exported successfully, ``False`` if
+            ``cookie_store`` is ``None`` (no-op) or an exception occurred.
+            Login itself succeeded regardless — cookie export is a side-effect.
+        """
+        if self._cookie_store is None:
+            return False
+        try:
+            cookies = context.cookies()
+            _log.debug(
+                "PlaywrightLoginSession._export_cookies: exporting %d cookies",
+                len(cookies),
+            )
+            self._cookie_store.store(cookies)
+            return True
+        except Exception:
+            _log.warning(
+                "PlaywrightLoginSession._export_cookies: failed to export cookies",
+                exc_info=True,
+            )
+            return False
 
     def _make_route_handler(self) -> Callable[[Route], None]:
         """Return a route handler that enforces the host-whitelist invariant.

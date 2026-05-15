@@ -40,7 +40,12 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from fis_monitor.domain.errors import ParseBugError, ParserVersionMismatch, UpstreamError
+from fis_monitor.domain.errors import (
+    ParseBugError,
+    ParserVersionMismatch,
+    SessionExpiredError,
+    UpstreamError,
+)
 from fis_monitor.domain.interfaces import (
     Clock,
     ConfigSource,
@@ -266,12 +271,12 @@ class MonitorCycleService:
                         region,
                         exc_info=True,
                     )
-                except (ParseBugError, ParserVersionMismatch):
-                    # Per run_cycle contract: parse-domain errors may re-raise when
-                    # they escape _run_cycle_inner — data-quality issue, not a bug
-                    # in the loop itself.  Log at WARNING (no backoff) and continue.
+                except (ParseBugError, ParserVersionMismatch, SessionExpiredError):
+                    # Per run_cycle contract: parse-domain errors and session expiry may
+                    # re-raise when they escape _run_cycle_inner — data-quality or auth
+                    # issue, not a bug in the loop itself.  Log at WARNING and continue.
                     logger.warning(
-                        "monitor_cycle: parse domain error escaped run_cycle for region=%s "
+                        "monitor_cycle: parse/session domain error escaped run_cycle for region=%s "
                         "(cycle row already closed); continuing loop",
                         region,
                         exc_info=True,
@@ -360,7 +365,7 @@ class MonitorCycleService:
                 cycle_id=cycle_id,
                 started_at=started_at,
             )
-        except (UpstreamError, ParseBugError, ParserVersionMismatch):
+        except (UpstreamError, ParseBugError, ParserVersionMismatch, SessionExpiredError):
             # Already handled inside _run_cycle_inner; these should not escape.
             # If they do (e.g. from an uncovered code path), re-raise so the
             # supervisor's run_forever can backoff.
@@ -399,6 +404,29 @@ class MonitorCycleService:
         # ---------- Step 2b: parse list ------------------------------------
         try:
             parsed_rows = self._list_parser.parse(response.text)
+        except SessionExpiredError:
+            # Session cookie expired: site returned an ESIA login page instead of
+            # lot-list DOM.  This is an auth failure, NOT a site DOM change.
+            # Log at WARN (not ERROR) and return a zero-lots cycle so the loop
+            # continues without raising an alert.
+            logger.warning(
+                "monitor_cycle: session expired for region=%s "
+                "(ESIA login page detected) — closing cycle with session_expired",
+                region,
+            )
+            finished_at = self._clock.now()
+            result = CycleResult(
+                id=cycle_id,
+                region=region,
+                started_at=started_at,
+                finished_at=finished_at,
+                status="error",
+                lots_fetched=0,
+                new_lots=0,
+                error="session_expired",
+            )
+            self._cycles_repo.close(cycle_id, result)
+            return result
         except ParseBugError as exc:
             return self._close_with_parse_bug(
                 exc, cycle_id=cycle_id, region=region, started_at=started_at

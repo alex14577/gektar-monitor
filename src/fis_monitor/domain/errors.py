@@ -240,6 +240,22 @@ class InvalidTransitionError(DomainError):
         self.requested_to = requested_to
 
 
+class SessionExpiredError(DomainError):
+    """HTTP response indicates the session is expired — site redirected to ESIA login.
+
+    Raised by ``SelectolaxListParser.parse()`` when the HTML response contains
+    ESIA (esia.gosuslugi.ru) redirect markers instead of the expected lot-list DOM.
+
+    This is NOT a ``ParseBugError`` — the DOM is not broken; the session cookie
+    is expired and the site returned a login page.  Callers (``MonitorCycleService``,
+    ``FullScanService``) should log a WARN and trigger re-authentication rather than
+    treating this as a site-DOM change.
+
+    PII contract: message and attributes contain NO session tokens, cookies,
+    URLs with query params, or user-identifying data.
+    """
+
+
 class SmtpStarttlsError(UpstreamError):
     """Raised by ``SmtpEmailNotifier.send()`` when the STARTTLS handshake
     returns a non-220 SMTP reply code.

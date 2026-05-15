@@ -116,7 +116,8 @@ def test_open_returns_outcome(tmp_path: Path) -> None:
 
     assert isinstance(outcome, LoginOutcome)
     assert outcome.success is True
-    assert outcome.cookies_updated is True
+    # No cookie_store injected → _export_cookies is a no-op → cookies_updated=False
+    assert outcome.cookies_updated is False
     assert outcome.error is None
 
 
@@ -591,7 +592,8 @@ def test_silent_refresh_success(tmp_path: Path) -> None:
 
     assert isinstance(outcome, LoginOutcome)
     assert outcome.success is True
-    assert outcome.cookies_updated is True
+    # No cookie_store injected → _export_cookies is a no-op → cookies_updated=False
+    assert outcome.cookies_updated is False
     assert outcome.error is None
 
 
@@ -658,3 +660,171 @@ def test_silent_refresh_busy_error(tmp_path: Path) -> None:
     unblock.set()
     t.join(timeout=5.0)
     assert not t.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# Test 19: cookie_store.store() called with non-empty list after successful login
+# ---------------------------------------------------------------------------
+
+
+class FakeCookieStore:
+    """Fake CookieStore that records calls to store()."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[dict]] = []  # type: ignore[type-arg]
+
+    def store(self, cookies: list[dict]) -> None:  # type: ignore[type-arg]
+        self.calls.append(cookies)
+
+
+def test_cookie_store_called_after_login(tmp_path: Path) -> None:
+    """After a successful open_headed_login, cookie_store.store() must be called
+    with the cookies returned by context.cookies()."""
+    fake_cookies = [
+        {"name": "session", "value": "abc", "domain": "example.com",
+         "path": "/", "expires": 9999999.0, "httpOnly": False,
+         "secure": True, "sameSite": "Lax"},
+    ]
+
+    page = _make_page_mock()  # wait_for_url returns normally → success
+    context = _make_context_mock(page)
+    context.cookies.return_value = fake_cookies  # Playwright context.cookies()
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+    cookie_store = FakeCookieStore()
+
+    session = PlaywrightLoginSession(
+        profile_dir=tmp_path,
+        allowed_hosts=["example.com"],
+        clock=clock,
+        cookie_store=cookie_store,
+        playwright_factory=factory,
+    )
+    outcome = session.open_headed_login(deadline=60.0)
+
+    assert outcome.success is True
+    # store() must have been called exactly once with the cookies from context.cookies()
+    assert len(cookie_store.calls) == 1, (
+        f"Expected 1 call to store(), got {len(cookie_store.calls)}"
+    )
+    assert cookie_store.calls[0] == fake_cookies
+
+
+def test_cookie_store_called_after_silent_refresh(tmp_path: Path) -> None:
+    """After a successful silent_refresh, cookie_store.store() must be called."""
+    fake_cookies = [
+        {"name": "refresh", "value": "tok", "domain": "example.com",
+         "path": "/", "expires": -1.0, "httpOnly": True,
+         "secure": False, "sameSite": "Strict"},
+    ]
+
+    page = _make_page_mock()
+    context = _make_context_mock(page)
+    context.cookies.return_value = fake_cookies
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+    cookie_store = FakeCookieStore()
+
+    session = PlaywrightLoginSession(
+        profile_dir=tmp_path,
+        allowed_hosts=["example.com"],
+        clock=clock,
+        cookie_store=cookie_store,
+        playwright_factory=factory,
+    )
+    outcome = session.silent_refresh(deadline=100.0)
+
+    assert outcome.success is True
+    assert len(cookie_store.calls) == 1
+    assert cookie_store.calls[0] == fake_cookies
+
+
+def test_cookie_store_none_is_noop(tmp_path: Path) -> None:
+    """When cookie_store=None (default), login succeeds without calling any store."""
+    page = _make_page_mock()
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+
+    # No cookie_store injected → default None
+    session = _make_session(clock=clock, playwright_factory=factory, profile_dir=tmp_path)
+    outcome = session.open_headed_login(deadline=60.0)
+
+    assert outcome.success is True
+    # context.cookies() must NOT be called since cookie_store is None
+    context.cookies.assert_not_called()
+
+
+def test_cookie_store_not_called_on_failed_login(tmp_path: Path) -> None:
+    """cookie_store.store() must NOT be called when login fails."""
+    timeout_exc = RuntimeError("Timeout 60000ms exceeded while waiting for URL pattern")
+
+    page = _make_page_mock(wait_for_url_side_effect=timeout_exc)
+    context = _make_context_mock(page)
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+    cookie_store = FakeCookieStore()
+
+    session = PlaywrightLoginSession(
+        profile_dir=tmp_path,
+        allowed_hosts=["example.com"],
+        clock=clock,
+        cookie_store=cookie_store,
+        playwright_factory=factory,
+    )
+    outcome = session.open_headed_login(deadline=60.0)
+
+    assert outcome.success is False
+    assert cookie_store.calls == [], (
+        f"store() must not be called on failed login; got {cookie_store.calls}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 23: failing cookie_store.store() → success=True, cookies_updated=False
+# ---------------------------------------------------------------------------
+
+
+class FailingCookieStore:
+    """CookieStore that always raises on store() — simulates broken store."""
+
+    def store(self, cookies: list[dict]) -> None:  # type: ignore[type-arg]
+        raise OSError("simulated store failure")
+
+
+def test_failing_cookie_store_login_succeeds_cookies_updated_false(tmp_path: Path) -> None:
+    """When cookie_store.store() raises, login outcome must be success=True but
+    cookies_updated=False — login itself succeeded, export is a side-effect failure.
+
+    Verifies MINOR-2 fix: _export_cookies catches the exception and returns False,
+    which is propagated as LoginOutcome.cookies_updated=False.
+    """
+    fake_cookies = [
+        {"name": "session", "value": "tok", "domain": "example.com",
+         "path": "/", "expires": -1.0, "httpOnly": False,
+         "secure": False, "sameSite": "Lax"},
+    ]
+
+    page = _make_page_mock()
+    context = _make_context_mock(page)
+    context.cookies.return_value = fake_cookies
+    factory = _make_pw_factory(context)
+    clock = FakeClock(start=0.0)
+    cookie_store = FailingCookieStore()
+
+    session = PlaywrightLoginSession(
+        profile_dir=tmp_path,
+        allowed_hosts=["example.com"],
+        clock=clock,
+        cookie_store=cookie_store,
+        playwright_factory=factory,
+    )
+    outcome = session.open_headed_login(deadline=60.0)
+
+    # Login itself succeeded — the Playwright flow completed normally.
+    assert outcome.success is True
+    # But the cookie export side-effect failed → cookies_updated must be False.
+    assert outcome.cookies_updated is False, (
+        "Expected cookies_updated=False when store() raises; "
+        f"got cookies_updated={outcome.cookies_updated}"
+    )

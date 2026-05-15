@@ -29,8 +29,34 @@ from datetime import UTC, datetime
 
 from selectolax.parser import HTMLParser, Node
 
-from fis_monitor.domain.errors import ParseBugError
+from fis_monitor.domain.errors import ParseBugError, SessionExpiredError
 from fis_monitor.domain.models import ParsedListRow
+
+# Markers that identify an ESIA (Gosuslugi) login-redirect response.
+# The site returns HTTP 200 with a login page when the session cookie is expired.
+#
+# Detection strategy — two independent signals (OR-logic, defense-in-depth):
+#
+# Signal 1 — <title> tag.
+#   ESIA redirect pages carry a distinctive title not present on normal lot-list
+#   pages.  We check for _ESIA_HOST_MARKER ("esia.gosuslugi.ru") and
+#   _ESIA_TITLE_MARKERS ("Портал государственных услуг", "Госуслуги").
+#
+# Signal 2 — ESIA URL inside <head> meta/script tags.
+#   Some ESIA redirect variants embed a <meta http-equiv="refresh" content="0; url=...
+#   esia.gosuslugi.ru/..."> or a <script> redirect in the <head>.  Searching only
+#   the <head> avoids false positives from esia.gosuslugi.ru links in the site
+#   navigation that appear on normal lot-list pages.
+#
+# Example redirect page (signal 2):
+#   <head>
+#     <title>Переадресация...</title>
+#     <meta http-equiv="refresh" content="0; url=https://esia.gosuslugi.ru/login/"/>
+#   </head>
+#
+# Either signal firing → SessionExpiredError (re-auth required).
+_ESIA_HOST_MARKER = "esia.gosuslugi.ru"
+_ESIA_TITLE_MARKERS = ("Портал государственных услуг", "Госуслуги")
 
 _DATE_FORMAT = "%d.%m.%Y"
 # Non-breaking space (U+00A0) used as digit separator on the site
@@ -98,6 +124,43 @@ class SelectolaxListParser:
                 missing from the page where it is required).
         """
         tree = HTMLParser(html)
+
+        # Detect ESIA session-expiry redirect BEFORE the tbody check.
+        # The site returns HTTP 200 with a Gosuslugi login page when the
+        # session cookie is expired — this is NOT a DOM bug, it is an auth
+        # failure. Raising SessionExpiredError lets callers (MonitorCycleService,
+        # FullScanService) log WARN and trigger re-auth instead of escalating
+        # a misleading ParseBugError.
+        #
+        # Detection is title-based: the <title> of the ESIA redirect page
+        # contains distinctive markers not present in normal lot-list pages.
+        # We do NOT search the full HTML body because normal lot-list pages
+        # include esia.gosuslugi.ru links in the navigation header.
+        title_node = tree.css_first("title")
+        title_text = title_node.text(strip=True) if title_node is not None else ""
+        _title_signal = _ESIA_HOST_MARKER in title_text or any(
+            marker in title_text for marker in _ESIA_TITLE_MARKERS
+        )
+
+        # Signal 2: esia.gosuslugi.ru URL present inside <head> <meta> or <script>
+        # tags.  Scoped to <head> to avoid false positives from nav-bar links that
+        # appear on normal lot-list pages.
+        _head_signal = False
+        head_node = tree.css_first("head")
+        if head_node is not None:
+            for tag in ("meta", "script"):
+                for node in head_node.css(tag):
+                    node_html = node.html or ""
+                    if _ESIA_HOST_MARKER in node_html:
+                        _head_signal = True
+                        break
+                if _head_signal:
+                    break
+
+        if _title_signal or _head_signal:
+            raise SessionExpiredError(
+                "Session expired: response contains ESIA login-page markers"
+            )
 
         # The list table uses <tbody> wrapping <tr data-key="N"> rows.
         # A missing tbody indicates a DOM change or a non-list page.

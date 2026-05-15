@@ -45,6 +45,7 @@
 - [[decisions/ADR-031-region-ssot-site-id|ADR-031]] — Region SSOT site-id: `SUBJECTS_BY_MACRO` + `SUBJECT_TITLE_BY_ID` в `domain/regions.py`; URL param переключён с `rfSubjectId` на `region=`; новое поле `Settings.subject_site_ids` для fetch-scope
 - [[decisions/ADR-032-onboarding-driven-backfill|ADR-032]] — Onboarding-driven backfill: auto-trigger перенесён из lifespan в `_handle_step4_next` (completion handler); supersedes ADR-028 §Auto-trigger
 - [[decisions/ADR-033-web-editable-schedule|ADR-033]] — Web-editable schedule: `POST /settings/schedule` (единый payload); hot-reload через ConfigSource; `MonitorCycleService` и `FullScanService` читают `.current()` каждую итерацию
+- [[decisions/ADR-034-cookie-bridge-playwright-requests|ADR-034]] — Cookie bridge Playwright → requests.Session: `CookieStore` Protocol + `RequestsCookieStore`; `_export_cookies()` после каждого успешного login/refresh; `SessionExpiredError` по title в `SelectolaxListParser`
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

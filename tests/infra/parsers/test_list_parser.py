@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from fis_monitor.domain.errors import ParseBugError
+from fis_monitor.domain.errors import ParseBugError, SessionExpiredError
 from fis_monitor.domain.models import ParsedListRow
 from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
 
@@ -254,17 +254,16 @@ def test_area_sqm_parsed_from_fixture_first_row(
 
 
 # ---------------------------------------------------------------------------
-# 10. error_8_no_region.html -- redirect/error page -> ParseBugError
+# 10. error_8_no_region.html -- redirect/error page -> SessionExpiredError
 # ---------------------------------------------------------------------------
 
 
-def test_error_page_no_region_raises_or_empty(parser: SelectolaxListParser) -> None:
-    """error_8_no_region.html is a Gosuslugi redirect page (no tbody).
-    Parser must raise ParseBugError (no tbody found)."""
+def test_error_page_no_region_raises_session_expired(parser: SelectolaxListParser) -> None:
+    """error_8_no_region.html is a Gosuslugi redirect page (title 'Портал государственных услуг').
+    Parser must raise SessionExpiredError — this is an auth failure, not a DOM bug."""
     html = load_fixture("error_8_no_region.html")
-    with pytest.raises(ParseBugError) as exc_info:
+    with pytest.raises(SessionExpiredError):
         parser.parse(html)
-    assert exc_info.value.selector == "tbody"
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +282,202 @@ def test_idempotency(
         assert r1.cadastral_no == r2.cadastral_no
         assert r1.date_create == r2.date_create
         assert r1.area_sqm == r2.area_sqm
+
+
+# ---------------------------------------------------------------------------
+# 12. ESIA / SessionExpiredError detection
+# ---------------------------------------------------------------------------
+
+# ESIA redirect page: title contains "Портал государственных услуг"
+_ESIA_HOST_HTML = """\
+<!DOCTYPE html>
+<html>
+<head><title>Портал государственных услуг</title></head>
+<body>
+  <p>Для продолжения войдите через esia.gosuslugi.ru</p>
+</body>
+</html>
+"""
+
+# ESIA redirect page: title contains "esia.gosuslugi.ru" (hypothetical)
+_ESIA_TITLE_HOST_HTML = """\
+<!DOCTYPE html>
+<html>
+<head><title>esia.gosuslugi.ru — войти</title></head>
+<body>
+  <p>Введите логин и пароль</p>
+</body>
+</html>
+"""
+
+_GOSUSLUGI_TITLE_HTML = """\
+<!DOCTYPE html>
+<html>
+<head><title>Госуслуги — вход</title></head>
+<body><p>Войдите в систему</p></body>
+</html>
+"""
+
+# Normal lot-list page that happens to have esia.gosuslugi.ru in a nav link —
+# must NOT trigger SessionExpiredError.
+_NORMAL_PAGE_WITH_ESIA_NAVLINK_HTML = """\
+<!DOCTYPE html>
+<html>
+<head><title>Список свободных лотов</title></head>
+<body>
+  <nav>
+    <a href="https://esia.gosuslugi.ru/registration">Зарегистрироваться</a>
+  </nav>
+  <table>
+    <tbody>
+    </tbody>
+  </table>
+</body>
+</html>
+"""
+
+_NORMAL_EMPTY_PAGE_HTML = """\
+<!DOCTYPE html>
+<html>
+<head><title>Список лотов</title></head>
+<body>
+  <table>
+    <tbody>
+    </tbody>
+  </table>
+</body>
+</html>
+"""
+
+
+def test_esia_title_host_marker_raises_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """Title containing 'esia.gosuslugi.ru' must raise SessionExpiredError."""
+    with pytest.raises(SessionExpiredError):
+        parser.parse(_ESIA_TITLE_HOST_HTML)
+
+
+def test_esia_gosuslugi_portal_title_raises_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """HTML with title 'Портал государственных услуг' must raise SessionExpiredError."""
+    with pytest.raises(SessionExpiredError):
+        parser.parse(_ESIA_HOST_HTML)
+
+
+def test_gosuslugi_title_raises_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """HTML with title 'Госуслуги' must raise SessionExpiredError."""
+    with pytest.raises(SessionExpiredError):
+        parser.parse(_GOSUSLUGI_TITLE_HTML)
+
+
+def test_session_expired_not_parse_bug_error(
+    parser: SelectolaxListParser,
+) -> None:
+    """SessionExpiredError is NOT a subclass of ParseBugError — callers must catch separately."""
+    with pytest.raises(SessionExpiredError) as exc_info:
+        parser.parse(_ESIA_HOST_HTML)
+    assert not isinstance(exc_info.value, ParseBugError), (
+        "SessionExpiredError must NOT be a ParseBugError — different recovery paths"
+    )
+
+
+def test_normal_page_with_esia_navlink_not_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """A normal lot-list page with esia.gosuslugi.ru in nav must NOT raise SessionExpiredError.
+
+    The normal site navigation includes an ESIA registration link.
+    Only an ESIA-titled redirect page (title contains ESIA markers) should trigger.
+    """
+    rows = parser.parse(_NORMAL_PAGE_WITH_ESIA_NAVLINK_HTML)
+    assert rows == []
+
+
+def test_normal_empty_tbody_does_not_raise_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """A page with a real tbody (even empty) must NOT raise SessionExpiredError."""
+    rows = parser.parse(_NORMAL_EMPTY_PAGE_HTML)
+    assert rows == []
+
+
+def test_no_tbody_without_esia_raises_parse_bug(
+    parser: SelectolaxListParser,
+) -> None:
+    """A page with no tbody and no ESIA markers must raise ParseBugError (DOM change)."""
+    html = "<html><body><p>No table here</p></body></html>"
+    with pytest.raises(ParseBugError):
+        parser.parse(html)
+
+
+# ---------------------------------------------------------------------------
+# 13. ESIA head-signal detection (Signal 2) — meta refresh in <head>
+# ---------------------------------------------------------------------------
+
+# ESIA redirect page where title is neutral but <head> contains a meta refresh
+# pointing to esia.gosuslugi.ru — Signal 2 must fire alone.
+#
+# Example (real-world variant seen on fis.rosim.gov.ru):
+#   <head>
+#     <title>Переадресация...</title>
+#     <meta http-equiv="refresh" content="0; url=https://esia.gosuslugi.ru/login/"/>
+#   </head>
+_ESIA_HEAD_META_REFRESH_HTML = """\
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Переадресация...</title>
+  <meta http-equiv="refresh" content="0; url=https://esia.gosuslugi.ru/login/"/>
+</head>
+<body>
+  <p>Перенаправление на портал авторизации...</p>
+</body>
+</html>
+"""
+
+# Page where esia.gosuslugi.ru appears in body nav links only (not in <head>)
+# — must NOT trigger SessionExpiredError (false-positive guard).
+_ESIA_BODY_LINK_ONLY_HTML = """\
+<!DOCTYPE html>
+<html>
+<head><title>Список свободных лотов</title></head>
+<body>
+  <nav>
+    <a href="https://esia.gosuslugi.ru/registration">Регистрация через ЕСИА</a>
+  </nav>
+  <table>
+    <tbody>
+    </tbody>
+  </table>
+</body>
+</html>
+"""
+
+
+def test_esia_head_meta_refresh_raises_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """Signal 2: esia.gosuslugi.ru in <head> <meta http-equiv='refresh'> must
+    raise SessionExpiredError even when the <title> contains no ESIA markers.
+
+    This covers a redirect variant where the server sends a neutral title
+    ('Переадресация...') but embeds the ESIA URL in a meta-refresh tag.
+    """
+    with pytest.raises(SessionExpiredError):
+        parser.parse(_ESIA_HEAD_META_REFRESH_HTML)
+
+
+def test_esia_body_link_does_not_raise_session_expired(
+    parser: SelectolaxListParser,
+) -> None:
+    """esia.gosuslugi.ru appearing only in <body> nav links must NOT trigger
+    SessionExpiredError — normal lot-list pages include ESIA registration links.
+
+    Verifies that head-signal scoping to <head> prevents false positives.
+    """
+    rows = parser.parse(_ESIA_BODY_LINK_ONLY_HTML)
+    assert rows == []

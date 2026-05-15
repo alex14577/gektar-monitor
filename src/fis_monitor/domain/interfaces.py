@@ -77,6 +77,7 @@ __all__ = [
     "ConfigSource",
     "ConfigSubscription",
     "ConnectionProvider",
+    "CookieStore",
     "CyclesRepository",
     "DetailParser",
     "EventBus",
@@ -458,6 +459,38 @@ class CyclesRepository(Protocol):
 # ===========================================================================
 # Layer 2 — external-system adapters
 # ===========================================================================
+
+
+class CookieStore(Protocol):
+    """Bidirectional bridge: store Playwright-obtained cookies into requests.Session.
+
+    This Protocol is the seam between ``PlaywrightLoginSession`` (which acquires
+    cookies via browser) and ``RequestsHttpClient`` (which needs those cookies for
+    authenticated HTTP requests).
+
+    Design rationale (ADR-034):
+    - ``store(cookies)`` is called by ``PlaywrightLoginSession`` after every
+      successful ``open_headed_login`` and ``silent_refresh``, passing the
+      raw Playwright cookie dicts (fields: name, value, domain, path, expires,
+      httpOnly, secure, sameSite).
+    - Implementation (``RequestsCookieStore``) translates them into
+      ``requests.cookies.RequestsCookieJar`` entries so subsequent HTTP
+      requests carry valid session cookies.
+    - Neither ``PlaywrightLoginSession`` nor ``HttpClient`` imports the other;
+      they share only this thin Protocol (high cohesion, low coupling).
+
+    Implementation: ``infra/http/cookie_bridge.py::RequestsCookieStore``.
+    """
+
+    def store(self, cookies: list[dict[str, object]]) -> None:
+        """Load Playwright cookie dicts into the underlying cookie store.
+
+        Args:
+            cookies: List of Playwright cookie dicts with keys:
+                ``name``, ``value``, ``domain``, ``path``, ``expires``
+                (float, -1 if session), ``httpOnly``, ``secure``, ``sameSite``.
+        """
+        ...
 
 
 class HttpClient(Protocol):

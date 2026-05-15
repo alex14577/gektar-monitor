@@ -39,6 +39,7 @@ from fis_monitor.domain.models import Settings
 from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.config_source import WatchdogConfigSource
 from fis_monitor.infra.http.client import RequestsHttpClient
+from fis_monitor.infra.http.cookie_bridge import RequestsCookieStore
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
@@ -238,6 +239,9 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
 
     # ── Layer 2: infra adapters ─────────────────────────────────────────────
     http_session = requests.Session()
+    # cookie_store bridges Playwright-obtained cookies into requests.Session so
+    # monitor_cycle / backfill requests carry valid session cookies (ADR-034).
+    cookie_store = RequestsCookieStore(http_session)
     target_cfg = config_source.current().target
     http_client = RequestsHttpClient(
         session=http_session,
@@ -250,6 +254,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         profile_dir=data_dir / "profile",
         allowed_hosts=_TORGI_ALLOWED_HOSTS,
         clock=clock,
+        cookie_store=cookie_store,
     )
     session_probe = _NotImplementedSessionProbe()
     autostart = _NotImplementedAutostartManager()

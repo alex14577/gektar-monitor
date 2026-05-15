@@ -11,6 +11,7 @@ from fis_monitor.domain.errors import (
     DomainError,
     ParseBugError,
     ParserVersionMismatch,
+    SessionExpiredError,
     UpstreamError,
 )
 from fis_monitor.domain.interfaces import (
@@ -67,6 +68,7 @@ __all__ = [  # noqa: RUF022 — grouped by responsibility, NOT alphabetical
     "ParserVersionMismatch",
     "AlreadyRunningError",
     "BusyError",
+    "SessionExpiredError",
     # type aliases / enums
     "TrackedField",
     "ErrorCategory",

@@ -46,7 +46,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fis_monitor.domain.errors import ParseBugError, UpstreamError
+from fis_monitor.domain.errors import ParseBugError, SessionExpiredError, UpstreamError
 from fis_monitor.domain.interfaces import (
     Clock,
     ConfigSource,
@@ -358,6 +358,15 @@ class FullScanService:
 
         try:
             rows = self._list_parser.parse(response.text)
+        except SessionExpiredError:
+            # Session cookie expired: site returned an ESIA login page.
+            # Log at WARN (not ERROR) — this is an auth issue, not a DOM bug.
+            logger.warning(
+                "full_scan: session expired for region=%s "
+                "(ESIA login page detected) — skipping region",
+                region,
+            )
+            return set()
         except ParseBugError:
             logger.warning(
                 "full_scan: parse error for region=%s — skipping region",
