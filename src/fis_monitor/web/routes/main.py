@@ -266,14 +266,12 @@ def _build_scope_context(settings: Settings) -> SimpleNamespace:
     """Derive sidebar scope chips from configured regions.
 
     ``macro_regions``: the configured region codes (rendered as chip labels
-    by the template).  ``subjects_count``: a count of subjects the user can
-    pick from — proxied by configured-region count until the subject catalog
-    is wired (separate bd).
+    by the template).  ``subjects_count``: count of monitored subjects from
+    settings.subject_site_ids.
     """
-    regions = list(settings.regions)
     return SimpleNamespace(
-        macro_regions=regions,
-        subjects_count=len(regions),
+        macro_regions=list(settings.regions),
+        subjects_count=len(settings.subject_site_ids),
     )
 
 

@@ -548,16 +548,12 @@ def test_feed_subjects_filter_passed_to_lot_query() -> None:
     assert used.regions == (77, 16)
 
 
-def test_scope_subjects_count_reflects_configured_regions() -> None:
-    """AC#4: when no filter is set the sidebar shows total subjects count.
-
-    For MVP that count is proxied by the number of configured regions.
-    """
-    settings = make_settings(regions=[77, 16, 50])
+def test_scope_subjects_count_reflects_subject_site_ids() -> None:
+    """AC#4: sidebar «Все · N» reflects count of monitored subjects (subject_site_ids)."""
+    settings = make_settings(regions=[1], subject_site_ids=[87, 88, 25])
     app, _, _ = _make_app(settings=settings)
     with TestClient(app, raise_server_exceptions=True) as client:
         resp = client.get("/")
     html = resp.text
-    # The sidebar renders "Все · {{ scope.subjects_count }}" when no subjects
-    # are selected.  Three regions configured → "Все · 3".
+    # Three monitored subjects → "Все · 3".
     assert "Все · 3" in html

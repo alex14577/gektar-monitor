@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID, subjects_for_macros
+from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 from fis_monitor.services.view_filters import (
     ViewFilters,
     ViewFiltersService,
@@ -122,17 +122,21 @@ def get_subjects(
     svc: ViewFiltersService = Depends(get_view_filters_service),
     config_source: Any = Depends(get_config_source),
 ) -> HTMLResponse:
-    """Return partial HTML with subject checkboxes scoped to current macro-regions.
+    """Return partial HTML with subject checkboxes scoped to settings.subject_site_ids.
 
-    Subject list is derived from subjects_for_macros(settings.regions) per ADR-031.
+    Subject list contains only the subjects the user actually monitors.
     Labels are human-readable names from SUBJECT_TITLE_BY_ID; values are site-ids.
+    Order follows settings.subject_site_ids. Empty list is a valid state.
 
     The checkboxes carry ``form="filters"`` so they participate in the main
     #filters form submission even though they live in a popover outside it.
     """
     settings = config_source.current()
-    scoped_ids = subjects_for_macros(settings.regions)
-    subjects = [(sid, SUBJECT_TITLE_BY_ID[sid]) for sid in scoped_ids]
+    subjects = [
+        (sid, SUBJECT_TITLE_BY_ID[sid])
+        for sid in settings.subject_site_ids
+        if sid in SUBJECT_TITLE_BY_ID
+    ]
     current = _current_filters(request, svc)
     ctx = {
         "subjects": subjects,

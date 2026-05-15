@@ -354,21 +354,41 @@ class TestGetSubjects:
         assert "text/html" in resp.headers["content-type"]
 
     def test_contains_checkbox_input(self) -> None:
-        """Template must render at least one checkbox for subject selection."""
-        app = _build_app()
+        """Template renders a checkbox for each subject in subject_site_ids."""
+        cs = _FakeConfigSource(Settings(subject_site_ids=[87]))
+        app = _build_app(config_source=cs)
         with TestClient(app) as client:
             resp = client.get("/filters/subjects")
         assert 'type="checkbox"' in resp.text, "Expected checkbox input in response"
 
     def test_subject_names_displayed(self) -> None:
-        """Template must render subject names from SUBJECT_TITLE_BY_ID (ADR-031)."""
-        # Settings with regions=[1] (ДФО) → subjects include site-id 87 (Якутия).
-        cs = _FakeConfigSource(Settings(regions=[1]))
+        """Template renders names from SUBJECT_TITLE_BY_ID for subject_site_ids."""
+        cs = _FakeConfigSource(Settings(subject_site_ids=[87]))
         app = _build_app(config_source=cs)
         with TestClient(app) as client:
             resp = client.get("/filters/subjects")
-        # Якутия is a well-known ДФО subject — must appear in the rendered list.
         assert "Якутия" in resp.text, "Expected subject name in response"
+
+    def test_only_monitored_subjects_rendered(self) -> None:
+        """Only subjects in subject_site_ids appear — not the full macro-region scope."""
+        cs = _FakeConfigSource(Settings(subject_site_ids=[27, 28]))
+        app = _build_app(config_source=cs)
+        with TestClient(app) as client:
+            resp = client.get("/filters/subjects")
+        from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
+        assert SUBJECT_TITLE_BY_ID[27] in resp.text
+        assert SUBJECT_TITLE_BY_ID[28] in resp.text
+        # site-id 87 (Якутия) is not in subject_site_ids — must not appear.
+        assert "Якутия" not in resp.text
+
+    def test_empty_subject_site_ids_renders_no_checkboxes(self) -> None:
+        """Empty subject_site_ids → no checkboxes rendered (valid state)."""
+        cs = _FakeConfigSource(Settings(subject_site_ids=[]))
+        app = _build_app(config_source=cs)
+        with TestClient(app) as client:
+            resp = client.get("/filters/subjects")
+        assert resp.status_code == 200
+        assert 'type="checkbox"' not in resp.text
 
     def test_selected_subjects_pre_checked(self) -> None:
         """Checkbox for a subject in the view_filters cookie must have checked attribute.
@@ -378,7 +398,7 @@ class TestGetSubjects:
         """
         from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
 
-        cs = _FakeConfigSource(Settings(regions=[1]))
+        cs = _FakeConfigSource(Settings(subject_site_ids=[87, 88]))
         svc = ViewFiltersService()
         app = _build_app(svc=svc, config_source=cs)
 
@@ -396,7 +416,7 @@ class TestGetSubjects:
         assert re.search(r'<input[^>]*value="87"[^>]*\bchecked\b', body), (
             "Expected value=87 input to be checked"
         )
-        # site-id 88 (Бурятия) must NOT be checked.
+        # site-id 88 must NOT be checked.
         assert not re.search(r'<input[^>]*value="88"[^>]*\bchecked\b', body), (
             "Expected value=88 input to NOT be checked"
         )
