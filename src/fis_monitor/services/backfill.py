@@ -84,6 +84,8 @@ class _PaginatedListFetcherProto(Protocol):
         stop_event: threading.Event,
         *,
         sleep_between_pages: float,
+        per_page: int | None = None,
+        max_pages: int | None = None,
     ) -> object: ...  # returns Iterator[ParsedListRow]
 
 
@@ -271,6 +273,7 @@ class BackfillService:
             region,
             stop,
             sleep_between_pages=self._sleep_between_pages,
+            per_page=50,  # ADR-036: full walk with explicit page size
         ):
             if stop.is_set():
                 break

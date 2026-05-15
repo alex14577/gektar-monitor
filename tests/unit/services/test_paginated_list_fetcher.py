@@ -297,3 +297,72 @@ class TestPageUrls:
 
         assert len(http.calls) == 2
         assert "FreeLotSearch_page=2" in http.calls[1]
+
+
+# ---------------------------------------------------------------------------
+# Test 7: max_pages kwarg (ADR-036 head-poll)
+# ---------------------------------------------------------------------------
+
+class TestMaxPages:
+    def test_iterate_respects_max_pages(self) -> None:
+        """With max_pages=1, only page 1 is fetched even when more pages exist."""
+        rows_p1 = [_make_row(1), _make_row(2)]
+        rows_p2 = [_make_row(3)]
+        rows_p3 = [_make_row(4)]
+
+        parser = FakeListParser([rows_p1, rows_p2, rows_p3])
+        http = FakeHttpClient(["<p1/>", "<p2/>", "<p3/>"])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        result = list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0, max_pages=1))
+
+        assert [r.id for r in result] == [1, 2]
+        assert len(http.calls) == 1  # only page 1 fetched
+
+    def test_iterate_unbounded_when_max_pages_none(self) -> None:
+        """max_pages=None (default) walks all pages until empty — existing behaviour."""
+        rows_p1 = [_make_row(1)]
+        rows_p2 = [_make_row(2)]
+        rows_p3: list[ParsedListRow] = []
+
+        parser = FakeListParser([rows_p1, rows_p2, rows_p3])
+        http = FakeHttpClient(["<p1/>", "<p2/>", "<p3/>"])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        result = list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0, max_pages=None))
+
+        assert [r.id for r in result] == [1, 2]
+        assert len(http.calls) == 3  # walked to empty page
+
+
+# ---------------------------------------------------------------------------
+# Test 8: per_page forwarded to URL builder (ADR-036)
+# ---------------------------------------------------------------------------
+
+class TestPerPageForwarding:
+    def test_iterate_forwards_per_page_to_url(self) -> None:
+        """per_page=20 appears as 'per-page=20' in the constructed URL."""
+        http = FakeHttpClient(["<p1/>"])
+        parser = FakeListParser([[]])  # empty first page → stops
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+        list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0, per_page=20))
+
+        assert len(http.calls) == 1
+        assert "per-page=20" in http.calls[0]
+
+    def test_iterate_no_per_page_when_none(self) -> None:
+        """per_page=None (default) omits the per-page query param entirely."""
+        http = FakeHttpClient(["<p1/>"])
+        parser = FakeListParser([[]])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+        list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0, per_page=None))
+
+        assert "per-page" not in http.calls[0]

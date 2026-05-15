@@ -311,6 +311,7 @@ class FullScanService:
                 region,
                 stop_event,
                 sleep_between_pages=0.0,  # full_scan paces via inter_batch_sleep_sec
+                per_page=50,  # ADR-036: full walk with explicit page size
             ):
                 ids.add(row.id)
             # Iterator exhausted without exception — all pages visited.

@@ -74,6 +74,8 @@ class PaginatedListFetcher:
         stop_event: threading.Event,
         *,
         sleep_between_pages: float = 2.0,
+        per_page: int | None = None,
+        max_pages: int | None = None,
     ) -> Iterator[ParsedListRow]:
         """Yield every ``ParsedListRow`` from pages 1..N for ``region``.
 
@@ -83,7 +85,16 @@ class PaginatedListFetcher:
         Stops when:
           - the parser returns an empty list (end of catalogue), or
           - ``stop_event`` is set, or
+          - ``max_pages`` pages have been fetched (ADR-036: head-poll uses 1), or
           - a page limit of 1000 is reached (warning logged).
+
+        *per_page* is forwarded to ``lot_list_url`` as the Yii2 ``per-page``
+        query parameter.  ``None`` uses the site default (≈50 rows).
+        ADR-036: FullScan and Backfill call this with ``per_page=50``,
+        ``max_pages=None`` (unbounded full walk). MonitorCycle does NOT use
+        ``iterate`` — it issues a single ``lot_list_url(per_page=20)`` request
+        directly. ``max_pages`` therefore caps generic callers; it is not the
+        mechanism that enforces head-poll.
 
         A ``sleep_between_pages`` pause is inserted **between** pages
         (not before the first) to respect the upstream rate limit.
@@ -93,6 +104,7 @@ class PaginatedListFetcher:
         coverage tracking.
         """
         page = 1
+        pages_walked = 0
 
         while True:
             if stop_event.is_set():
@@ -112,7 +124,7 @@ class PaginatedListFetcher:
                 )
                 return
 
-            url = self._url_builder.lot_list_url(region=region, page=page)
+            url = self._url_builder.lot_list_url(region=region, page=page, per_page=per_page)
             try:
                 response = self._http.get(url, headers=_PJAX_HEADERS)
             except UpstreamError:
@@ -168,6 +180,11 @@ class PaginatedListFetcher:
                 len(rows),
             )
             yield from rows
+
+            pages_walked += 1
+            # ADR-036: max_pages caps the walk for callers that want a bounded scan; None = unbounded.
+            if max_pages is not None and pages_walked >= max_pages:
+                return
 
             page += 1
 

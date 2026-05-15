@@ -17,6 +17,9 @@ _LIST_QUERY = "?region={region}&use_filter_pocket=1&sort={sort}"
 # Yii2 pagination parameter.  Page 1 is the default (omit for first page to
 # keep URLs canonical); page 2+ appends "&FreeLotSearch_page={page}".
 _LIST_PAGE_PARAM = "&FreeLotSearch_page={page}"
+# Yii2 per-page parameter (confirmed from live HTML fixtures: select name="per-page").
+# None = site default (≈50 rows). ADR-036: MonitorCycle uses 20, FullScan/Backfill use 50.
+_LIST_PER_PAGE_PARAM = "&per-page={per_page}"
 _DETAIL_PATH = "/cabinet/free-lot-view?id={lot_id}"
 
 # Default sort: DESC by date_create — newest lots first (research v3 confirmed,
@@ -52,8 +55,9 @@ class TorgiUrlBuilder:
         region: int,
         sort: str = DEFAULT_LIST_SORT,
         page: int = 1,
+        per_page: int | None = None,
     ) -> str:
-        """Return the list-page URL for *region* with optional *sort* and *page*.
+        """Return the list-page URL for *region* with optional *sort*, *page*, and *per_page*.
 
         *region* is a macro_id (1=ДФО, 2=Арктика) passed via the dedicated
         ``region=`` parameter.  The server filters the entire macro-region in
@@ -72,8 +76,18 @@ class TorgiUrlBuilder:
         the default; for page >= 2 the ``FreeLotSearch_page`` param is
         appended.  ``page`` MUST be a positive integer — no validation is
         performed here; callers enforce the 1..1000 guard.
+
+        *per_page* controls the Yii2 ``per-page`` query parameter (site key
+        confirmed from live HTML: ``<select name="per-page">``).  ``None``
+        omits the parameter and lets the site use its default (≈50 rows).
+        ADR-036: MonitorCycle passes 20 (head-poll); FullScan and Backfill
+        pass 50 (full walk).  ``per_page`` MUST be > 0 when provided.
         """
+        if per_page is not None and per_page <= 0:
+            raise ValueError(f"per_page must be > 0, got {per_page}")
         base = f"{self.base_url}{_LIST_PATH}{_LIST_QUERY.format(region=region, sort=sort)}"
+        if per_page is not None:
+            base += _LIST_PER_PAGE_PARAM.format(per_page=per_page)
         if page > 1:
             base += _LIST_PAGE_PARAM.format(page=page)
         return base

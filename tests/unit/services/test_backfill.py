@@ -65,6 +65,7 @@ class FakePaginatedListFetcher:
     ) -> None:
         self._rows_by_region: dict[int, list[ParsedListRow]] = rows_by_region or {}
         self.iterate_calls: list[int] = []
+        self.iterate_kwargs: list[dict] = []
 
     def iterate(
         self,
@@ -72,8 +73,11 @@ class FakePaginatedListFetcher:
         stop_event: threading.Event,
         *,
         sleep_between_pages: float = 2.0,
+        per_page: int | None = None,
+        max_pages: int | None = None,
     ) -> Iterator[ParsedListRow]:
         self.iterate_calls.append(region)
+        self.iterate_kwargs.append({"per_page": per_page, "max_pages": max_pages})
         for row in self._rows_by_region.get(region, []):
             if stop_event.is_set():
                 return
@@ -257,6 +261,20 @@ class TestBasicBackfill:
         assert len(lot_repo.upsert_calls) == 3
         assert set(c["lot_id"] for c in lot_repo.upsert_calls) == {1, 2, 10}
 
+    def test_iterate_called_with_per_page_50(self) -> None:
+        """BackfillService passes per_page=50 (ADR-036: full walk with explicit page size)."""
+        svc, _lot_repo, _mc, fetcher = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+            regions=[_REGION_A],
+        )
+
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert fetcher.iterate_kwargs[0]["per_page"] == 50
+        assert fetcher.iterate_kwargs[0]["max_pages"] is None
+
 
 # ---------------------------------------------------------------------------
 # Test 2: single-flight
@@ -289,6 +307,8 @@ class TestSingleFlight:
                 stop_event: threading.Event,
                 *,
                 sleep_between_pages: float = 2.0,
+                per_page: int | None = None,
+                max_pages: int | None = None,
             ) -> Iterator[ParsedListRow]:
                 barrier.wait()  # signal that backfill worker is running
                 done_event.wait(timeout=5.0)  # hold until test releases
@@ -381,6 +401,8 @@ class TestCancel:
                 stop_event: threading.Event,
                 *,
                 sleep_between_pages: float = 2.0,
+                per_page: int | None = None,
+                max_pages: int | None = None,
             ) -> Iterator[ParsedListRow]:
                 if region == _REGION_B:
                     # Signal the main thread to cancel

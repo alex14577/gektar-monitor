@@ -389,7 +389,8 @@ class MonitorCycleService:
         """Inner cycle logic — called from ``run_cycle`` which wraps for unexpected errors."""
 
         # ---------- Step 2: fetch list page --------------------------------
-        url = self._url_builder.lot_list_url(region=region)
+        # ADR-036: head-poll — page=1 with per_page=20 (newest lots first).
+        url = self._url_builder.lot_list_url(region=region, per_page=20)
         try:
             self.cycle_progress_signal.set()
             try:

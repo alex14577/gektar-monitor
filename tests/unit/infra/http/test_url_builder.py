@@ -80,6 +80,25 @@ class TestLotListUrl:
         url = builder.lot_list_url(region=2)
         assert "region=2" in url
 
+    def test_lot_list_url_includes_per_page_when_set(self) -> None:
+        """per_page=20 appears as 'per-page=20' in the URL (ADR-036: head-poll)."""
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=1, per_page=20)
+        assert "per-page=20" in url
+
+    def test_lot_list_url_omits_per_page_when_none(self) -> None:
+        """per_page=None (default) omits the per-page param entirely."""
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=1, per_page=None)
+        assert "per-page" not in url
+
+    def test_lot_list_url_per_page_zero_raises(self) -> None:
+        """per_page=0 is rejected with ValueError."""
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        import pytest
+        with pytest.raises(ValueError, match="per_page must be > 0"):
+            builder.lot_list_url(region=1, per_page=0)
+
 
 class TestLotDetailUrl:
     """TorgiUrlBuilder.lot_detail_url produces correct URLs."""
