@@ -11,6 +11,7 @@ Coverage:
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
@@ -135,11 +136,12 @@ class FakeConfigSource:
 
 
 class FakeMonitorCycleService:
-    """Tracks mark/clear_region_in_backfill calls."""
+    """Tracks mark/clear_region_in_backfill and request_run_now calls."""
 
     def __init__(self) -> None:
         self.mark_calls: list[int] = []
         self.clear_calls: list[int] = []
+        self.run_now_calls: int = 0
 
     def mark_region_in_backfill(self, region: int) -> None:
         self.mark_calls.append(region)
@@ -148,7 +150,7 @@ class FakeMonitorCycleService:
         self.clear_calls.append(region)
 
     def request_run_now(self) -> None:
-        pass
+        self.run_now_calls += 1
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +225,7 @@ def test_fake_all_methods() -> None:
     mc.request_run_now()
     assert mc.mark_calls == [1]
     assert mc.clear_calls == [1]
+    assert mc.run_now_calls == 1
 
 
 # ---------------------------------------------------------------------------
@@ -547,3 +550,213 @@ class TestWatcherExitsOnNormalCompletion:
                 "(P0-5 regression: _stop_event.set() not called in _run finally)"
             )
         # If no watcher thread is found, it already exited — which is also correct.
+
+
+# ---------------------------------------------------------------------------
+# Test: start(regions=[1,2]) processes only those regions
+# ---------------------------------------------------------------------------
+
+class TestSubsetRegions:
+    def test_start_subset_processes_only_given_regions(self) -> None:
+        svc, lot_repo, _mc, fetcher = _make_service(
+            rows_by_region={
+                _REGION_A: [_make_row(1)],
+                _REGION_B: [_make_row(10)],
+                99: [_make_row(99)],
+            },
+            regions=[_REGION_A, _REGION_B, 99],
+        )
+
+        stop = threading.Event()
+        svc.start(stop, regions=[_REGION_A, _REGION_B])
+        _wait_until_done(svc)
+
+        # Only A and B iterated — not region 99
+        assert set(fetcher.iterate_calls) == {_REGION_A, _REGION_B}
+        assert 99 not in fetcher.iterate_calls
+        assert len(lot_repo.upsert_calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Test: maybe_start gate
+# ---------------------------------------------------------------------------
+
+class TestMaybeStart:
+    def test_site_total_none_returns_false(self) -> None:
+        svc, *_ = _make_service()
+        stop = threading.Event()
+        result = svc.maybe_start(_REGION_A, site_total=None, db_count=0, stop_event=stop)
+        assert result is False
+        assert not svc.is_running()
+
+    def test_already_running_returns_false(self) -> None:
+        barrier = threading.Barrier(2)
+        done_event = threading.Event()
+
+        class SlowFetcher:
+            def iterate(
+                self,
+                region: int,
+                stop_event: threading.Event,
+                *,
+                sleep_between_pages: float = 2.0,
+                per_page: int | None = None,
+                max_pages: int | None = None,
+                page_callback: object = None,
+            ):
+                barrier.wait()
+                done_event.wait(timeout=5.0)
+                return iter([])
+
+        svc, *_ = _make_service(fetcher=SlowFetcher())  # type: ignore[call-overload]
+        stop = threading.Event()
+        svc.start(stop)
+        barrier.wait()
+
+        result = svc.maybe_start(_REGION_A, site_total=100, db_count=0, stop_event=stop)
+        assert result is False
+
+        done_event.set()
+        _wait_until_done(svc)
+
+    def test_delta_below_threshold_returns_false(self) -> None:
+        # delta=2, hint=4, threshold=3 → delta(2) <= hint(4)+threshold(3) → False
+        svc, *_ = _make_service()
+        stop = threading.Event()
+        result = svc.maybe_start(
+            _REGION_A, site_total=102, db_count=100, stop_event=stop,
+            len_parsed_hint=4,
+        )
+        assert result is False
+        assert not svc.is_running()
+
+    def test_delta_above_threshold_returns_true_and_starts(self) -> None:
+        # delta=10, hint=0, threshold=3 → delta(10) > hint(0)+threshold(3) → True
+        svc, _lot_repo, _mc, fetcher = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+            regions=[_REGION_A],
+        )
+        stop = threading.Event()
+        result = svc.maybe_start(
+            _REGION_A, site_total=110, db_count=100, stop_event=stop,
+            len_parsed_hint=0,
+        )
+        assert result is True
+        _wait_until_done(svc)
+        # Only the given region was iterated
+        assert fetcher.iterate_calls == [_REGION_A]
+
+    def test_negative_delta_returns_false_skip_negative(self) -> None:
+        # delta < 0 → False, decision=skip_negative
+        svc, *_ = _make_service()
+        stop = threading.Event()
+        result = svc.maybe_start(_REGION_A, site_total=50, db_count=100, stop_event=stop)
+        assert result is False
+        assert not svc.is_running()
+
+    def test_concurrent_maybe_start_single_flight(self) -> None:
+        """Concurrent maybe_start for 4 regions — only the first one starts."""
+        regions = [10, 20, 30, 40]
+        rows_by_region = {r: [_make_row(r)] for r in regions}
+        svc, _lot_repo, _mc, _fetcher = _make_service(
+            rows_by_region=rows_by_region,
+            regions=regions,
+        )
+
+        # Two-party barrier: main thread + exactly 1 winning iterate call.
+        in_iterate = threading.Barrier(2)
+        done_event = threading.Event()
+
+        class TrackingSlowFetcher:
+            def iterate(
+                self,
+                region: int,
+                stop_event: threading.Event,
+                *,
+                sleep_between_pages: float = 2.0,
+                per_page: int | None = None,
+                max_pages: int | None = None,
+                page_callback: object = None,
+            ):
+                in_iterate.wait(timeout=5.0)  # signal: one winner inside iterate
+                done_event.wait(timeout=5.0)
+                return iter([])
+
+        svc._fetcher = TrackingSlowFetcher()  # type: ignore[assignment]
+
+        stop = threading.Event()
+        results: list[bool] = []
+        result_lock = threading.Lock()
+
+        def _try(r: int) -> None:
+            res = svc.maybe_start(r, site_total=200, db_count=10, stop_event=stop)
+            with result_lock:
+                results.append(res)
+
+        threads = [threading.Thread(target=_try, args=(r,)) for r in regions]
+        for t in threads:
+            t.start()
+
+        # Wait until the winning backfill is inside the slow fetcher.
+        # The barrier times out (raises BrokenBarrierError) if no winner enters,
+        # which would make the assertion below fail clearly.
+        with contextlib.suppress(threading.BrokenBarrierError):
+            in_iterate.wait(timeout=5.0)
+
+        # At this point 1 winner is running; the other 3 threads have already
+        # called maybe_start and got False (they checked _running=True under lock).
+        for t in threads:
+            t.join(timeout=5.0)
+
+        done_event.set()
+        _wait_until_done(svc)
+
+        assert results.count(True) == 1
+        assert results.count(False) == len(regions) - 1
+
+
+# ---------------------------------------------------------------------------
+# Test: request_run_now called after success, NOT after cancel
+# ---------------------------------------------------------------------------
+
+class TestRequestRunNow:
+    def test_request_run_now_called_after_success(self) -> None:
+        svc, _lot_repo, mc, _fetcher = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+            regions=[_REGION_A],
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+        assert mc.run_now_calls == 1
+
+    def test_request_run_now_not_called_after_cancel(self) -> None:
+        barrier = threading.Barrier(2)
+        cancel_issued = threading.Event()
+
+        class SlowFetcher:
+            def iterate(
+                self,
+                region: int,
+                stop_event: threading.Event,
+                *,
+                sleep_between_pages: float = 2.0,
+                per_page: int | None = None,
+                max_pages: int | None = None,
+                page_callback: object = None,
+            ):
+                barrier.wait()
+                cancel_issued.wait(timeout=5.0)
+                return iter([])
+
+        svc, _lot_repo, mc, _ = _make_service(
+            fetcher=SlowFetcher(),  # type: ignore[call-overload]
+            regions=[_REGION_A],
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        barrier.wait()
+        svc.cancel()
+        cancel_issued.set()
+        _wait_until_done(svc)
+        assert mc.run_now_calls == 0

@@ -32,9 +32,10 @@ from fis_monitor.domain.models import parsed_row_to_lot as _parsed_row_to_lot
 
 if TYPE_CHECKING:
     from fis_monitor.domain.interfaces import ConfigSource, LotRepository
-    from fis_monitor.services.monitor_cycle import MonitorCycleService
 
 logger = logging.getLogger(__name__)
+
+_DELTA_THRESHOLD = 3
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +95,17 @@ class _Progress:
 
 
 # ---------------------------------------------------------------------------
+# Protocol for MonitorCycleHandle (avoids direct import / circular dep)
+# ---------------------------------------------------------------------------
+
+
+class MonitorCycleHandle(Protocol):
+    def mark_region_in_backfill(self, region: int) -> None: ...
+    def clear_region_in_backfill(self, region: int) -> None: ...
+    def request_run_now(self) -> None: ...
+
+
+# ---------------------------------------------------------------------------
 # Protocol for PaginatedListFetcher (avoids circular import in tests)
 # ---------------------------------------------------------------------------
 
@@ -131,7 +143,7 @@ class BackfillService:
         fetcher: _PaginatedListFetcherProto,
         lot_repo: LotRepository,
         config_source: ConfigSource,
-        monitor_cycle: MonitorCycleService,
+        monitor_cycle: MonitorCycleHandle,
         sleep_between_pages: float = 2.0,
     ) -> None:
         self._fetcher = fetcher
@@ -157,17 +169,18 @@ class BackfillService:
     # Public API
     # ------------------------------------------------------------------
 
-    def start(self, stop_event_external: threading.Event) -> bool:
+    def start(
+        self,
+        stop_event_external: threading.Event,
+        regions: list[int] | None = None,
+    ) -> bool:
         """Attempt to start a backfill in a daemon thread.
 
         Returns ``True`` immediately if a new backfill was started, ``False`` if
         one is already running (single-flight).
 
-        Thread spawning is done INSIDE ``start()`` so callers can use the bool
-        return value as the single-flight gate — no need for a TOCTOU-prone
-        ``is_running()`` pre-check (P1-5).  The returned bool is race-free
-        because the ``_flight_lock`` is held while checking and setting
-        ``_running``.
+        ``regions``: subset of regions to backfill.  ``None`` = all configured
+        regions (default behaviour).
 
         ``stop_event_external``: if set, the backfill will stop.  Merged with
         the internal stop-event so both ``cancel()`` and external shutdown abort
@@ -182,7 +195,73 @@ class BackfillService:
 
         def _worker() -> None:
             try:
-                self._run(stop_event_external)
+                self._run(stop_event_external, regions=regions)
+            finally:
+                with self._flight_lock:
+                    self._running = False
+                with self._progress_lock:
+                    self._progress.running = False
+
+        t = threading.Thread(target=_worker, daemon=True, name="backfill-worker")
+        t.start()
+        return True
+
+    def maybe_start(
+        self,
+        region_id: int,
+        site_total: int | None,
+        db_count: int,
+        stop_event: threading.Event,
+        *,
+        len_parsed_hint: int = 0,
+    ) -> bool:
+        """Conditionally start a backfill for a single region (delta-trigger gate).
+
+        All checks are performed atomically inside ``_flight_lock`` to prevent
+        TOCTOU races with concurrent callers.
+
+        Returns ``True`` and fires backfill if triggered; ``False`` otherwise.
+        """
+        with self._flight_lock:
+            if site_total is None:
+                logger.debug(
+                    "maybe_start: region=%s site_total=None → skip", region_id
+                )
+                return False
+
+            if self._running:
+                logger.debug(
+                    "maybe_start: region=%s already running → skip", region_id
+                )
+                return False
+
+            delta = site_total - db_count
+
+            if delta < 0:
+                logger.debug(
+                    "maybe_start: region=%s delta=%d decision=skip_negative",
+                    region_id,
+                    delta,
+                )
+                return False
+
+            if delta <= len_parsed_hint + _DELTA_THRESHOLD:
+                logger.debug(
+                    "maybe_start: region=%s delta=%d hint=%d threshold=%d → below threshold",
+                    region_id,
+                    delta,
+                    len_parsed_hint,
+                    _DELTA_THRESHOLD,
+                )
+                return False
+
+            # Trigger: acquire the flight lock for real start.
+            self._running = True
+            self._stop_event = threading.Event()
+
+        def _worker() -> None:
+            try:
+                self._run(stop_event, regions=[region_id])
             finally:
                 with self._flight_lock:
                     self._running = False
@@ -249,12 +328,18 @@ class BackfillService:
         t.start()
         return combined
 
-    def _run(self, stop_event_external: threading.Event) -> None:
+    def _run(
+        self,
+        stop_event_external: threading.Event,
+        *,
+        regions: list[int] | None = None,
+    ) -> None:
         """Inner backfill loop — runs in the caller's thread."""
         stop = self._combined_stop(stop_event_external)
 
-        settings = self._config_source.current()
-        regions = list(settings.regions)
+        if regions is None:
+            settings = self._config_source.current()
+            regions = list(settings.regions)
         now = datetime.now(UTC)
 
         with self._progress_lock:
@@ -285,12 +370,18 @@ class BackfillService:
 
         # Mark done (normal completion only — cancel keeps done=False so the UI
         # can distinguish a successful finish from an interrupted one).
-        # stop is a combined event (internal cancel OR external shutdown); we
-        # only set done=True when it was NOT fired — i.e. natural completion.
-        if not stop.is_set():
+        # Check both the internal cancel event and the external stop event
+        # directly — the combined `stop` event relies on a polling watcher that
+        # may lag by up to 0.1 s, creating a TOCTOU window.
+        cancelled = self._stop_event.is_set() or stop_event_external.is_set()
+        if not cancelled:
             with self._progress_lock:
                 self._progress.done = True
                 self._progress.updated_at = datetime.now(UTC)
+            try:
+                self._monitor_cycle.request_run_now()
+            except Exception:
+                logger.warning("backfill: request_run_now() failed", exc_info=True)
 
         # Signal the stop-watcher thread to exit on normal completion.
         # Without this, the watcher spins forever waiting for `combined` to be
