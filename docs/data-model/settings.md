@@ -27,7 +27,7 @@ class UIConfig(BaseModel):
 class EmailConfig(BaseModel):
     enabled: bool = True
     use_default_smtp: bool = True
-    smtp_host: str = "smtp.yandex.ru"
+    smtp_host: str | None = None  # ADR-024: host в state.db; None = дефолтный из infra/smtp/constants.py
     smtp_port: int = Field(587, ge=1, le=65535)
     from_address: str | None = None
     recipients: list[EmailStr] = Field(default_factory=list)
@@ -73,7 +73,7 @@ class MonitoringConfig(BaseModel):
 
 class Settings(BaseModel):
     mode: Literal["local", "server"] = "local"
-    interval_minutes: int = Field(15, ge=0, le=60)  # 0 = непрерывно
+    interval_minutes: int = Field(1, ge=0, le=60)  # 0 = непрерывно (без пауз между циклами), 1 = по умолчанию (1 минута между циклами)
     timezone: str = "Europe/Moscow"
     regions: list[int] = Field(default_factory=lambda: [1, 2])  # 1=ДФО, 2=Арктика
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
@@ -84,7 +84,9 @@ class Settings(BaseModel):
 
 ## SmtpCredentials — state.db
 
-SMTP-логин и пароль хранятся в `state.db` (одна строка с id=1, см. [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]]). В `config.json` их нет.
+SMTP-параметры (host, port, user, password) хранятся в `state.db` (одна строка с id=1), **не в `config.json`**. 
+
+См. [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]] (SMTP SSOT = state.db) и [[decisions/ADR-024-target-config-and-url-builder|ADR-024]] (хост и порт не должны быть в domain models).
 
 ```python
 from pydantic import SecretStr
@@ -94,10 +96,12 @@ class SmtpCredentials(BaseModel):
     smtp_password: SecretStr    # ADR-017: __repr__/__str__ → '***'. plain — .get_secret_value()
     smtp_host: str              # формат-валидатор (см. ADR-015); policy — infra/smtp/host_policy.py
     smtp_port: int = Field(587, ge=1, le=65535)   # R4-C1, ADR-020: SSOT = state.db
-    use_default: bool = True    # True = бот-ящик, зашитый в сборку
+    use_default: bool = True    # True = использовать дефолтный бот-ящик (`smtp.yandex.ru:587` из infra/smtp/constants.py)
 
     model_config = ConfigDict(frozen=True)
 ```
+
+Дефолтные значения (`DEFAULT_SMTP_HOST = "smtp.yandex.ru"`, `DEFAULT_SMTP_PORT = 587`) живут в коде — fallback на случай пустой таблицы при первой установке.
 
 `SecretStr` гарантирует что пароль не утечёт в crash-логи через `__repr__`. Получить plain-value — только явным `.get_secret_value()` в `SmtpEmailNotifier.send()`. Хранение plain в `state.db` сохраняется (ACL `%LOCALAPPDATA%` достаточен — см. [[decisions-log]]).
 

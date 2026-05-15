@@ -9,7 +9,7 @@
 | Путь | Тип | Дефолт | Валидация | Меняется в UI |
 |---|---|---|---|---|
 | `mode` | enum | `"local"` | `local` \| `server` | нет (env `MODE`) |
-| `interval_minutes` | int | `15` | `0..60` (0 = непрерывно, без паузы между циклами) | да |
+| `interval_minutes` | int | `1` | `0..60` (0 = непрерывно, без паузы между циклами) | да |
 | `timezone` | str | `"Europe/Moscow"` | IANA TZ | да |
 | `regions` | int[] | `[1, 2]` | min 1 элемент. Макрорегионы: 1=ДФО, 2=Арктика. **Fetch-time** — определяет какие данные тянутся с сайта и попадают в БД | да |
 | `filters.rf_subjects` | int[] | `[]` | пусто = все субъекты выбранных макрорегионов. **Notify-time** — фильтрует уведомления, в БД хранятся все лоты выбранных макрорегионов | да |
@@ -22,7 +22,7 @@
 | `ui.theme` | enum | `"auto"` | `auto` \| `light` \| `dark` (в MVP `auto` через `prefers-color-scheme`, см. [[decisions-log]]) | да |
 | `notifications.email.enabled` | bool | `true` | — | да |
 | `notifications.email.use_default_smtp` | bool | `true` | — | да |
-| `notifications.email.smtp_host` | str | `"smtp.yandex.ru"` | hostname | да (override) |
+| `notifications.email.smtp_host` | str\|null | `null` | hostname \| null | да (override) |
 | `notifications.email.smtp_port` | int | `587` | `1..65535` | да |
 | `notifications.email.from_address` | str\|null | `null` | email \| null | да |
 | `notifications.email.recipients` | str[] | `[]` | каждый — email | да |
@@ -35,11 +35,12 @@
 | `notifications.catchup.enabled` | bool | `true` | — | да |
 | `notifications.catchup.min_offline_minutes` | int | `60` | ≥0. Порог простоя для catch-up-уведомления при возврате | да |
 
-**SMTP-логин и пароль** (`smtp_user`, `smtp_password`) хранятся в `state.db`
-(таблица `smtp_credentials`), **не в `config.json`**. См. [[decisions-log]] → «SMTP-пароль
-хранится в state.db» и [[data-model]] → `SmtpCredentials`. Pydantic-схема `config.json`
-этих полей не содержит. Изменяются через `PUT /api/notifiers/email`
-(см. [[web/api-reference]]).
+**SMTP-логин, пароль, host и port** хранятся в `state.db`
+(таблица `smtp_credentials`), **не в `config.json`**. См. [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]] и [[decisions/ADR-024-target-config-and-url-builder|ADR-024]].
+
+В `config.json` остаётся только флаг `use_default_smtp=true` (признак использования дефолтного бот-ящика `smtp.yandex.ru:587`). Дефолтные SMTP-параметры хранятся в коде (`infra/smtp/constants.py`) — fallback при пустой таблице `smtp_credentials` на первый запуск.
+
+Pydantic-схема `config.json` полей `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password` не содержит. Изменяются через `PUT /api/notifiers/email` (см. [[web/api-reference]]).
 
 ## Секреты
 
