@@ -117,13 +117,17 @@ class FakeBackfillService:
 
 
 class FakeSseStreamer:
-    """Minimal fake for SseStreamer — records bind_executor calls."""
+    """Minimal fake for SseStreamer — records bind_executor / bind_event_encoder calls."""
 
     def __init__(self) -> None:
         self.bound_executor: object = None
+        self.bound_encoder: object = None
 
     def bind_executor(self, executor: object) -> None:
         self.bound_executor = executor
+
+    def bind_event_encoder(self, encoder: object) -> None:
+        self.bound_encoder = encoder
 
 
 @dataclass

@@ -168,3 +168,47 @@ class TestCycleRunRateLimit:
             f"Expected run_now called once (not for rate-limited req), "
             f"got {fake.run_now_call_count}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test: HTMX content negotiation — HTML fragment response
+# ---------------------------------------------------------------------------
+
+
+class TestCycleRunHtmxFragment:
+    """POST /cycle/run with HX-Request header returns HTML fragment."""
+
+    def test_htmx_request_returns_html_fragment_with_ok_result(self) -> None:
+        """HTMX POST returns text/html containing success indicator."""
+        fake = FakeMonitorCycleService()
+        limiter = RateLimiter(max_requests=5, window_seconds=10.0)
+        app = _build_app(fake, rate_limiter=limiter)
+
+        with TestClient(app) as client:
+            resp = client.post("/cycle/run", headers={"HX-Request": "true"})
+
+        assert resp.status_code == 202, f"Expected 202, got {resp.status_code}"
+        assert "text/html" in resp.headers.get("content-type", ""), (
+            f"Expected text/html content-type, got: {resp.headers.get('content-type')}"
+        )
+        assert "cycle-result--ok" in resp.text, (
+            f"Expected ok CSS class in fragment, got: {resp.text!r}"
+        )
+
+    def test_htmx_rate_limited_returns_html_fragment_with_error(self) -> None:
+        """HTMX POST returns text/html with error indicator when rate-limited."""
+        fake = FakeMonitorCycleService()
+        limiter = RateLimiter(max_requests=1, window_seconds=10.0)
+        app = _build_app(fake, rate_limiter=limiter)
+
+        with TestClient(app) as client:
+            client.post("/cycle/run", headers={"HX-Request": "true"})   # accepted
+            resp = client.post("/cycle/run", headers={"HX-Request": "true"})  # rate-limited
+
+        assert resp.status_code == 429, f"Expected 429, got {resp.status_code}"
+        assert "text/html" in resp.headers.get("content-type", ""), (
+            f"Expected text/html content-type, got: {resp.headers.get('content-type')}"
+        )
+        assert "cycle-result--err" in resp.text, (
+            f"Expected err CSS class in fragment, got: {resp.text!r}"
+        )

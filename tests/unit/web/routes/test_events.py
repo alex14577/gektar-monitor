@@ -15,6 +15,9 @@ Coverage:
   #12 — Origin matching is case-insensitive
   #13 — Empty frozenset whitelist → all origins rejected
   #14 — test #14 (canonical SSE acceptance): bad origin → 421, no stream body
+  #15 — SSE Content-Type is text/event-stream
+  #16 — SseLotNew with fragment_template='poster' → HTML fragment, not JSON
+  #17 — SseLotNew with unsupported fragment_template → JSON fallback, no crash
 """
 
 from __future__ import annotations
@@ -41,6 +44,8 @@ from fis_monitor.domain.models import (
 from fis_monitor.infra.sse.sse_stream import _KNOWN_SSE_EVENTS, SseStreamer
 from fis_monitor.web.deps import get_csrf_origin_whitelist, get_sse_streamer
 from fis_monitor.web.routes.events import router
+from fis_monitor.web.sse_encoder import make_html_sse_encoder
+from fis_monitor.web.templates import build_templates
 
 # ---------------------------------------------------------------------------
 # Helpers / fakes
@@ -491,3 +496,94 @@ class TestFakeInterfaces:
         ev = SseLotStatus(lot_id=99, new_status="active", event_type="changed")
         bus.publish(ev)
         assert sub._events == [ev]
+
+
+class TestHtmlSseEncoding:
+    """#15-#16: HTML-rendering encoder for lot.new events.
+
+    Layer 4 (Web) — integration via TestClient + FakeEventBus.
+    Invariants per docs/architecture/09-test-strategy.md Layer 4 §SSE:
+      #15: SSE endpoint Content-Type is text/event-stream.
+      #16: SseLotNew with fragment_template='poster' → client receives an
+           HTML fragment (<article …>), NOT a JSON string.
+    """
+
+    def test_content_type_is_text_event_stream(self) -> None:
+        """#15 — GET /events returns Content-Type: text/event-stream."""
+        streamer = _DriftTrackingStreamer([])
+        client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
+        with client.stream("GET", "/events") as resp:
+            assert resp.status_code == 200
+            assert "text/event-stream" in resp.headers["content-type"]
+
+    def test_lot_new_poster_renders_html_not_json(self) -> None:
+        """#16 — SseLotNew(fragment_template='poster') → HTML fragment in SSE data.
+
+        Uses the real Jinja2 environment (build_templates()) and the real
+        make_html_sse_encoder so the assertion covers the actual rendering path.
+        """
+        lot_new = _make_lot_new(lot_id=42)
+        streamer = _make_finite_streamer([lot_new])
+
+        # Inject the HTML-rendering encoder (mirrors lifespan wiring in app.py).
+        templates = build_templates()
+        streamer.bind_event_encoder(make_html_sse_encoder(templates.env))
+
+        client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
+        with client.stream("GET", "/events") as resp:
+            assert resp.status_code == 200
+            chunks = list(resp.iter_bytes(chunk_size=4096))
+
+        payload = b"".join(chunks).decode()
+
+        # Must contain HTML article element (lot poster partial).
+        assert "<article" in payload, (
+            "Expected HTML <article> element in SSE data for lot.new poster event"
+        )
+        # Must NOT contain raw JSON event envelope.
+        assert '"event":"lot.new"' not in payload and '"event": "lot.new"' not in payload, (
+            "SSE data must be HTML, not the raw JSON SseLotNew payload"
+        )
+        # SSE line discipline (RFC 8895): every non-empty line must start with
+        # a recognised field prefix.
+        for line in payload.split("\n"):
+            if line and not line.startswith(("event:", "data:", ":")):
+                raise AssertionError(f"SSE line discipline violated: {line!r}")
+
+    def test_unsupported_fragment_template_does_not_crash(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """#17 — SseLotNew with unsupported fragment_template → JSON fallback, no crash.
+
+        The encoder logs a warning and falls back to JSON encoding.
+        The stream must remain open (status 200) and the payload must not
+        contain rendered HTML with broken Jinja2 Undefined fields.
+        Mirrors the object.__setattr__ injection technique from test #7b.
+        """
+        lot_new = _make_lot_new(lot_id=99)
+        # fragment_template="list" is no longer in the Literal, so we bypass
+        # Pydantic's frozen guard to inject the unsupported value (same pattern
+        # as #7b for ghost discriminators).
+        object.__setattr__(lot_new, "fragment_template", "list")
+
+        streamer = _make_finite_streamer([lot_new])
+        templates = build_templates()
+        streamer.bind_event_encoder(make_html_sse_encoder(templates.env))
+
+        client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
+        with caplog.at_level(logging.WARNING), client.stream("GET", "/events") as resp:
+            assert resp.status_code == 200
+            chunks = list(resp.iter_bytes(chunk_size=4096))
+
+        payload = b"".join(chunks).decode()
+
+        # JSON fallback: the raw event envelope is present (not HTML).
+        assert "<article" not in payload, (
+            "Unsupported fragment_template must NOT produce HTML output"
+        )
+        # Warning must be logged by the encoder.
+        warning_records = [
+            r for r in caplog.records
+            if r.message == "sse_encoder.unknown_fragment_template"
+        ]
+        assert warning_records, "Encoder must log a warning for unsupported fragment_template"

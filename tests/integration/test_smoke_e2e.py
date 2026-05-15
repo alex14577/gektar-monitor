@@ -239,11 +239,15 @@ def _build_smoke_container(
             raise NotImplementedError
 
     class _StubSseStreamer:
-        """Absorbs bind_executor() called by lifespan — smoke injects real SseStreamer
-        via dependency_overrides, so this stub is never used for actual streaming."""
+        """Absorbs bind_executor() / bind_event_encoder() called by lifespan —
+        smoke injects real SseStreamer via dependency_overrides, so this stub
+        is never used for actual streaming."""
 
         def bind_executor(self, executor: object) -> None:
             pass  # lifespan binds executor; smoke overrides get_sse_streamer anyway
+
+        def bind_event_encoder(self, encoder: object) -> None:
+            pass  # lifespan wires HTML encoder; not needed for smoke stub
 
     infra = Infra(  # type: ignore[arg-type]
         clock=unused,

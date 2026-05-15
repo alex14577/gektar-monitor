@@ -20,7 +20,7 @@ import logging
 from typing import Annotated
 from urllib.parse import quote, unquote
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 __all__ = ["ViewFilters", "ViewFiltersService", "deserialize", "serialize"]
 
@@ -54,6 +54,17 @@ class ViewFilters(BaseModel):
     area_max: int | None = Field(default=None, ge=0)
     only_new: bool = False
     only_stars: bool = False
+
+    @model_validator(mode="after")
+    def _area_range_consistent(self) -> ViewFilters:
+        """Ensure area_min <= area_max when both are provided."""
+        if (
+            self.area_min is not None
+            and self.area_max is not None
+            and self.area_min > self.area_max
+        ):
+            raise ValueError("area_min must be <= area_max")
+        return self
 
 
 # ---------------------------------------------------------------------------

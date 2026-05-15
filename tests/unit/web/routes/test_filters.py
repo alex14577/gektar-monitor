@@ -17,6 +17,7 @@ import re
 import urllib.parse
 from urllib.parse import unquote
 
+import pytest
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
@@ -195,6 +196,36 @@ class TestPostViewFiltersInvalid:
         with TestClient(app) as client:
             resp = client.post("/filters/view", data={"subjects": "x" * 129})
         assert resp.status_code == 422, resp.text
+
+    @pytest.mark.parametrize(
+        "area_min, area_max, expected_status",
+        [
+            ("500", "10", 422),   # min > max → error
+            ("10", "500", 204),   # min < max → ok
+            ("100", "100", 204),  # min == max → ok (boundary)
+            (None, "500", 204),   # only area_max → ok
+            ("500", None, 204),   # only area_min → ok
+            (None, None, 204),    # neither → ok
+        ],
+    )
+    def test_area_min_greater_than_area_max_returns_422(
+        self,
+        area_min: str | None,
+        area_max: str | None,
+        expected_status: int,
+    ) -> None:
+        """Cross-field validation: area_min must be <= area_max (gektar_monitor-gho)."""
+        app = _build_app()
+        data: dict[str, str] = {}
+        if area_min is not None:
+            data["area_min"] = area_min
+        if area_max is not None:
+            data["area_max"] = area_max
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data=data)
+        assert resp.status_code == expected_status, resp.text
+        if expected_status == 422:
+            assert resp.json()["detail"] == "area_min must be <= area_max"
 
 
 # ---------------------------------------------------------------------------

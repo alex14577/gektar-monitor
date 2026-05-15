@@ -840,7 +840,7 @@ class SseLotNew(BaseModel):
 
     event: Literal["lot.new"] = "lot.new"
     lot: LotPublicDTO
-    fragment_template: Literal["poster", "list"]
+    fragment_template: Literal["poster"]
 
 
 class SseLotStatus(BaseModel):

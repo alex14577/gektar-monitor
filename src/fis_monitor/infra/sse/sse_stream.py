@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, get_args, get_type_hints
 
@@ -83,10 +83,14 @@ class SseStreamer:
         event_bus: EventBus,
         sse_executor: ThreadPoolExecutor | None = None,
         ping_interval: float = _DEFAULT_PING_INTERVAL,
+        event_encoder: Callable[[SseEvent], bytes] | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._sse_executor = sse_executor
         self._ping_interval = ping_interval
+        self._event_encoder: Callable[[SseEvent], bytes] = (
+            event_encoder if event_encoder is not None else encode_sse_event
+        )
 
     def bind_executor(self, executor: ThreadPoolExecutor) -> None:
         """Bind the executor pool (called in lifespan, ADR-014 late-binding pattern).
@@ -105,6 +109,26 @@ class SseStreamer:
         See: ADR-014 (late-binding executor pattern).
         """
         self._sse_executor = executor
+
+    def bind_event_encoder(self, encoder: Callable[[SseEvent], bytes]) -> None:
+        """Replace the event encoder (called in lifespan after templates are ready).
+
+        The default encoder (``encode_sse_event``) serialises every event to
+        JSON.  The web layer supplies a template-aware encoder via
+        ``web.sse_encoder.make_html_sse_encoder(templates.env)`` that renders
+        Jinja2 HTML fragments for ``SseLotNew`` events and falls back to JSON
+        for all others.
+
+        Late-binding mirrors ``bind_executor``: the Jinja2 ``Environment`` is
+        created before the lifespan but the encoder is only wired once both the
+        container and templates are confirmed live.
+
+        Thread-safety: ``_event_encoder`` is replaced atomically (Python GIL
+        guarantees reference assignment is atomic on CPython).  Encoders called
+        concurrently in flight will finish with the old encoder; the new encoder
+        applies to all subsequent calls.
+        """
+        self._event_encoder = encoder
 
     async def stream(self) -> AsyncIterator[bytes]:
         """Async generator producing SSE-encoded bytes.
@@ -146,7 +170,7 @@ class SseStreamer:
                     yield _encode_ping()
                 else:
                     for event in events:
-                        encoded = encode_sse_event(event)
+                        encoded = self._event_encoder(event)
                         if not encoded:
                             continue  # dropped by schema-drift guard
                         yield encoded

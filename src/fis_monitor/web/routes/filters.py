@@ -29,6 +29,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 
 from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID, subjects_for_macros
 from fis_monitor.services.view_filters import (
@@ -158,8 +159,8 @@ def post_view_filters(
     Pydantic extra='forbid'. This is acceptable because only parsed values are
     written to the cookie; unknown fields are never propagated.
 
-    Cross-field validation (area_min <= area_max) is intentionally deferred to
-    gektar_monitor-gho — matches pre-existing behaviour of the JSON variant.
+    Cross-field validation (area_min <= area_max) is enforced by the
+    ViewFilters model_validator; invalid input yields 422 (gektar_monitor-gho).
 
     Returns 204 No Content + Set-Cookie header.
     """
@@ -171,16 +172,24 @@ def post_view_filters(
                 status_code=422, detail="subjects: each item must be <= 128 characters"
             )
 
-    filters = ViewFilters(
-        subjects=subjects,
-        area_min=_parse_int_or_none(area_min),
-        area_max=_parse_int_or_none(area_max),
-        # Checkbox unchecked → key absent → None → False.
-        # Checked → key present with any value (typically "on") → True.
-        # only_new="" (empty value, key present) also → True — non-browser edge case, intentional.
-        only_new=only_new is not None,
-        only_stars=only_stars is not None,
-    )
+    try:
+        filters = ViewFilters(
+            subjects=subjects,
+            area_min=_parse_int_or_none(area_min),
+            area_max=_parse_int_or_none(area_max),
+            # Checkbox unchecked → key absent → None → False.
+            # Checked → key present with any value (typically "on") → True.
+            # only_new="" (empty value, key present) also → True — non-browser edge case,
+            # intentional.
+            only_new=only_new is not None,
+            only_stars=only_stars is not None,
+        )
+    except ValidationError as exc:
+        # Extract the first human-readable message from the Pydantic error.
+        first_msg = exc.errors()[0]["msg"]
+        # Pydantic prefixes user-defined ValueError messages with "Value error, ".
+        detail = first_msg.removeprefix("Value error, ")
+        raise HTTPException(status_code=422, detail=detail) from exc
     cookie_value = svc.serialize(filters)
     response = Response(status_code=204)
     _set_filter_cookie(response, cookie_value)

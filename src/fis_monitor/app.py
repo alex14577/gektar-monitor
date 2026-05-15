@@ -104,6 +104,7 @@ from fis_monitor.web.routes import (
 )
 from fis_monitor.web.routes import main as main_routes
 from fis_monitor.web.routes import settings as settings_routes
+from fis_monitor.web.sse_encoder import make_html_sse_encoder
 from fis_monitor.web.templates import STATIC_DIR, build_templates
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,12 @@ async def _lifespan_impl(
         sse_executor = ThreadPoolExecutor(max_workers=64, thread_name_prefix="sse-wait")
         app.state.sse_executor = sse_executor
         container.infra.sse_streamer.bind_executor(sse_executor)  # ydj late-binding ADR-014
+        # Bind HTML-rendering encoder: SseLotNew → Jinja2 partial (not JSON).
+        # app.state.templates is set outside lifespan (create_app), so it is
+        # available here.  encoder is thread-safe to swap (GIL atomic assign).
+        container.infra.sse_streamer.bind_event_encoder(
+            make_html_sse_encoder(app.state.templates.env)
+        )
 
         # enrichment_pool: for future bind_executor on EnrichmentService (follow-up).
         # EnrichmentService.bind_executor does not exist yet; stored on app.state for
