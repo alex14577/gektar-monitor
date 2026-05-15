@@ -87,6 +87,7 @@ def row_to_lot(row: sqlite3.Row | tuple) -> Lot:
         inactive_reason,
         inactive_since_raw,
         inactive_confirmed_at_raw,
+        region_id,
     ) = row
 
     has_boundaries: bool | None = None
@@ -123,6 +124,7 @@ def row_to_lot(row: sqlite3.Row | tuple) -> Lot:
         inactive_reason=inactive_reason,
         inactive_since=_parse_dt(inactive_since_raw),
         inactive_confirmed_at=_parse_dt(inactive_confirmed_at_raw),
+        region_id=region_id,
     )
 
 
@@ -132,7 +134,8 @@ _LOT_SELECT = (
     "has_boundaries, raw_json, parser_version, first_seen, last_seen, "
     "detail_fetched_at, enrichment_status, enrichment_retries, "
     "enrichment_last_error, last_seen_at, last_status, last_status_at, "
-    "is_active, inactive_reason, inactive_since, inactive_confirmed_at"
+    "is_active, inactive_reason, inactive_since, inactive_confirmed_at, "
+    "region_id"
 )
 
 
@@ -297,10 +300,11 @@ class SqliteLotRepository:
                     "  raw_json, parser_version, first_seen, last_seen,"
                     "  detail_fetched_at, enrichment_status, enrichment_retries,"
                     "  last_seen_at, last_status, last_status_at,"
-                    "  is_active, inactive_reason, inactive_since, inactive_confirmed_at"
+                    "  is_active, inactive_reason, inactive_since, inactive_confirmed_at,"
+                    "  region_id"
                     ") VALUES ("
                     "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                    "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                    "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
                     ")",
                     (
                         lot.id,
@@ -331,6 +335,7 @@ class SqliteLotRepository:
                         lot.inactive_reason,
                         _iso(lot.inactive_since),
                         _iso(lot.inactive_confirmed_at),
+                        lot.region_id,
                     ),
                 )
                 was_new = True
@@ -346,7 +351,7 @@ class SqliteLotRepository:
                     "  detail_fetched_at = ?, enrichment_status = ?,"
                     "  last_seen_at = ?, is_active = ?,"
                     "  inactive_reason = ?, inactive_since = ?,"
-                    "  inactive_confirmed_at = ?"
+                    "  inactive_confirmed_at = ?, region_id = ?"
                     " WHERE id = ?",
                     (
                         lot.cadastral_no,
@@ -373,6 +378,7 @@ class SqliteLotRepository:
                         lot.inactive_reason,
                         _iso(lot.inactive_since),
                         _iso(lot.inactive_confirmed_at),
+                        lot.region_id,
                         lot.id,
                     ),
                 )

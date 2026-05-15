@@ -266,7 +266,7 @@ class LotUserViewModel(LotViewModel):
         self,
         dto: LotUserDTO,
         *,
-        subscribed_regions: frozenset[str] = frozenset(),
+        subscribed_regions: frozenset[int] = frozenset(),
     ) -> None:
         super().__init__(dto)
         self._subscribed_regions = subscribed_regions
@@ -287,7 +287,8 @@ class LotUserViewModel(LotViewModel):
     def in_subscribed_subjects(self) -> bool:
         if not self._subscribed_regions:
             return False
-        return self._user_dto.region in self._subscribed_regions
+        rid = self._user_dto.region_id
+        return rid is not None and rid in self._subscribed_regions
 
     @property
     def note(self) -> str | None:

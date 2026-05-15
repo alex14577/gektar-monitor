@@ -205,8 +205,8 @@ class TestRegionDiffOnReload:
         assert repo.delete_calls == []
 
     def test_cold_start_all_regions_get_set_if_absent(self, tmp_path: Path) -> None:
-        """No file at boot → defaults (regions=[1,2]). File appears with [1,2,3] →
-        only region 3 is net-new; 1 and 2 match defaults so no diff for them."""
+        """No file at boot → defaults (regions=[1,2]). Bootstrap seeds 1 and 2.
+        File appears with [1,2,3] → _do_reload adds only 3 (set_if_absent for 1,2 is no-op)."""
         clock = _FakeClock()
         repo = _FakeRegionSubRepo()
         # File does NOT exist at boot — _current = Settings() → regions=[1,2].
@@ -214,14 +214,20 @@ class TestRegionDiffOnReload:
 
         src = _make_source(cfg, clock=clock, repo=repo)
         assert src.current().regions == [1, 2]  # bootstrap defaults
+        # Bootstrap seeds 1 and 2.
+        assert {1, 2} <= repo._store.keys()
+        bootstrap_calls = list(repo.set_if_absent_calls)
 
         # Config file appears with regions=[1,2,3].
         _write_regions(cfg, [1, 2, 3])
         src._do_reload()
 
-        called_ids = {region_id for region_id, _ in repo.set_if_absent_calls}
-        # Only region 3 is net-new vs bootstrap defaults [1,2].
-        assert called_ids == {3}
+        all_called_ids = {region_id for region_id, _ in repo.set_if_absent_calls}
+        reload_calls = repo.set_if_absent_calls[len(bootstrap_calls):]
+        reload_called_ids = {region_id for region_id, _ in reload_calls}
+        # _do_reload diff: [1,2] → [1,2,3] — only 3 is net-new.
+        assert reload_called_ids == {3}
+        assert all_called_ids == {1, 2, 3}
 
 
 class TestRegionDiffOnSave:
@@ -278,6 +284,8 @@ class TestAuditLog:
         # No file at boot → defaults regions=[1,2].
         cfg = tmp_path / "config.json"
         src = _make_source(cfg, clock=clock, repo=repo)
+        # Clear bootstrap events emitted during __init__ (ADR-039 _bootstrap_subscriptions).
+        caplog.clear()
 
         # Write config with a region not in defaults to trigger a net-new diff.
         _write_regions(cfg, [1, 2, 5])
@@ -285,7 +293,9 @@ class TestAuditLog:
             src._do_reload()
 
         audit_msgs = [r.message for r in caplog.records if "migration_applied" in r.message]
-        assert len(audit_msgs) == 1
+        assert len(audit_msgs) == 1, (
+            f"Expected 1 audit event for net-new region 5, got {len(audit_msgs)}: {audit_msgs}"
+        )
         assert "migration_applied" in audit_msgs[0]
 
     def test_no_audit_log_on_no_diff(
@@ -314,6 +324,55 @@ class TestAuditLog:
 
         audit_msgs = [r.message for r in caplog.records if "migration_applied" in r.message]
         assert audit_msgs == []
+
+
+class TestBootstrapSubscriptions:
+    """_bootstrap_subscriptions called in __init__ seeds region_subscriptions (ADR-039)."""
+
+    def test_fresh_start_seeds_all_startup_regions(self, tmp_path: Path) -> None:
+        """Fresh start: empty region_subscriptions + config regions=[1,2] → both seeded."""
+        clock = _FakeClock()
+        repo = _FakeRegionSubRepo()
+        cfg = tmp_path / "config.json"
+        _write_regions(cfg, [1, 2])
+
+        _make_source(cfg, clock=clock, repo=repo)
+
+        assert repo._store == {1: clock.now(), 2: clock.now()}
+
+    def test_restart_with_existing_records_is_noop(self, tmp_path: Path) -> None:
+        """Restart: region_subscriptions already has 1 and 2 → no overwrite, no audit log."""
+        clock = _FakeClock()
+        repo = _FakeRegionSubRepo()
+        existing_time = datetime(2025, 1, 1, tzinfo=UTC)
+        repo._store[1] = existing_time
+        repo._store[2] = existing_time
+
+        cfg = tmp_path / "config.json"
+        _write_regions(cfg, [1, 2])
+
+        _make_source(cfg, clock=clock, repo=repo)
+
+        assert repo.set_if_absent_calls == []
+        assert repo._store[1] == existing_time
+        assert repo._store[2] == existing_time
+
+    def test_partial_state_seeds_missing_region_only(self, tmp_path: Path) -> None:
+        """Partial state: region_subscriptions has 1 only, config=[1,2] → only 2 seeded."""
+        clock = _FakeClock()
+        repo = _FakeRegionSubRepo()
+        existing_time = datetime(2025, 1, 1, tzinfo=UTC)
+        repo._store[1] = existing_time
+
+        cfg = tmp_path / "config.json"
+        _write_regions(cfg, [1, 2])
+
+        _make_source(cfg, clock=clock, repo=repo)
+
+        assert repo._store[1] == existing_time  # untouched
+        assert repo._store[2] == clock.now()    # newly seeded
+        seeded_ids = [rid for rid, _ in repo.set_if_absent_calls]
+        assert seeded_ids == [2]
 
 
 class TestNullRepoIsNoOp:

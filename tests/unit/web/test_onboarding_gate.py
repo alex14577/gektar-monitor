@@ -271,3 +271,26 @@ def test_state_not_queried_for_whitelisted() -> None:
     client = TestClient(_build_app(fake), follow_redirects=False)
     client.get("/static/style.css")
     assert fake.current_call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for /settings/smtp/suggest whitelist (gektar_monitor-w7m2)
+# ---------------------------------------------------------------------------
+
+
+def test_smtp_suggest_whitelisted_during_onboarding() -> None:
+    """GET /settings/smtp/suggest returns 200 (not 302) when onboarding is incomplete."""
+    fake = FakeOnboardingService(OnboardingState.NOT_STARTED)
+    client = TestClient(_build_app(fake), follow_redirects=False)
+    resp = client.get("/settings/smtp/suggest?email=test@yandex.ru")
+    assert resp.status_code == 200
+    assert fake.current_call_count == 0
+
+
+def test_other_settings_still_gated_during_onboarding() -> None:
+    """GET /settings/other must still redirect (302) while onboarding is incomplete."""
+    fake = FakeOnboardingService(OnboardingState.NOT_STARTED)
+    client = TestClient(_build_app(fake), follow_redirects=False)
+    resp = client.get("/settings/other")
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/onboarding/regions"

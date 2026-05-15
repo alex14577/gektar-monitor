@@ -52,13 +52,10 @@ from fis_monitor.domain.models import (
 from fis_monitor.domain.models import (
     lot_to_public_dto as _lot_to_public_dto,
 )
-from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
 from fis_monitor.services.dnd import DndService
 
 logger = logging.getLogger(__name__)
-
-_REGION_NAME_TO_ID: dict[str, int] = {name: id_ for id_, name in SUBJECT_TITLE_BY_ID.items()}
 
 # ---------------------------------------------------------------------------
 # Hard cap on total delivery attempts (R4-M6)
@@ -168,22 +165,20 @@ class NotifierDispatcher:
         On queue overflow the lot is silently dropped and a warning is
         logged — monitor-cycle throughput takes priority over notifications.
         """
-        if self._region_sub_repo is not None:
-            region_id = _REGION_NAME_TO_ID.get(lot.region)
-            if region_id is not None:
-                subscribed_at = self._region_sub_repo.get_subscribed_at(region_id)
-                if subscribed_at is not None and lot.date_create < subscribed_at:
-                    logger.debug(
-                        "notification.subscribed_at_dropped",
-                        extra={
-                            "region_id": region_id,
-                            "lot_id": lot.id,
-                            "lot_date_create": lot.date_create.isoformat(),
-                            "subscribed_at": subscribed_at.isoformat(),
-                            "decision": "dropped_subscribed_at",
-                        },
-                    )
-                    return
+        if self._region_sub_repo is not None and lot.region_id is not None:
+            subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
+            if subscribed_at is not None and lot.date_create < subscribed_at:
+                logger.debug(
+                    "notification.subscribed_at_dropped",
+                    extra={
+                        "region_id": lot.region_id,
+                        "lot_id": lot.id,
+                        "lot_date_create": lot.date_create.isoformat(),
+                        "subscribed_at": subscribed_at.isoformat(),
+                        "decision": "dropped_subscribed_at",
+                    },
+                )
+                return
         try:
             self._queue.put_nowait(lot)
         except queue.Full:

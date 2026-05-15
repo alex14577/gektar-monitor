@@ -429,7 +429,7 @@ class BackfillService:
             rows_processed += 1
             now = datetime.now(UTC)
             try:
-                lot = _parsed_row_to_lot(row, now)
+                lot = _parsed_row_to_lot(row, now, region_id=region)
             except Exception:
                 logger.warning(
                     "backfill: failed to convert row id=%s region=%s — skipping",
