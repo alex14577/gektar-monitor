@@ -32,7 +32,9 @@ from fis_monitor.domain.models import (
     SmtpCredentials,
 )
 from fis_monitor.web.deps import (
+    get_backfill,
     get_config_source,
+    get_lot_repo,
     get_onboarding,
     get_settings_service,
     get_smtp_test,
@@ -40,7 +42,11 @@ from fis_monitor.web.deps import (
 )
 from fis_monitor.web.rate_limit import RateLimiter
 from fis_monitor.web.routes import onboarding as onboarding_module
-from fis_monitor.web.routes.onboarding import _validate_smtp_input, router
+from fis_monitor.web.routes.onboarding import (
+    _should_trigger_backfill,
+    _validate_smtp_input,
+    router,
+)
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 from tests.factories import make_settings
 
@@ -164,6 +170,41 @@ class FakeSmtpTestService:
         return self._result
 
 
+class FakeLotRepo:
+    """Fake LotRepository — records count_active() calls."""
+
+    def __init__(self, *, active_count: int = 0) -> None:
+        self._active_count = active_count
+        self.count_active_calls: int = 0
+
+    def count_active(self) -> int:
+        self.count_active_calls += 1
+        return self._active_count
+
+
+class FakeBackfillService:
+    """Fake BackfillService — records start() calls."""
+
+    def __init__(self) -> None:
+        self.start_calls: int = 0
+
+    def start(self, stop_event: object) -> bool:
+        self.start_calls += 1
+        return True
+
+
+class FakeSupervisor:
+    """Fake ThreadSupervisor — records start() calls."""
+
+    def __init__(self) -> None:
+        self.started: list[str] = []
+        self.start_call_count: int = 0
+
+    def start(self, name: str, target: object) -> None:
+        self.started.append(name)
+        self.start_call_count += 1
+
+
 # ---------------------------------------------------------------------------
 # Anti-mock: exercise ALL fake methods
 # ---------------------------------------------------------------------------
@@ -204,6 +245,22 @@ def test_all_fake_methods_exercised() -> None:
     result = smtp_test.test_send(object(), "r@example.com")
     assert result.ok is True
 
+    # FakeLotRepo
+    lot_repo = FakeLotRepo(active_count=0)
+    assert lot_repo.count_active() == 0
+    assert lot_repo.count_active_calls == 1
+
+    # FakeBackfillService
+    backfill = FakeBackfillService()
+    assert backfill.start(object()) is True
+    assert backfill.start_calls == 1
+
+    # FakeSupervisor
+    sup = FakeSupervisor()
+    sup.start("backfill-auto", lambda _: None)
+    assert sup.started == ["backfill-auto"]
+    assert sup.start_call_count == 1
+
 
 # ---------------------------------------------------------------------------
 # App builder
@@ -223,6 +280,9 @@ def _make_app(
     fake_cfg: FakeConfigSource | None = None,
     fake_settings_svc: FakeSettingsService | None = None,
     fake_smtp_test: FakeSmtpTestService | None = None,
+    fake_lot_repo: FakeLotRepo | None = None,
+    fake_backfill: FakeBackfillService | None = None,
+    supervisor: FakeSupervisor | None = None,
     rate_limiter: RateLimiter | None = None,
 ) -> tuple[
     FastAPI, FakeOnboardingService, FakeConfigSource, FakeSettingsService, FakeSmtpTestService
@@ -237,6 +297,8 @@ def _make_app(
     f_smtp_test = fake_smtp_test or FakeSmtpTestService(
         result=smtp_test_result, raises=smtp_test_raises
     )
+    f_lot_repo = fake_lot_repo or FakeLotRepo(active_count=0)
+    f_backfill = fake_backfill or FakeBackfillService()
 
     # Always install a fresh limiter so each test gets an isolated quota.
     # Tests that want to control the exact limiter instance pass one explicitly.
@@ -254,6 +316,10 @@ def _make_app(
     app.dependency_overrides[get_settings_service] = lambda: f_settings_svc
     app.dependency_overrides[get_smtp_test] = lambda: f_smtp_test
     app.dependency_overrides[get_templates] = lambda: templates
+    app.dependency_overrides[get_lot_repo] = lambda: f_lot_repo
+    app.dependency_overrides[get_backfill] = lambda: f_backfill
+    if supervisor is not None:
+        app.state.supervisor = supervisor
     return app, f_onboarding, f_cfg, f_settings_svc, f_smtp_test
 
 
@@ -1055,3 +1121,122 @@ def test_smtp_test_rate_limiter_unknown_ip_does_not_crash() -> None:
     # Second call — same IP bucket is full → 429, not 500
     resp2 = client.post("/onboarding/smtp-test", data=_SMTP_TEST_FORM)
     assert resp2.status_code == 429
+
+
+# ---------------------------------------------------------------------------
+# _should_trigger_backfill — pure-function unit tests (ADR-032)
+# ---------------------------------------------------------------------------
+
+
+def test_should_trigger_backfill_all_conditions_met() -> None:
+    """All guard conditions met → returns True."""
+    lot_repo = FakeLotRepo(active_count=0)
+    settings = make_settings(regions=[1])
+    assert _should_trigger_backfill(lot_repo, settings) is True
+
+
+def test_should_trigger_backfill_count_active_nonzero() -> None:
+    """count_active() != 0 → returns False (catalogue already populated)."""
+    lot_repo = FakeLotRepo(active_count=5)
+    settings = make_settings(regions=[1])
+    assert _should_trigger_backfill(lot_repo, settings) is False
+
+
+def test_should_trigger_backfill_empty_regions() -> None:
+    """Empty regions list → returns False (nothing to backfill)."""
+    lot_repo = FakeLotRepo(active_count=0)
+    settings = make_settings(regions=[])
+    assert _should_trigger_backfill(lot_repo, settings) is False
+
+
+def test_should_trigger_backfill_empty_catalogue_and_regions() -> None:
+    """count_active() == 0 but regions also empty → returns False."""
+    lot_repo = FakeLotRepo(active_count=0)
+    settings = make_settings(regions=[])
+    assert _should_trigger_backfill(lot_repo, settings) is False
+
+
+def test_should_trigger_backfill_count_active_called() -> None:
+    """count_active() is always called (not short-circuited before repo call)."""
+    lot_repo = FakeLotRepo(active_count=0)
+    settings = make_settings(regions=[1, 2])
+    _should_trigger_backfill(lot_repo, settings)
+    assert lot_repo.count_active_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Step 4 auto-backfill trigger — integration via POST /onboarding/save?step=4
+# ---------------------------------------------------------------------------
+
+
+def test_step4_next_triggers_backfill_when_all_guards_pass() -> None:
+    """Happy path: all 3 guard conditions → supervisor.start called once for backfill-auto."""
+    sup = FakeSupervisor()
+    f_lot_repo = FakeLotRepo(active_count=0)
+    f_backfill = FakeBackfillService()
+    app, _, _, _, _ = _make_app(
+        onboarding_state=OnboardingState.RECIPIENTS_SET,
+        settings=make_settings(regions=[1]),
+        fake_lot_repo=f_lot_repo,
+        fake_backfill=f_backfill,
+        supervisor=sup,
+    )
+    client = _client(app)
+
+    resp = client.post("/onboarding/save?step=4", data={"action": "next"})
+
+    assert resp.status_code == 200
+    assert resp.headers.get("HX-Redirect") == "/"
+    assert sup.start_call_count == 1
+    assert "backfill-auto" in sup.started
+
+
+def test_step4_next_no_trigger_when_catalogue_not_empty() -> None:
+    """count_active() != 0 → supervisor.start NOT called."""
+    sup = FakeSupervisor()
+    app, _, _, _, _ = _make_app(
+        onboarding_state=OnboardingState.RECIPIENTS_SET,
+        settings=make_settings(regions=[1]),
+        fake_lot_repo=FakeLotRepo(active_count=3),
+        supervisor=sup,
+    )
+    client = _client(app)
+
+    resp = client.post("/onboarding/save?step=4", data={"action": "next"})
+
+    assert resp.status_code == 200
+    assert sup.start_call_count == 0
+
+
+def test_step4_next_no_trigger_when_regions_empty() -> None:
+    """Empty regions → supervisor.start NOT called."""
+    sup = FakeSupervisor()
+    app, _, _, _, _ = _make_app(
+        onboarding_state=OnboardingState.RECIPIENTS_SET,
+        settings=make_settings(regions=[]),
+        fake_lot_repo=FakeLotRepo(active_count=0),
+        supervisor=sup,
+    )
+    client = _client(app)
+
+    resp = client.post("/onboarding/save?step=4", data={"action": "next"})
+
+    assert resp.status_code == 200
+    assert sup.start_call_count == 0
+
+
+def test_step4_next_no_trigger_when_supervisor_absent() -> None:
+    """supervisor=None on app.state → graceful skip, no crash, still redirects."""
+    f_lot_repo = FakeLotRepo(active_count=0)
+    # No supervisor= kwarg → app.state.supervisor not set
+    app, _, _, _, _ = _make_app(
+        onboarding_state=OnboardingState.RECIPIENTS_SET,
+        settings=make_settings(regions=[1]),
+        fake_lot_repo=f_lot_repo,
+    )
+    client = _client(app)
+
+    resp = client.post("/onboarding/save?step=4", data={"action": "next"})
+
+    assert resp.status_code == 200
+    assert resp.headers.get("HX-Redirect") == "/"

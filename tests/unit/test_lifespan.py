@@ -644,3 +644,49 @@ def test_backfill_cancel_called_on_shutdown():
         f"Expected backfill.cancel() to be called once during shutdown, "
         f"got {backfill.cancel_calls}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 9 (ADR-032): lifespan does NOT start backfill-auto (trigger moved to
+# onboarding step-4 handler)
+# ---------------------------------------------------------------------------
+
+
+def test_lifespan_does_not_start_backfill_auto():
+    """ADR-032: lifespan must NOT start a 'backfill-auto' thread even on empty catalogue.
+
+    The auto-trigger was moved to _handle_step4_next (onboarding completion).
+    If this test fails, the old lifespan block was re-introduced.
+    """
+    container, _login, _dispatcher, _full_scan, _conn_provider, _backfill = _make_fake_container()
+    locker = FakeLocker()
+
+    # Add a lot_repo that reports empty catalogue — the old lifespan code would
+    # have used this to trigger backfill-auto.
+    class EmptyLotRepo:
+        def count_active(self) -> int:
+            return 0
+
+    container.infra.lot_repo = EmptyLotRepo()  # type: ignore[attr-defined]
+
+    thread_names_at_yield: list[str] = []
+
+    async def capture_threads(app: Any) -> None:
+        sup = app.state.supervisor
+        thread_names_at_yield.extend(t.name for t in sup.threads)
+
+    def container_factory(settings, data_dir):
+        return container
+
+    app = create_app(
+        data_dir=Path("/tmp/fake"),
+        container_factory=container_factory,
+        locker_factory=_make_locker_factory(locker),
+    )
+
+    asyncio.run(_run_lifespan(app, action=capture_threads))
+
+    assert "backfill-auto" not in thread_names_at_yield, (
+        f"lifespan started 'backfill-auto' thread — ADR-032 violation. "
+        f"Threads: {thread_names_at_yield}"
+    )

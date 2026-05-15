@@ -235,21 +235,6 @@ async def _lifespan_impl(
         app.state.supervisor = supervisor
         logger.info("lifespan: supervisor started (full-scan, monitor-cycle, notifier)")
 
-        # Auto-trigger backfill on empty catalogue (gektar_monitor-4pn).
-        # First post-onboarding run: lots table is empty → fetch all pages of
-        # the listing for every configured region so the user sees the full
-        # catalogue immediately. notify=False is set inside BackfillService so
-        # this does not spam the user with hundreds of "new lot" notifications.
-        # Guarded with getattr so minimal FakeInfra used in lifespan tests
-        # (no lot_repo / no backfill service) does not crash.
-        _lot_repo = getattr(container.infra, "lot_repo", None)
-        _backfill = getattr(container.services, "backfill", None)
-        if _lot_repo is not None and _backfill is not None and _lot_repo.count_active() == 0:
-            def _auto_backfill(_stop: threading.Event) -> None:
-                _backfill.start(_stop)
-            supervisor.start("backfill-auto", _auto_backfill)
-            logger.info("lifespan: lots table empty — auto-backfill scheduled")
-
         yield
 
     finally:
