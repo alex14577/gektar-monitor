@@ -46,6 +46,7 @@ class TestInfraFrozen:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            smtp_provider_catalog=Mock(),
             sse_streamer=Mock(),
         )
 
@@ -111,6 +112,7 @@ class TestContainerNotFrozen:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            smtp_provider_catalog=Mock(),
             sse_streamer=Mock(),
         )
 
@@ -184,6 +186,7 @@ class TestReprNoPII:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            smtp_provider_catalog=Mock(),
             sse_streamer=Mock(),
         )
 
@@ -247,6 +250,7 @@ class TestReprNoPII:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            smtp_provider_catalog=Mock(),
             sse_streamer=Mock(),
         )
 
@@ -304,6 +308,7 @@ class TestContainerConstruction:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            smtp_provider_catalog=Mock(),
             sse_streamer=Mock(),
         )
 

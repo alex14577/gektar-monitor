@@ -49,6 +49,7 @@
 - [[decisions/ADR-035-three-scope-filter-model|ADR-035]] — Three-scope filter model: Fetch (macro-region URL) / Notify (`filters.rf_subjects`) / View (cookie `view_filters`); удаление мёртвого поля `Settings.subject_site_ids`; migration shim `subject_site_ids → rf_subjects`; supersedes ADR-031 §Q3 + Addendum
 - [[decisions/ADR-036-head-poll-cycle-policy|ADR-036]] — Head-poll cycle policy: `MonitorCycleService` делает head-poll page=1/per_page=20 каждый `interval_minutes`; `FullScanService` — полная пагинация per_page=50 для active-set; `BackfillService` — полная пагинация при первом логине. `PaginatedListFetcher.iterate` получает kwargs `per_page` и `max_pages` (bd `gektar_monitor-3pw`)
 - [[decisions/ADR-037-tls-russian-trusted-ca-bundle|ADR-037]] — TLS hardening: `verify=False` → `verify=russian_trusted_ca_bundle()` (bundled PEM с Russian Trusted Root CA + Sub CA); fail-closed RuntimeError при отсутствии bundle; убран `urllib3.disable_warnings`; supersedes ADR-024 §TLS-note
+- [[decisions/ADR-038-smtp-provider-catalog|ADR-038]] — SMTP provider catalog: `SmtpProviderCatalog` Protocol (domain) + `StaticSmtpProviderCatalog` (infra hardcoded dict) + `GET /settings/smtp/suggest?email=` endpoint; UI prefill host/port/use_starttls по домену email + app-password hint для Gmail/Outlook/Yandex; БД-схема `SmtpCredentials` не меняется; suggestion НЕ обходит `DefaultSmtpHostPolicy` (bd `gektar_monitor-0bf`)
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

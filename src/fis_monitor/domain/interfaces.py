@@ -53,6 +53,7 @@ from fis_monitor.domain.models import (
     OnboardingState,
     ParsedDetail,
     ParsedListRow,
+    ProviderSuggestion,
     ResolvedSmtpEndpoint,
     Settings,
     SmtpCredentials,
@@ -94,6 +95,7 @@ __all__ = [
     "SettingsRepository",
     "SmtpCredentialsRepository",
     "SmtpHostPolicy",
+    "SmtpProviderCatalog",
     "StateRepository",
     "UserStateRepository",
 ]
@@ -614,6 +616,35 @@ class SmtpHostPolicy(Protocol):
         Returns a ``ResolvedSmtpEndpoint`` pinned to the first valid address —
         callers MUST use ``endpoint.ip`` for the actual ``socket.connect()``
         to eliminate TOCTOU between resolve and connect (R3-C4).
+        """
+        ...
+
+
+class SmtpProviderCatalog(Protocol):
+    """Static catalog of known SMTP provider endpoints (ADR-038).
+
+    Infra-layer seam: maps email domains to pre-filled ``ProviderSuggestion``
+    DTOs without any network I/O. Implementation: pure in-memory dict lookup
+    in ``infra/smtp/provider_catalog.py::StaticSmtpProviderCatalog``.
+
+    Contract:
+    - ``lookup`` MUST return ``None`` on unrecognised domains and on malformed
+      emails (no ``@``, empty string) — never raises.
+    - Domain matching MUST be case-insensitive (``USER@Yandex.RU`` → same
+      result as ``user@yandex.ru``).
+    - All catalog entries MUST pass ``DefaultSmtpHostPolicy._reject_pre_resolve``
+      (security invariant — catalog is UX-only, not a policy bypass).
+    """
+
+    def lookup(self, email: str) -> ProviderSuggestion | None:
+        """Return a ``ProviderSuggestion`` for *email*'s domain, or ``None``.
+
+        Args:
+            email: Full email address (e.g. ``"user@yandex.ru"``). Malformed
+                inputs (no ``@``, empty) return ``None`` without raising.
+
+        Returns:
+            ``ProviderSuggestion`` if the domain is in the catalog, else ``None``.
         """
         ...
 

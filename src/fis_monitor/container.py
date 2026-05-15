@@ -41,6 +41,7 @@ from fis_monitor.domain.interfaces import (
     SettingsRepository,
     SmtpCredentialsRepository,
     SmtpHostPolicy,
+    SmtpProviderCatalog,
     StateRepository,
     UserStateRepository,
 )
@@ -165,6 +166,10 @@ class Infra:
 
     smtp_host_policy: SmtpHostPolicy
     """SMTP endpoint validation: resolve hostname, check A/AAAA/MX, manual STARTTLS (ADR-021)."""
+
+    smtp_provider_catalog: SmtpProviderCatalog
+    """Static catalog: email domain → pre-filled SMTP suggestion DTO (ADR-038).
+    Pure in-memory lookup, no network I/O. Implementation: StaticSmtpProviderCatalog."""
 
     sse_streamer: SseStreamer
     """Sync EventBus → async text/event-stream bridge for SSE fan-out.

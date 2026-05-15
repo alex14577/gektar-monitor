@@ -48,6 +48,7 @@ from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
 from fis_monitor.infra.playwright.login import PlaywrightLoginSession
 from fis_monitor.infra.smtp.email_notifier import SmtpEmailNotifier
 from fis_monitor.infra.smtp.host_policy import DefaultSmtpHostPolicy
+from fis_monitor.infra.smtp.provider_catalog import StaticSmtpProviderCatalog
 from fis_monitor.infra.sqlite.connection import ConnectionProvider
 from fis_monitor.infra.sqlite.init_db import init_db
 from fis_monitor.infra.sqlite.migrations import default_migration_runner
@@ -260,6 +261,8 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     autostart = _NotImplementedAutostartManager()
     # R4-M12: SmtpHostPolicy — pure logic, no deps, instantiated in Layer 2.
     smtp_host_policy = DefaultSmtpHostPolicy()
+    # ADR-038: SMTP provider catalog — pure in-memory dict, no I/O, Layer 2.
+    smtp_provider_catalog = StaticSmtpProviderCatalog()
 
     # SseStreamer: constructed without executor (late-binding, ADR-014).
     # Executor is bound in lifespan via container.infra.sse_streamer.bind_executor().
@@ -286,6 +289,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         session_probe=session_probe,
         autostart=autostart,
         smtp_host_policy=smtp_host_policy,
+        smtp_provider_catalog=smtp_provider_catalog,
         sse_streamer=sse_streamer,
     )
 

@@ -253,6 +253,10 @@ def _build_smoke_container(
         def resolve_and_check(self, host: str, port: int) -> object:
             raise NotImplementedError
 
+    class _StubSmtpProviderCatalog:
+        def lookup(self, email: str) -> object:
+            return None
+
     class _StubSseStreamer:
         """Absorbs bind_executor() / bind_event_encoder() called by lifespan —
         smoke injects real SseStreamer via dependency_overrides, so this stub
@@ -285,6 +289,7 @@ def _build_smoke_container(
         session_probe=unused,
         autostart=unused,
         smtp_host_policy=_StubSmtpHostPolicy(),
+        smtp_provider_catalog=_StubSmtpProviderCatalog(),
         sse_streamer=_StubSseStreamer(),
     )
 

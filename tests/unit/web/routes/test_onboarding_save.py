@@ -31,6 +31,7 @@ from fis_monitor.domain.models import (
     Settings,
     SmtpCredentials,
 )
+from fis_monitor.infra.smtp.host_policy import _reject_pre_resolve
 from fis_monitor.web.deps import (
     get_backfill,
     get_config_source,
@@ -556,6 +557,51 @@ def test_step2_next_advance_state_mismatch_redirects() -> None:
 
     assert resp.status_code == 200
     assert resp.headers.get("HX-Redirect") == "/onboarding/recipients"
+
+
+def test_save_with_auto_suggested_host_passes_host_policy() -> None:
+    """Regression: catalog-host smtp.gmail.com must not be blocked by TLD policy.
+
+    Scenario: user submits wizard step 2 with Gmail auto-suggested credentials.
+    The route must:
+    - Accept the submission (HX-Redirect to /onboarding/recipients).
+    - Persist credentials with host=smtp.gmail.com, port=587.
+    - NOT raise SmtpHostPolicyError — i.e. 'gmail.com' TLD is not in _BLOCKED_TLDS.
+
+    The second assertion calls _reject_pre_resolve directly: if smtp.gmail.com ever
+    lands in the TLD blocklist, this call raises SmtpHostPolicyError and the test
+    fails immediately, pointing to the exact regression site (ADR-038 §tests Layer 4).
+    """
+    # --- Layer 4: full route smoke ---
+    app, f_svc, _, f_settings_svc, _ = _make_app(
+        onboarding_state=OnboardingState.REGIONS_SET
+    )
+    client = _client(app)
+
+    resp = client.post(
+        "/onboarding/save?step=2",
+        data={
+            "action": "next",
+            "smtp_host": "smtp.gmail.com",
+            "smtp_port": "587",
+            "smtp_login": "user@gmail.com",
+            "smtp_pass": "secret",
+            "smtp_from_name": "Бот",
+            "use_starttls": "true",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers.get("HX-Redirect") == "/onboarding/recipients"
+    assert len(f_settings_svc.set_smtp_credentials_calls) == 1
+    creds = f_settings_svc.set_smtp_credentials_calls[0]
+    assert creds.smtp_host == "smtp.gmail.com"
+    assert creds.smtp_port == 587
+    assert len(f_svc.advance_calls) == 1
+
+    # --- Regression pin: _reject_pre_resolve must NOT raise for smtp.gmail.com ---
+    # If 'com' ever gets added to _BLOCKED_TLDS, this raises SmtpHostPolicyError.
+    _reject_pre_resolve("smtp.gmail.com")  # must not raise
 
 
 def test_step2_skip_sets_email_skipped_and_redirects() -> None:

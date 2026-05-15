@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         ConfigSource,
         LotRepository,
         NotificationsRepository,
+        SmtpProviderCatalog,
         UserStateRepository,
     )
     from fis_monitor.infra.sse.sse_stream import SseStreamer
@@ -214,6 +215,17 @@ def get_lot_repo(c: Container = Depends(get_container)) -> LotRepository:
     services, not the repo directly.
     """
     return c.infra.lot_repo
+
+
+def get_smtp_provider_catalog(
+    c: Container = Depends(get_container),
+) -> SmtpProviderCatalog:
+    """Return SmtpProviderCatalog from the composition root.
+
+    Stored at ``app.state.container.infra.smtp_provider_catalog``.
+    Route tests override via ``app.dependency_overrides[get_smtp_provider_catalog]``.
+    """
+    return c.infra.smtp_provider_catalog  # type: ignore[return-value]
 
 
 def get_view_filters_service() -> ViewFiltersService:

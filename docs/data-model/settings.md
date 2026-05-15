@@ -111,6 +111,8 @@ class SmtpCredentials(BaseModel):
 
 Дефолтные значения (`DEFAULT_SMTP_HOST = "smtp.yandex.ru"`, `DEFAULT_SMTP_PORT = 587`) живут в коде — fallback на случай пустой таблицы при первой установке.
 
+**UI prefill через `SmtpProviderCatalog` (ADR-038).** При вводе email-логина wizard / `/settings`-форма дёргают `GET /settings/smtp/suggest?email=...`. Если домен в каталоге провайдеров (`yandex.ru`, `mail.ru`, `gmail.com`, `outlook.com`, `icloud.com`, `rambler.ru`, ...) — UI подставляет `smtp_host`, `smtp_port`, `use_starttls` (и опционально показывает app-password hint). **БД-схема `smtp_credentials` от этого не меняется** — host/port пишутся в те же существующие колонки. Suggestion — UX-помощник: на сабмите формы `DefaultSmtpHostPolicy.resolve_and_check()` валидирует host/port независимо ([[decisions/ADR-015-smtp-host-validation|ADR-015]] fail-closed pipeline сохранён). Неизвестный домен → suggestion=null → UI разворачивает advanced-секцию с manual-вводом. См. [[decisions/ADR-038-smtp-provider-catalog|ADR-038]].
+
 `SecretStr` гарантирует что пароль не утечёт в crash-логи через `__repr__`. Получить plain-value — только явным `.get_secret_value()` в `SmtpEmailNotifier.send()`. Хранение plain в `state.db` сохраняется (ACL `%LOCALAPPDATA%` достаточен — см. [[decisions-log]]).
 
 ## OnboardingState — FSM
@@ -145,4 +147,4 @@ class LotUserState(BaseModel):
     updated_at: datetime
 ```
 
-См. также: [[data-model/lot]], [[config-reference]], [[decisions/ADR-015-smtp-host-validation|ADR-015]], [[decisions/ADR-017-secrets-secretstr-crash-dump-exclusion|ADR-017]], [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]].
+См. также: [[data-model/lot]], [[config-reference]], [[decisions/ADR-015-smtp-host-validation|ADR-015]], [[decisions/ADR-017-secrets-secretstr-crash-dump-exclusion|ADR-017]], [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]], [[decisions/ADR-038-smtp-provider-catalog|ADR-038]].

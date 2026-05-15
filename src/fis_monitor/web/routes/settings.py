@@ -2,6 +2,7 @@
 
 Endpoints:
   GET  /settings              — return current Settings snapshot.
+  GET  /settings/smtp/suggest — auto-suggest SMTP host/port by email domain (ADR-038).
   POST /settings/smtp         — update SMTP credentials (DNS-outside-tx via SettingsService).
   POST /settings/smtp/test    — send a test email to a given recipient.
   POST /settings/regions      — replace macro-region scope; truncates subjects + htmx partial.
@@ -38,6 +39,7 @@ from fis_monitor.services.smtp_test import SmtpTestService
 from fis_monitor.web.deps import (
     get_config_source,
     get_settings_service,
+    get_smtp_provider_catalog,
     get_smtp_test,
     get_templates,
 )
@@ -168,6 +170,62 @@ def _prefers_html(accept: str) -> bool:
     # Browsers always include 'text/html'; pure API clients typically send
     # 'application/json' or omit the header entirely.
     return "text/html" in accept and "application/json" not in accept.split(",")[0]
+
+
+# ---------------------------------------------------------------------------
+# SMTP provider catalog — email domain → pre-filled suggestion (ADR-038)
+# ---------------------------------------------------------------------------
+
+#: Valid email must contain exactly one ``@`` with a non-empty domain part.
+_AT_RE = re.compile(r"^[^@]+@[^@]+$")
+
+
+@router.get("/smtp/suggest")
+def get_smtp_suggest(
+    email: str,
+    catalog: Any = Depends(get_smtp_provider_catalog),
+) -> JSONResponse:
+    """Return a pre-filled SMTP suggestion based on the email's domain.
+
+    Performs a pure in-memory catalog lookup — no DNS, no network I/O.
+    The suggestion is a UX helper only; ``POST /settings/smtp`` always
+    re-validates via ``DefaultSmtpHostPolicy`` regardless (ADR-038 §4).
+
+    Args:
+        email: Full email address (e.g. ``user@gmail.com``).
+
+    Returns:
+        200 with ``{smtp_host, smtp_port, use_starttls, app_password_url,
+        provider_label}`` populated if domain is known, all ``null`` if
+        unknown.
+        400 if *email* is empty or contains no ``@`` (malformed input —
+        the UI should not send suggest requests for clearly invalid emails).
+    """
+    if not email or not _AT_RE.match(email):
+        raise HTTPException(
+            status_code=400,
+            detail="email must be a non-empty string containing '@'",
+        )
+    suggestion = catalog.lookup(email)
+    if suggestion is None:
+        return JSONResponse(
+            content={
+                "smtp_host": None,
+                "smtp_port": None,
+                "use_starttls": None,
+                "app_password_url": None,
+                "provider_label": None,
+            }
+        )
+    return JSONResponse(
+        content={
+            "smtp_host": suggestion.smtp_host,
+            "smtp_port": suggestion.smtp_port,
+            "use_starttls": suggestion.use_starttls,
+            "app_password_url": suggestion.app_password_url,
+            "provider_label": suggestion.provider_label,
+        }
+    )
 
 
 @router.get("", response_model=None)

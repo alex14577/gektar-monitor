@@ -989,6 +989,33 @@ def lot_to_public_dto(lot: Lot) -> LotPublicDTO:
 
 
 # ---------------------------------------------------------------------------
+# ProviderSuggestion — SMTP provider auto-fill DTO (ADR-038)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class ProviderSuggestion:
+    """Pre-filled SMTP endpoint for a known email provider.
+
+    Returned by ``SmtpProviderCatalog.lookup()`` when the email domain is
+    in the static catalog. DTO without behavior — infra-internal, never
+    crosses the EventBus / SSE / DB boundary.
+
+    Fields:
+        smtp_host: FQDN of the SMTP submission endpoint (e.g. ``"smtp.yandex.ru"``).
+        smtp_port: Port number — 465 for implicit TLS, 587 for STARTTLS.
+        use_starttls: True for port-587 STARTTLS, False for port-465 implicit TLS.
+        app_password_url: URL to provider's app-password setup docs, or ``None``
+            if a regular account password is sufficient.
+        provider_label: Human-readable provider name for UI display (e.g. ``"Yandex"``).
+    """
+
+    smtp_host: str
+    smtp_port: int
+    use_starttls: bool
+    app_password_url: str | None
+    provider_label: str
+
+
+# ---------------------------------------------------------------------------
 # SseEvent — closed union over all bus event types
 # ---------------------------------------------------------------------------
 #: All five concrete SSE event DTOs. `EventBus.publish(event: SseEvent)` and

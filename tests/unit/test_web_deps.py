@@ -61,6 +61,7 @@ def mock_container() -> Container:
             session_probe=Mock(),
             autostart=Mock(),
             smtp_host_policy=Mock(),
+            smtp_provider_catalog=Mock(),
             sse_streamer=Mock(),
         )
 
