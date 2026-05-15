@@ -21,6 +21,7 @@ Design decisions (brainstorm consensus, bye.9):
 
 See: docs/architecture/07-concurrency.md §7.6, ADR-020.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -284,9 +285,7 @@ class WatchdogConfigSource:
         self._observer.stop()
         self._observer.join(timeout=5.0)
         if self._observer.is_alive():
-            logger.warning(
-                "config_source: Observer failed to stop within 5 s"
-            )
+            logger.warning("config_source: Observer failed to stop within 5 s")
 
     # ------------------------------------------------------------------
     # Internal — env overrides
@@ -324,6 +323,27 @@ class WatchdogConfigSource:
             return settings
         new_target = settings.target.model_copy(update=overrides)
         return settings.model_copy(update={"target": new_target})
+
+    @staticmethod
+    def _check_catalog_drift(settings: Settings) -> None:
+        """Check for catalog drift: log if rf_subjects contain IDs not in SUBJECT_TITLE_BY_ID.
+
+        Detects stale config.json after upstream catalog updates (ADR-035).
+        Debug-level only — not a hard error, as invalid IDs are harmless at runtime
+        (they simply never match any lot's region).
+        """
+        from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
+
+        if not settings.filters.rf_subjects:
+            return
+        valid_ids = frozenset(SUBJECT_TITLE_BY_ID)
+        invalid_ids = [sid for sid in settings.filters.rf_subjects if sid not in valid_ids]
+        if invalid_ids:
+            logger.debug(
+                "catalog drift: filters.rf_subjects contain invalid IDs not in "
+                "SUBJECT_TITLE_BY_ID catalog: %r",
+                invalid_ids,
+            )
 
     # ------------------------------------------------------------------
     # Internal — FS event → debounce → reload
@@ -370,9 +390,7 @@ class WatchdogConfigSource:
         try:
             raw: bytes = self._path.read_bytes()
         except OSError as exc:
-            logger.warning(
-                "config_source: read failed: %s", exc.__class__.__name__
-            )
+            logger.warning("config_source: read failed: %s", exc.__class__.__name__)
             with self._lock:
                 self.reload_error_count += 1
                 self.last_error_at = self._clock.now()
@@ -392,6 +410,8 @@ class WatchdogConfigSource:
             # (mirrors __init__ behaviour; otherwise FIS_TARGET__* values are
             # silently dropped on the first config.json edit).
             new_settings = self._apply_env_overrides(new_settings)
+            # Check for catalog drift: log if any rf_subjects IDs are not in current catalog.
+            self._check_catalog_drift(new_settings)
         except Exception as exc:
             # Log parse errors without PII: no raw exc repr, no field values.
             if isinstance(exc, ValidationError):
@@ -400,9 +420,7 @@ class WatchdogConfigSource:
                     len(exc.errors()),
                 )
             elif isinstance(exc, json.JSONDecodeError):
-                logger.warning(
-                    "config_source: reload: invalid JSON at line %d", exc.lineno
-                )
+                logger.warning("config_source: reload: invalid JSON at line %d", exc.lineno)
             else:
                 logger.warning(
                     "config_source: reload: unexpected error: %s",
@@ -431,9 +449,7 @@ class WatchdogConfigSource:
             try:
                 sub.deliver(new_settings)
             except Exception:
-                logger.exception(
-                    "config_source: subscriber callback raised; continuing delivery"
-                )
+                logger.exception("config_source: subscriber callback raised; continuing delivery")
 
     # ------------------------------------------------------------------
     # Internal — subscriber management
