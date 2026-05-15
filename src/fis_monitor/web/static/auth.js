@@ -62,6 +62,8 @@
   }
 
   function _startPolling(btn, originalText) {
+    _stopPolling(); // Ensure any previous polling is stopped (guard against double-click)
+
     _pollDeadline = Date.now() + HARD_TIMEOUT_MS;
 
     _pollTimer = setInterval(function () {
@@ -151,5 +153,8 @@
     e.preventDefault();
     startLogin(btn);
   });
+
+  // Cleanup polling on page navigation (htmx, manual navigation, etc.)
+  window.addEventListener('pagehide', _stopPolling);
 
 })();
