@@ -300,6 +300,22 @@ class FakeNotificationsRepository:
 # ---------------------------------------------------------------------------
 
 
+class FakeDndService:
+    """Fake DndService that returns a fixed is_active result."""
+
+    def __init__(self, *, active: bool = False) -> None:
+        self._active = active
+
+    def is_active(self, now: datetime) -> bool:
+        return self._active
+
+    def until(self, now: datetime) -> datetime | None:
+        return None
+
+    def set_dnd_until(self, now: datetime, minutes: int) -> None:
+        pass
+
+
 class FakeLotRepository:
     """In-memory lot repository for recovery tests."""
 
@@ -437,6 +453,7 @@ def _make_dispatcher(
     clock: FakeClock | None = None,
     event_bus: FakeEventBus | None = None,
     stop_event: threading.Event | None = None,
+    dnd_service: FakeDndService | None = None,
     retry_attempts: int = 3,
     retry_backoff: Sequence[float] = (0.01, 0.02, 0.04),  # tiny for fast tests
     max_queue_size: int = 100,
@@ -458,6 +475,7 @@ def _make_dispatcher(
     clock = clock or FakeClock()
     event_bus = event_bus or FakeEventBus()
     stop_event = stop_event or threading.Event()
+    dnd_service = dnd_service or FakeDndService(active=False)
     dispatcher = NotifierDispatcher(
         registry=registry,
         notif_repo=notif_repo,
@@ -466,6 +484,7 @@ def _make_dispatcher(
         clock=clock,
         event_bus=event_bus,
         stop_event=stop_event,
+        dnd_service=dnd_service,
         retry_attempts=retry_attempts,
         retry_backoff=retry_backoff,
         max_queue_size=max_queue_size,
@@ -794,6 +813,43 @@ def test_consumer_loop_recovery_skip_unknown_channel(caplog):
     assert notif_repo.get_status(888, "email", "x@x.com") == "pending"
 
 
+def test_retry_one_passes_lot_public_dto_not_lot(caplog):
+    """_retry_one must convert Lot → LotPublicDTO before calling _send_one (P0-3).
+
+    A bare Lot passed to BrowserSseNotifier.send() would trigger a Pydantic
+    ValidationError inside the notifier, which would be swallowed as a
+    non-retryable failure resulting in a false mark_sent.  This test verifies
+    that the input to the notifier's send() is a LotPublicDTO, not a Lot.
+    """
+    stop_event = threading.Event()
+    dispatcher, registry, notif_repo, lot_repo, *_ = _make_dispatcher(
+        stop_event=stop_event
+    )
+
+    notifier = FakeNotifier("email")
+    registry.register(notifier)
+
+    lot_repo.seed(make_lot(id=555))
+    notif_repo.seed_pending(555, "email", "dto@x.com")
+
+    pending = notif_repo.list_pending_older_than(timedelta(minutes=0))
+    assert len(pending) == 1
+
+    dispatcher._retry_one(pending[0])
+
+    # Exactly one send call was made
+    assert len(notifier.send_calls) == 1
+    sent_lot, _recipient = notifier.send_calls[0]
+
+    # The lot passed to send() must be a LotPublicDTO, not a bare Lot
+    from fis_monitor.domain.models import Lot, LotPublicDTO
+    assert isinstance(sent_lot, LotPublicDTO), (
+        f"Expected LotPublicDTO but got {type(sent_lot).__name__} — "
+        "bare Lot would break BrowserSseNotifier (P0-3 regression)"
+    )
+    assert type(sent_lot) is not Lot, "Must not be a plain Lot (only LotPublicDTO)"
+
+
 def test_consumer_loop_recovery_lot_missing(caplog):
     """Pending row whose lot_id is not in lot_repo → permanent_fail + warning.
 
@@ -880,6 +936,46 @@ def test_recipients_of_unknown_channel_empty():
     notifier = UnknownNotifier("telegram")
     recipients = dispatcher._recipients_of(notifier)
     assert recipients == []  # no raise — extensibility
+
+
+def test_dispatch_suppressed_during_dnd_active():
+    """When DnD is active, _dispatch_all_channels must not call any notifier.
+
+    Acceptance criteria (P0-2):
+    - FakeDndService.is_active() returns True.
+    - Email notifier: 0 send calls.
+    - Browser notifier: 0 send calls.
+    - No notifications reserved in the repo.
+    """
+    dnd = FakeDndService(active=True)
+    stop_event = threading.Event()
+    dispatcher, registry, notif_repo, *_ = _make_dispatcher(
+        stop_event=stop_event,
+        dnd_service=dnd,
+    )
+
+    class _EmailNotifier(FakeNotifier):
+        channel_id: ClassVar[str] = "email"
+
+    class _BrowserNotifier(FakeBrowserNotifier):
+        channel_id: ClassVar[str] = "browser"
+
+    email_n = _EmailNotifier("email")
+    browser_n = _BrowserNotifier()
+    registry.register(email_n)
+    registry.register(browser_n)
+
+    settings = _make_email_settings(["a@x.com"])
+    dispatcher._config_source = FakeConfigSource(settings)
+
+    lot = _make_lot_public()
+    dispatcher._dispatch_all_channels(lot)
+
+    # No send calls on any notifier
+    assert len(email_n.send_calls) == 0, "email notifier must not be called during DnD"
+    assert len(browser_n.send_calls) == 0, "browser notifier must not be called during DnD"
+    # No notifications reserved
+    assert len(notif_repo._rows) == 0, "no rows must be reserved during DnD"
 
 
 # ===========================================================================

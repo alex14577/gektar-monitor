@@ -37,29 +37,23 @@ def backfill_start(
     """Start a paginated backfill of the lot catalogue.
 
     Single-flight: if a backfill is already running, returns 409 Conflict.
-    The backfill runs in a daemon thread so the response is returned
-    immediately (202 Accepted).
+    Thread spawning is done INSIDE ``BackfillService.start()`` (P1-5); the
+    route calls ``start()`` synchronously and uses its bool return value as
+    the race-free single-flight gate — no TOCTOU ``is_running()`` pre-check.
 
     Returns:
         202 Accepted  — backfill started.
         409 Conflict  — another backfill is already running.
     """
-    if svc.is_running():
+    # A never-set external stop event; shutdown is coordinated via
+    # BackfillService.cancel() from the lifespan (P0-4).
+    external_stop = threading.Event()
+    started = svc.start(external_stop)
+    if not started:
         raise HTTPException(
             status_code=409,
             detail="Backfill already running",
         )
-
-    # Launch in a daemon thread with a never-set external stop event.
-    # Shutdown is coordinated via BackfillService.cancel() from the lifespan.
-    external_stop = threading.Event()
-
-    def _run() -> None:
-        svc.start(external_stop)
-
-    t = threading.Thread(target=_run, daemon=True, name="backfill-worker")
-    t.start()
-
     return JSONResponse(status_code=202, content={"status": "started"})
 
 

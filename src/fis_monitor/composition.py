@@ -299,6 +299,9 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     registry.register(BrowserSseNotifier(event_bus=event_bus))
 
     # ── Layer 4: use cases ──────────────────────────────────────────────────
+    # dnd_service is built before NotifierDispatcher so it can be injected.
+    dnd = DndService(settings_repo=settings_repo)
+
     # Dispatcher built first — monitor_cycle and full_scan depend on it.
     dispatcher_stop_event = threading.Event()
     notifier_dispatcher = NotifierDispatcher(
@@ -309,6 +312,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         clock=clock,
         event_bus=event_bus,
         stop_event=dispatcher_stop_event,
+        dnd_service=dnd,
         settings_repo=settings_repo,
         retry_attempts=3,
         retry_backoff=(2.0, 4.0, 8.0),
@@ -400,8 +404,6 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         config_source=config_source,
         monitor_cycle=monitor_cycle,
     )
-
-    dnd = DndService(settings_repo=settings_repo)
 
     catchup_dismiss = CatchupDismissService(state_repo=settings_repo, clock=clock)
 

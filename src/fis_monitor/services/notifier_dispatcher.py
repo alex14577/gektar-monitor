@@ -48,7 +48,11 @@ from fis_monitor.domain.models import (
     NotifyResult,
     SseSmtpFailed,
 )
+from fis_monitor.domain.models import (
+    lot_to_public_dto as _lot_to_public_dto,
+)
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
+from fis_monitor.services.dnd import DndService
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +126,7 @@ class NotifierDispatcher:
         clock: Clock,
         event_bus: EventBus,
         stop_event: threading.Event,
+        dnd_service: DndService,
         settings_repo: SettingsRepository | None = None,
         retry_attempts: int = 3,
         retry_backoff: Sequence[float] = (2.0, 4.0, 8.0),
@@ -135,6 +140,7 @@ class NotifierDispatcher:
         self._clock = clock
         self._event_bus = event_bus
         self.stop_event = stop_event
+        self._dnd_service = dnd_service
         self._settings_repo = settings_repo
         self.retry_attempts = retry_attempts
         self.retry_backoff = list(retry_backoff)
@@ -193,7 +199,16 @@ class NotifierDispatcher:
     # ------------------------------------------------------------------
 
     def _dispatch_all_channels(self, lot: LotPublicDTO) -> None:
-        """Deliver ``lot`` through every registered notifier x recipient pair."""
+        """Deliver ``lot`` through every registered notifier x recipient pair.
+
+        Do-Not-Disturb guard: if DnD is active at dispatch time, all channel
+        deliveries are suppressed for the duration of the DnD window.  The
+        lot is not re-queued — the monitor cycle produces a new event on the
+        next scan if the lot is still relevant.  See dnd.py docstring.
+        """
+        if self._dnd_service.is_active(self._clock.now()):
+            logger.info("dispatch suppressed (DnD active)")
+            return
         for notifier in self._registry.all():
             for recipient in self._recipients_of(notifier):
                 self._send_one(lot, notifier, recipient)
@@ -330,10 +345,14 @@ class NotifierDispatcher:
             )
             return
 
-        # Build a minimal LotPublicDTO from the Lot for retry context.
-        # NotificationRecord.recipient gives us the exact address.
+        # Convert Lot → LotPublicDTO before passing to _send_one.
+        # _send_one calls notifier.send(lot, recipient); BrowserSseNotifier builds
+        # SseLotNew(lot=lot) which requires a LotPublicDTO — passing a bare Lot
+        # causes a Pydantic ValidationError that is silently caught as a
+        # non-retryable failure, resulting in a false mark_sent (P0-3 bug fix).
+        lot_dto = _lot_to_public_dto(lot)
         self._send_one(
-            lot,  # type: ignore[arg-type]  — Lot satisfies the structural shape _send_one needs
+            lot_dto,
             notifier,
             pending.recipient,
         )

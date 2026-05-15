@@ -38,6 +38,8 @@
 - [[decisions/ADR-024-target-config-and-url-builder|ADR-024]] — `TargetConfig` + `TorgiUrlBuilder`: config seam для реального target URL (`надальнийвосток.рф`); SMTP defaults → `infra/smtp/constants.py`
 - [[decisions/ADR-025-sse-single-endpoint|ADR-025]] — SSE routing: единственный роут `/events`, фильтрация по `sse-swap` на клиенте
 - [[decisions/ADR-026-distribution-packaging-pyinstaller|ADR-026]] — Distribution packaging: PyInstaller --onedir + bundled Chromium, build-on-target strategy
+- [[decisions/ADR-027-silent-cookie-refresh|ADR-027]] — Silent cookie refresh: headless Playwright `silent_refresh()` для продления сессии без интерактивного логина (shared `_lock`, 30s deadline, `needs_manual_login` enum value)
+- [[decisions/ADR-028-paginated-catalogue-backfill|ADR-028]] — Paginated catalogue backfill: `PaginatedListFetcher` + `BackfillService` + auto-trigger heuristic (empty DB) + single-flight across auto/manual + notify caller-side
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

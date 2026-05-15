@@ -24,6 +24,7 @@ DI: ViewFiltersService is injected via get_view_filters_service() from deps.py.
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, Response
@@ -65,7 +66,10 @@ class ViewFiltersBody(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    subjects: list[str] = Field(default_factory=list)
+    subjects: Annotated[
+        list[Annotated[str, Field(max_length=128)]],
+        Field(max_length=50),
+    ] = Field(default_factory=list)
     area_min: int | None = Field(default=None, ge=0)
     area_max: int | None = Field(default=None, ge=0)
     only_new: bool = False

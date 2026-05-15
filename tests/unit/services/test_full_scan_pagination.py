@@ -109,7 +109,9 @@ class FakeHttpClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def get(self, url: str, *, params: Any = None, headers: Any = None, timeout: float | None = None) -> Any:
+    def get(
+        self, url: str, *, params: Any = None, headers: Any = None, timeout: float | None = None
+    ) -> Any:
         self.calls.append(url)
         from fis_monitor.domain.models import HttpResponse
         return HttpResponse(status=200, text="<html/>", headers={}, final_url=url)
@@ -131,7 +133,7 @@ class FakeLotRepository:
         self.mark_seen_calls: list[tuple] = []
         self.mark_inactive_calls: list[tuple] = []
 
-    def upsert(self, lot: Any, *, tracked: Any, notify: bool = True) -> Any:
+    def upsert(self, lot: Any, *, tracked: Any) -> Any:
         raise NotImplementedError
 
     def get(self, lot_id: int) -> None:

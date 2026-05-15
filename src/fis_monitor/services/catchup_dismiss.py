@@ -14,7 +14,7 @@ and by in-memory fakes in tests.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -60,6 +60,11 @@ class CatchupDismissService:
 
         False when: no dismissal has been recorded, or the window has expired.
         *now* must be timezone-aware (same TZ as stored value).
+
+        Defensive timezone handling (P1-7): ``fromisoformat`` may return a
+        naive datetime for legacy stored values; comparing naive and aware
+        datetimes raises ``TypeError`` in Python 3.11+.  We apply the same
+        UTC-coercion pattern as ``DndService.until()``.
         """
         raw = self._repo.get(_DISMISSED_UNTIL_KEY)
         if raw is None:
@@ -68,4 +73,9 @@ class CatchupDismissService:
             until = datetime.fromisoformat(raw)
         except ValueError:
             return False
+        # Ensure both sides are timezone-aware before comparison (defensive).
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=UTC)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
         return now < until

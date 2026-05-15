@@ -166,6 +166,17 @@ class _StubService:
     def recent_feed(self, *, limit: int) -> list:
         raise NotImplementedError
 
+    def cancel(self) -> None:
+        """No-op for BackfillService.cancel() called in lifespan shutdown."""
+
+
+class _StubLotRepo:
+    """Minimal lot_repo for smoke: count_active() returns 1 so the lifespan
+    auto-backfill path (triggered on empty DB) is skipped."""
+
+    def count_active(self) -> int:
+        return 1
+
 
 # ---------------------------------------------------------------------------
 # Container factory helpers
@@ -241,7 +252,7 @@ def _build_smoke_container(
         locker=_StubLocker(),
         config_source=_FakeConfigSource(),
         cycle_progress_signal=threading.Event(),
-        lot_repo=unused,
+        lot_repo=_StubLotRepo(),
         user_state_repo=unused,
         settings_repo=unused,
         notif_repo=unused,
@@ -276,6 +287,10 @@ def _build_smoke_container(
         session_monitor=_StubService(),
         diagnostics=_StubService(),
         lot_query=_StubService(),
+        lot_user_state=_StubService(),
+        backfill=_StubService(),
+        dnd=_StubService(),
+        catchup_dismiss=_StubService(),
     )
 
     return Container(infra=infra, services=services)

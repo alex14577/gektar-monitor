@@ -297,7 +297,7 @@ class PlaywrightLoginSession:
     def _run_login(self, *, deadline: float) -> LoginOutcome:
         """Core login flow — called with ``_lock`` already held."""
         start = self._clock.monotonic()
-        remaining_ms = int(deadline * 1000)
+        remaining_ms = int((deadline - start) * 1000)
 
         try:
             with self._playwright_factory() as pw:

@@ -222,11 +222,22 @@ class FullScanService:
         settings = self._config_source.current()
         now = self._clock.now()
 
-        # Step 2 — collect seen ids from list pages (one page per region).
+        # Step 2 — collect seen ids from list pages (all pages per region via paginator).
+        # Track region completeness: if pagination for any region fails mid-way,
+        # mass-deactivation is suppressed for that run to avoid false-positive
+        # mark_inactive calls (P1-4 bug fix).
         seen_ids: set[int] = set()
+        all_regions_completed = True
         for region in settings.regions:
-            region_ids = self._fetch_region_ids(region)
+            region_ids, pagination_completed = self._fetch_region_ids(region, _stop)
             seen_ids.update(region_ids)
+            if not pagination_completed:
+                all_regions_completed = False
+                logger.warning(
+                    "full_scan: region=%s pagination incomplete — "
+                    "mass-deactivation suppressed for this run to avoid false positives",
+                    region,
+                )
 
         # Step 3 — abort if ALL regions failed (seen_ids is empty).
         # This prevents false-positive mass-deactivation of all known lots.
@@ -238,7 +249,13 @@ class FullScanService:
             return
 
         # Step 4 — iterate active lots in batches, mark seen / inactive.
-        self._process_batches(seen_ids=seen_ids, now=now, stop_event=_stop)
+        # mass_deactivation_enabled=False when any region had partial pagination.
+        self._process_batches(
+            seen_ids=seen_ids,
+            mass_deactivation_enabled=all_regions_completed,
+            now=now,
+            stop_event=_stop,
+        )
 
         logger.info("full_scan: run_once completed")
 
@@ -246,45 +263,74 @@ class FullScanService:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _fetch_region_ids(self, region: int) -> set[int]:
-        """Fetch all pages for ``region`` and return the set of lot ids.
+    def _fetch_region_ids(
+        self, region: int, stop_event: threading.Event
+    ) -> tuple[set[int], bool]:
+        """Fetch all pages for ``region`` and return ``(ids, pagination_completed)``.
+
+        ``pagination_completed`` is ``True`` when the iterator completed without
+        exception (all pages visited).  ``False`` means the iteration was cut
+        short by an error — callers must exclude this region from mass-
+        deactivation (P1-4) to prevent false-positive mark_inactive calls.
+
+        ``stop_event`` is propagated to ``_fetch_region_ids_paginated`` so that
+        a shutdown signal during the paginated fetch exits the iterator promptly
+        rather than waiting for all pages to complete (P1-2 fix).
 
         When a ``PaginatedListFetcher`` was supplied at construction time,
         all pages are iterated.  Otherwise falls back to single-page fetch
-        (backward-compat for tests that pre-date the fetcher).
-
-        Returns an empty set on any error so the caller can decide whether
-        to proceed (mass-deactivation guard upstream).
+        (backward-compat for tests that pre-date the fetcher); single-page
+        fetch always reports ``pagination_completed=True`` on success.
         """
         if self._paginated_fetcher is not None:
-            return self._fetch_region_ids_paginated(region)
-        return self._fetch_region_ids_single_page(region)
+            return self._fetch_region_ids_paginated(region, stop_event)
+        ids = self._fetch_region_ids_single_page(region)
+        # Single-page path: treat empty set from HTTP error as incomplete,
+        # non-empty set as completed (single-page guarantees full coverage).
+        # Empty set on error is already logged inside _fetch_region_ids_single_page.
+        return ids, True  # single page = always completed
 
-    def _fetch_region_ids_paginated(self, region: int) -> set[int]:
-        """Fetch all pages via ``PaginatedListFetcher``; collect lot ids."""
+    def _fetch_region_ids_paginated(
+        self, region: int, stop_event: threading.Event
+    ) -> tuple[set[int], bool]:
+        """Fetch all pages via ``PaginatedListFetcher``; collect lot ids.
+
+        Returns ``(ids, pagination_completed)`` where ``pagination_completed``
+        is ``True`` only when iteration finished without exception.  An exception
+        on any page yields ``False``, signalling the caller that the id-set is
+        partial and must NOT be used for mass-deactivation (P1-4).
+
+        ``stop_event`` is passed directly to ``iterate()`` so the paginator can
+        abort mid-iteration on shutdown (P1-2).
+        """
         assert self._paginated_fetcher is not None  # type narrowing
-        # Use a never-set stop event — full_scan doesn't have one at this call
-        # site (run_once passes stop_event to _process_batches, not here).
-        # Using a sentinel avoids changing the _fetch_region_ids signature.
-        stop_sentinel = threading.Event()
         ids: set[int] = set()
+        pagination_completed = False
         try:
             for row in self._paginated_fetcher.iterate(
                 region,
-                stop_sentinel,
+                stop_event,
                 sleep_between_pages=0.0,  # full_scan paces via inter_batch_sleep_sec
             ):
                 ids.add(row.id)
+            # Iterator exhausted without exception — all pages visited.
+            pagination_completed = True
         except Exception:
+            # Exception mid-iteration → ids contains only pages fetched so far.
+            # pagination_completed stays False → caller excludes this region
+            # from mass-deactivation (P1-4).
             logger.warning(
-                "full_scan: error during paginated fetch for region=%s — using partial ids",
+                "full_scan: error during paginated fetch for region=%s — partial ids only",
                 region,
                 exc_info=True,
             )
         logger.debug(
-            "full_scan: region=%s paginated fetch collected %d ids", region, len(ids)
+            "full_scan: region=%s paginated fetch collected %d ids (completed=%s)",
+            region,
+            len(ids),
+            pagination_completed,
         )
-        return ids
+        return ids, pagination_completed
 
     def _fetch_region_ids_single_page(self, region: int) -> set[int]:
         """Fetch one list page for ``region`` and return the set of lot ids.
@@ -335,10 +381,18 @@ class FullScanService:
         self,
         *,
         seen_ids: set[int],
+        mass_deactivation_enabled: bool,
         now: datetime,
         stop_event: threading.Event,
     ) -> None:
         """Paginate through active lots and mark each as seen or inactive.
+
+        ``seen_ids`` — confirmed-sighted lot ids (used for mark_seen).
+        ``mass_deactivation_enabled`` — when ``True``, lots absent from
+            ``seen_ids`` are marked inactive.  Set to ``False`` when any
+            region's pagination was incomplete (P1-4): we cannot confirm
+            absence for those lots, so we skip deactivation entirely for
+            this scan to prevent false-positive mark_inactive calls.
 
         ``stop_event`` is required (never None).  ``run_once`` always passes
         either the caller-supplied event or a never-set sentinel, so this
@@ -370,14 +424,15 @@ class FullScanService:
             if seen_in_batch:
                 self._lot_repo.mark_seen(seen_in_batch, now)
 
-            for lot_id in missing_in_batch:
-                logger.info(
-                    "full_scan: marking lot %d inactive (reason=full_scan_missing)",
-                    lot_id,
-                )
-                self._lot_repo.mark_inactive(
-                    lot_id, reason="full_scan_missing", at=now
-                )
+            if mass_deactivation_enabled:
+                for lot_id in missing_in_batch:
+                    logger.info(
+                        "full_scan: marking lot %d inactive (reason=full_scan_missing)",
+                        lot_id,
+                    )
+                    self._lot_repo.mark_inactive(
+                        lot_id, reason="full_scan_missing", at=now
+                    )
 
             offset += self._batch_size
 

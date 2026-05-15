@@ -84,6 +84,38 @@ class FakeLoginService:
         self.cancel_active_job_calls += 1
 
 
+class FakeBackfillService:
+    """Fake BackfillService — records cancel() calls."""
+
+    def __init__(self) -> None:
+        self.cancel_calls = 0
+        self._running = False
+
+    def cancel(self) -> None:
+        self.cancel_calls += 1
+
+    def is_running(self) -> bool:
+        return self._running
+
+    def start(self, stop_event: threading.Event) -> bool:
+        return True
+
+    def status(self) -> object:
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Status:
+            running: bool = False
+            current_region: object = None
+            current_page: object = None
+            lots_seen: int = 0
+            regions_done: int = 0
+            regions_total: int = 0
+            started_at: object = None
+
+        return _Status()
+
+
 class FakeSseStreamer:
     """Minimal fake for SseStreamer — records bind_executor calls."""
 
@@ -110,6 +142,11 @@ class FakeServices:
     full_scan: FakeFullScan
     monitor_cycle: FakeMonitorCycle
     login: FakeLoginService
+    backfill: FakeBackfillService = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.backfill is None:
+            self.backfill = FakeBackfillService()
 
 
 @dataclass
@@ -143,23 +180,30 @@ class FakeLocker:
         self._release_args.append(handle)
 
 
-def _make_fake_container() -> (
-    tuple[FakeContainer, FakeLoginService, FakeDispatcher, FakeFullScan, FakeConnProvider]
-):
+def _make_fake_container() -> tuple[
+    FakeContainer,
+    FakeLoginService,
+    FakeDispatcher,
+    FakeFullScan,
+    FakeConnProvider,
+    FakeBackfillService,
+]:
     conn_provider = FakeConnProvider()
     dispatcher = FakeDispatcher()
     full_scan = FakeFullScan()
     monitor_cycle = FakeMonitorCycle()
     login = FakeLoginService()
+    backfill = FakeBackfillService()
     infra = FakeInfra(conn_provider=conn_provider)
     services = FakeServices(
         notifier_dispatcher=dispatcher,
         full_scan=full_scan,
         monitor_cycle=monitor_cycle,
         login=login,
+        backfill=backfill,
     )
     container = FakeContainer(infra=infra, services=services)
-    return container, login, dispatcher, full_scan, conn_provider
+    return container, login, dispatcher, full_scan, conn_provider, backfill
 
 
 def _make_locker_factory(locker: FakeLocker):
@@ -190,7 +234,7 @@ def test_clean_shutdown(caplog):
     """Happy path: startup + immediate shutdown. Lock acquired then released.
     All executors are shut down; no warning logged for pw_executor.
     """
-    container, login, dispatcher, _full_scan, conn_provider = _make_fake_container()
+    container, login, dispatcher, _full_scan, conn_provider, _backfill = _make_fake_container()
     locker = FakeLocker()
 
     def container_factory(settings, data_dir):
@@ -235,7 +279,7 @@ def test_hung_pw_executor_warns_and_releases_lock(caplog):
     Warning about pw_executor.shutdown timed out must be logged.
     Lock must still release.
     """
-    container, _login, _dispatcher, _full_scan, _conn_provider = _make_fake_container()
+    container, _login, _dispatcher, _full_scan, _conn_provider, _backfill = _make_fake_container()
     locker = FakeLocker()
 
     # --- Fake pw_executor that blocks in shutdown ---
@@ -320,7 +364,7 @@ def test_phase1_raises_later_phases_still_run(caplog):
     """If supervisor.shutdown() raises, cancel_active_job, pw_executor.shutdown,
     conn_provider.close_all, and lock release must ALL still execute.
     """
-    container, _login, _dispatcher, _full_scan, conn_provider = _make_fake_container()
+    container, _login, _dispatcher, _full_scan, conn_provider, _backfill = _make_fake_container()
     locker = FakeLocker()
 
     # Replace full_scan with one whose run_forever raises immediately.
@@ -415,7 +459,7 @@ def test_phase15_raises_phase23_still_run(caplog):
     happen even when cancel_active_job raises. (Slightly different invariant:
     tests the inner try/except around cancel separately from supervisor.shutdown.)
     """
-    container, _login, _dispatcher, _full_scan, conn_provider = _make_fake_container()
+    container, _login, _dispatcher, _full_scan, conn_provider, _backfill = _make_fake_container()
     locker = FakeLocker()
 
     class AlwaysRaiseCancel(FakeLoginService):
@@ -452,7 +496,7 @@ def test_phase15_raises_phase23_still_run(caplog):
 
 def test_pw_executor_bound_to_login_service():
     """j19: bind_executor called exactly once with the pw_executor instance at startup."""
-    container, login, _dispatcher, _full_scan, _conn_provider = _make_fake_container()
+    container, login, _dispatcher, _full_scan, _conn_provider, _backfill = _make_fake_container()
     locker = FakeLocker()
 
     def container_factory(settings, data_dir):
@@ -478,7 +522,7 @@ def test_pw_executor_bound_to_login_service():
 
 def test_sse_executor_bound_to_sse_streamer():
     """ydj: sse_streamer.bind_executor called with the sse_executor at startup."""
-    container, _login, _dispatcher, _full_scan, _conn_provider = _make_fake_container()
+    container, _login, _dispatcher, _full_scan, _conn_provider, _backfill = _make_fake_container()
     locker = FakeLocker()
 
     def container_factory(settings, data_dir):
@@ -525,7 +569,7 @@ def test_lock_acquire_before_release_and_exactly_once():
     locker.acquire = recording_acquire  # type: ignore[method-assign]
     locker.release = recording_release  # type: ignore[method-assign]
 
-    container, _login, _dispatcher, _full_scan, _conn_provider = _make_fake_container()
+    container, _login, _dispatcher, _full_scan, _conn_provider, _backfill = _make_fake_container()
 
     def container_factory(settings, data_dir):
         call_order.append("build_container")
@@ -569,3 +613,34 @@ def test_build_container_raises_lock_still_released():
     # Lock must have been acquired (before build_container) and released (after error).
     assert locker.acquire_calls == 1
     assert locker.release_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 8 (P0-4): backfill.cancel() called during shutdown
+# ---------------------------------------------------------------------------
+
+
+def test_backfill_cancel_called_on_shutdown():
+    """Shutdown phase 1 must call backfill.cancel() before supervisor.shutdown.
+
+    Acceptance criterion (P0-4): HTTP backfill thread must be cancelled on
+    shutdown so it exits cleanly rather than leaking as a daemon thread.
+    """
+    container, _login, _dispatcher, _full_scan, _conn_provider, backfill = _make_fake_container()
+    locker = FakeLocker()
+
+    def container_factory(settings, data_dir):
+        return container
+
+    app = create_app(
+        data_dir=Path("/tmp/fake"),
+        container_factory=container_factory,
+        locker_factory=_make_locker_factory(locker),
+    )
+
+    asyncio.run(_run_lifespan(app))
+
+    assert backfill.cancel_calls == 1, (
+        f"Expected backfill.cancel() to be called once during shutdown, "
+        f"got {backfill.cancel_calls}"
+    )

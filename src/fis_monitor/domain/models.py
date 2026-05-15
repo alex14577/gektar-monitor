@@ -857,6 +857,82 @@ class SseLotStatus(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Conversion helpers — public domain functions
+# ---------------------------------------------------------------------------
+
+def parsed_row_to_lot(row: ParsedListRow, now: datetime) -> Lot:
+    """Construct a minimal ``Lot`` from a ``ParsedListRow``.
+
+    Detail fields (lat, lon, raw_json, enrichment_status, …) are set to
+    sensible defaults — ``EnrichmentService`` will fill them in.
+
+    Moved from ``services/monitor_cycle.py`` (was private ``_parsed_row_to_lot``)
+    because both ``MonitorCycleService`` and ``BackfillService`` need it.
+    Domain conversion belongs in the domain layer alongside the types involved.
+    """
+    return Lot(
+        id=row.id,
+        cadastral_no=row.cadastral_no,
+        area_sqm=row.area_sqm,
+        region=row.region,
+        municipality=row.municipality,
+        land_category=row.land_category,
+        permitted_use=row.permitted_use,
+        ogv=row.ogv,
+        status=row.status,
+        date_create=row.date_create,
+        date_update=row.date_update,
+        lat=None,
+        lon=None,
+        has_boundaries=None,
+        raw_json={},
+        parser_version=1,
+        first_seen=now,
+        last_seen=now,
+        detail_fetched_at=None,
+        enrichment_status="pending",
+        last_seen_at=now,
+        is_active=True,
+        inactive_reason=None,
+        inactive_since=None,
+        inactive_confirmed_at=None,
+    )
+
+
+#: Fields written to lots_history on every upsert — minimal MVP set.
+#: Moved from services/monitor_cycle.py so both MonitorCycleService and
+#: BackfillService can import without cross-service dependency.
+DEFAULT_TRACKED_FIELDS: tuple[TrackedField, ...] = (
+    "status",
+    "area_sqm",
+    "date_update",
+    "is_active",
+    "list_presence",
+)
+
+
+def lot_to_public_dto(lot: Lot) -> LotPublicDTO:
+    """Construct a ``LotPublicDTO`` from a ``Lot`` with default presentation hints.
+
+    ``age_seconds``, ``tier``, and ``freshness`` are presentation hints that
+    are computed properly by the web layer.  For EventBus fan-out and retry
+    paths we use safe defaults — downstream consumers that need accurate tiers
+    should recompute from the lot's timestamps.
+
+    Moved from ``services/monitor_cycle.py`` (was private ``_lot_to_public_dto``)
+    because it is a pure domain conversion used by multiple services
+    (MonitorCycleService, NotifierDispatcher retry path).  High cohesion:
+    belongs in the domain layer alongside the types it converts.
+    """
+    return LotPublicDTO(
+        **lot.model_dump(),
+        age_seconds=0,
+        tier="match",
+        freshness="hot",
+    )
+
+
+# ---------------------------------------------------------------------------
 # SseEvent — closed union over all bus event types
 # ---------------------------------------------------------------------------
 #: All five concrete SSE event DTOs. `EventBus.publish(event: SseEvent)` and

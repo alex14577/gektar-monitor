@@ -294,7 +294,6 @@ class LotRepository(Protocol):
         lot: Lot,
         *,
         tracked: Sequence[TrackedField],
-        notify: bool = True,
     ) -> LotUpsertResult:
         """Atomically insert-or-update ``lot`` and record field-level history.
 
@@ -302,9 +301,10 @@ class LotRepository(Protocol):
         inside the same ``BEGIN IMMEDIATE`` transaction — callers MUST NOT
         compute the diff themselves beforehand (R3-C2).
 
-        ``notify=False`` suppresses SSE publication for this upsert — used
-        by ``BackfillService`` to avoid flooding the event bus during bulk
-        catalogue import.
+        Notification dispatch is caller-side: ``BackfillService`` simply does
+        not call the dispatcher after upsert; ``MonitorCycleService`` does.
+        The ``notify`` parameter (P1-3) has been removed — dead parameter that
+        was never read by the repository implementation.
         """
         ...
 

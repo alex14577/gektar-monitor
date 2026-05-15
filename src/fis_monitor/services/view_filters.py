@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Annotated
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, Field, ValidationError
@@ -55,7 +56,10 @@ class ViewFilters(BaseModel):
 
     model_config = {"extra": "ignore"}  # forward-compat: ignore unknown keys
 
-    subjects: list[str] = Field(default_factory=list)
+    subjects: Annotated[
+        list[Annotated[str, Field(max_length=128)]],
+        Field(max_length=50),
+    ] = Field(default_factory=list)
     area_min: int | None = Field(default=None, ge=0)
     area_max: int | None = Field(default=None, ge=0)
     only_new: bool = False

@@ -27,7 +27,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
-from fis_monitor.services.monitor_cycle import DEFAULT_TRACKED_FIELDS, _parsed_row_to_lot
+from fis_monitor.domain.models import DEFAULT_TRACKED_FIELDS
+from fis_monitor.domain.models import parsed_row_to_lot as _parsed_row_to_lot
 
 if TYPE_CHECKING:
     from fis_monitor.domain.interfaces import ConfigSource, LotRepository
@@ -132,13 +133,16 @@ class BackfillService:
     # ------------------------------------------------------------------
 
     def start(self, stop_event_external: threading.Event) -> bool:
-        """Attempt to start a backfill.
+        """Attempt to start a backfill in a daemon thread.
 
-        Returns ``True`` if started, ``False`` if one is already running
-        (single-flight).  The backfill runs synchronously in the **caller's
-        thread** — typical usage from the lifespan hook passes the supervisor
-        ``stop_event`` so shutdown aborts the backfill.  The HTTP route starts
-        the backfill in a daemon thread.
+        Returns ``True`` immediately if a new backfill was started, ``False`` if
+        one is already running (single-flight).
+
+        Thread spawning is done INSIDE ``start()`` so callers can use the bool
+        return value as the single-flight gate — no need for a TOCTOU-prone
+        ``is_running()`` pre-check (P1-5).  The returned bool is race-free
+        because the ``_flight_lock`` is held while checking and setting
+        ``_running``.
 
         ``stop_event_external``: if set, the backfill will stop.  Merged with
         the internal stop-event so both ``cancel()`` and external shutdown abort
@@ -151,14 +155,17 @@ class BackfillService:
             # Fresh stop-event per run so a previous cancel() does not carry over.
             self._stop_event = threading.Event()
 
-        try:
-            self._run(stop_event_external)
-        finally:
-            with self._flight_lock:
-                self._running = False
-            with self._progress_lock:
-                self._progress.running = False
+        def _worker() -> None:
+            try:
+                self._run(stop_event_external)
+            finally:
+                with self._flight_lock:
+                    self._running = False
+                with self._progress_lock:
+                    self._progress.running = False
 
+        t = threading.Thread(target=_worker, daemon=True, name="backfill-worker")
+        t.start()
         return True
 
     def status(self) -> BackfillStatus:
@@ -241,6 +248,12 @@ class BackfillService:
                 self._progress.current_region = None
                 self._progress.current_page = None
 
+        # Signal the stop-watcher thread to exit on normal completion.
+        # Without this, the watcher spins forever waiting for `combined` to be
+        # set, since neither `internal` nor `external` is set on a clean finish.
+        # Setting the internal stop-event here causes the watcher to detect it
+        # and exit promptly.  Idempotent: safe if cancel() was already called.
+        self._stop_event.set()
         logger.info("backfill: finished")
 
     def _process_region(self, region: int, stop: threading.Event) -> None:
@@ -276,9 +289,7 @@ class BackfillService:
                 continue
 
             try:
-                self._lot_repo.upsert(  # type: ignore[call-arg]
-                    lot, tracked=DEFAULT_TRACKED_FIELDS, notify=False
-                )
+                self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
             except Exception:
                 logger.warning(
                     "backfill: upsert failed for lot id=%s region=%s — skipping",

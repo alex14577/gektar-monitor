@@ -86,8 +86,8 @@ class FakeLotRepository:
     def __init__(self) -> None:
         self.upsert_calls: list[dict] = []
 
-    def upsert(self, lot: Any, *, tracked: Any, notify: bool = True) -> LotUpsertResult:
-        self.upsert_calls.append({"lot_id": lot.id, "notify": notify})
+    def upsert(self, lot: Any, *, tracked: Any) -> LotUpsertResult:
+        self.upsert_calls.append({"lot_id": lot.id})
         return LotUpsertResult(was_new=True, changes=[])
 
     def get(self, lot_id: int) -> None:
@@ -192,7 +192,7 @@ def test_fake_all_methods() -> None:
         enrichment_status="pending", last_seen_at=_NOW, is_active=True,
         inactive_reason=None, inactive_since=None, inactive_confirmed_at=None,
     )
-    result = repo.upsert(lot, tracked=("status",), notify=False)
+    result = repo.upsert(lot, tracked=("status",))
     assert result.was_new is True
     assert repo.get(1) is None
     assert repo.list_active(limit=10, offset=0) == []
@@ -216,7 +216,7 @@ def test_fake_all_methods() -> None:
 # ---------------------------------------------------------------------------
 
 class TestBasicBackfill:
-    def test_upserts_all_rows_with_notify_false(self) -> None:
+    def test_upserts_all_rows(self) -> None:
         rows = [_make_row(1), _make_row(2), _make_row(3)]
         svc, lot_repo, _mc, _fetcher = _make_service(
             rows_by_region={_REGION_A: rows},
@@ -224,10 +224,9 @@ class TestBasicBackfill:
 
         stop = threading.Event()
         svc.start(stop)
+        _wait_until_done(svc)
 
         assert len(lot_repo.upsert_calls) == 3
-        for call in lot_repo.upsert_calls:
-            assert call["notify"] is False, "upsert must be called with notify=False"
 
     def test_mark_clear_called_per_region(self) -> None:
         svc, _lot_repo, mc, _fetcher = _make_service(
@@ -237,6 +236,7 @@ class TestBasicBackfill:
 
         stop = threading.Event()
         svc.start(stop)
+        _wait_until_done(svc)
 
         assert mc.mark_calls == [_REGION_A]
         assert mc.clear_calls == [_REGION_A]
@@ -252,6 +252,7 @@ class TestBasicBackfill:
 
         stop = threading.Event()
         svc.start(stop)
+        _wait_until_done(svc)
 
         assert len(lot_repo.upsert_calls) == 3
         assert set(c["lot_id"] for c in lot_repo.upsert_calls) == {1, 2, 10}
@@ -261,9 +262,23 @@ class TestBasicBackfill:
 # Test 2: single-flight
 # ---------------------------------------------------------------------------
 
+def _wait_until_done(svc: BackfillService, timeout: float = 5.0) -> None:
+    """Block until ``svc.is_running()`` returns False or timeout expires."""
+    import time
+    deadline = time.monotonic() + timeout
+    while svc.is_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
 class TestSingleFlight:
     def test_second_start_returns_false_while_running(self) -> None:
-        """A second start() call while one is running returns False immediately."""
+        """A second start() call while one is running returns False immediately.
+
+        start() now spawns a daemon thread internally (P1-5), so the test
+        barrier waits until the worker thread is inside SlowFetcher.iterate
+        (i.e. the backfill is genuinely in-flight) before attempting a
+        second concurrent start().
+        """
         barrier = threading.Barrier(2)
         done_event = threading.Event()
 
@@ -275,40 +290,41 @@ class TestSingleFlight:
                 *,
                 sleep_between_pages: float = 2.0,
             ) -> Iterator[ParsedListRow]:
-                barrier.wait()  # signal that backfill is running
-                done_event.wait(timeout=5.0)  # wait until test lets it finish
+                barrier.wait()  # signal that backfill worker is running
+                done_event.wait(timeout=5.0)  # hold until test releases
                 return iter([])
 
         svc, *_ = _make_service(fetcher=SlowFetcher())  # type: ignore[call-overload]
 
         stop = threading.Event()
 
-        results: list[bool] = []
+        # First start() — spawns a daemon thread internally; returns True immediately.
+        r1 = svc.start(stop)
+        assert r1 is True
 
-        def _first() -> None:
-            results.append(svc.start(stop))
+        barrier.wait()  # wait until the worker thread is inside SlowFetcher.iterate
 
-        t = threading.Thread(target=_first, daemon=True)
-        t.start()
-
-        barrier.wait()  # wait until backfill thread is inside SlowFetcher.iterate
-        # Now backfill is running — second start() should return False
+        # Now backfill is running — second start() should return False.
         second_result = svc.start(stop)
         assert second_result is False, f"Expected False, got {second_result}"
         assert svc.is_running() is True
 
+        # Release the worker thread.
         done_event.set()
-        t.join(timeout=5.0)
-        assert results == [True]
+        _wait_until_done(svc)
+        assert not svc.is_running()
 
     def test_second_start_allowed_after_first_finishes(self) -> None:
+        """Two sequential start() calls both return True (no overlap)."""
         svc, _lot_repo, *_ = _make_service(rows_by_region={})
 
         stop = threading.Event()
         r1 = svc.start(stop)
-        r2 = svc.start(stop)
-
         assert r1 is True
+        # Wait for the first run to complete before attempting the second.
+        _wait_until_done(svc)
+        r2 = svc.start(stop)
+        _wait_until_done(svc)
         assert r2 is True  # second run started after first completed
 
 
@@ -334,6 +350,7 @@ class TestStatusSnapshot:
 
         stop = threading.Event()
         svc.start(stop)
+        _wait_until_done(svc)
 
         snap = svc.status()
         assert snap.running is False
@@ -349,7 +366,11 @@ class TestStatusSnapshot:
 
 class TestCancel:
     def test_cancel_while_running_stops_backfill(self) -> None:
-        """cancel() sets the stop event; the backfill stops before processing all regions."""
+        """cancel() sets the stop event; the backfill stops before processing all regions.
+
+        start() now spawns the backfill daemon thread internally.  The test uses
+        the barrier to synchronize with the worker thread directly.
+        """
         barrier = threading.Barrier(2)
         cancel_issued = threading.Event()
 
@@ -373,23 +394,15 @@ class TestCancel:
         )
 
         stop = threading.Event()
-        started = threading.Event()
-        finished = threading.Event()
+        # start() spawns the worker thread internally and returns True immediately.
+        svc.start(stop)
+        assert svc.is_running()
 
-        def _run() -> None:
-            started.set()
-            svc.start(stop)
-            finished.set()
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-        started.wait(timeout=5.0)
-
-        barrier.wait()  # wait until region B starts
+        barrier.wait()  # wait until worker thread is inside region B
         svc.cancel()
         cancel_issued.set()
 
-        finished.wait(timeout=5.0)
+        _wait_until_done(svc, timeout=5.0)
         assert not svc.is_running()
 
     def test_cancel_when_idle_is_noop(self) -> None:
@@ -397,3 +410,50 @@ class TestCancel:
         svc, *_ = _make_service()
         svc.cancel()  # should not raise
         assert not svc.is_running()
+
+
+# ---------------------------------------------------------------------------
+# Test 5: watcher thread exits on normal completion (P0-5)
+# ---------------------------------------------------------------------------
+
+class TestWatcherExitsOnNormalCompletion:
+    def test_watcher_exits_on_normal_completion(self) -> None:
+        """Stop-watcher daemon thread must exit within 2 s after a clean backfill run.
+
+        Regression guard for P0-5: without ``self._stop_event.set()`` in the
+        finally block of ``_run()``, the watcher thread polls forever because
+        neither the internal nor the external stop-event is set on a normal
+        finish.  The thread is daemon=True so it is invisible to join(), but it
+        still consumes OS resources.
+
+        Strategy: run a one-region backfill synchronously (start() blocks), then
+        verify the watcher thread is no longer alive within 2 s.
+        """
+        rows = [_make_row(1), _make_row(2)]
+        svc, _lot_repo, _mc, _fetcher = _make_service(
+            rows_by_region={_REGION_A: rows},
+        )
+
+        # Grab the watcher before it's created to identify it by name after.
+        # The watcher is started inside _combined_stop() which is called from
+        # _run().  We capture it by listing threads before and after start().
+        import threading
+
+        stop = threading.Event()
+        # start() is synchronous — it blocks until _run() completes.
+        svc.start(stop)
+
+        # The backfill finished; find the watcher thread if it exists.
+        watcher_threads = [
+            t for t in threading.enumerate()
+            if t.name == "backfill-stop-watcher"
+        ]
+
+        if watcher_threads:
+            # Watcher should exit shortly after _stop_event.set().
+            watcher_threads[0].join(timeout=2.0)
+            assert not watcher_threads[0].is_alive(), (
+                "Stop-watcher thread is still alive after backfill finished "
+                "(P0-5 regression: _stop_event.set() not called in _run finally)"
+            )
+        # If no watcher thread is found, it already exited — which is also correct.

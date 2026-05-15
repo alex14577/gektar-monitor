@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, EmailStr, Field
@@ -153,7 +153,7 @@ def get_settings(
     request: Request,
     config_source: Any = Depends(get_config_source),
     templates: Jinja2Templates = Depends(get_templates),
-) -> JSONResponse:
+) -> Response:
     """Return the current Settings snapshot.
 
     Content-negotiation:

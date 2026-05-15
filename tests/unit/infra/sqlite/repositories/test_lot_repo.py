@@ -1,9 +1,11 @@
 """Unit tests for SqliteLotRepository additions.
 
 Coverage:
-  1. upsert with notify=False — kwarg accepted, returns LotUpsertResult.
-  2. upsert with notify=True (default) — backward-compat, returns LotUpsertResult.
-  3. count_active — returns 0 on empty DB, correct count after inserts.
+  1. upsert basic — new lot insertion, second upsert, kwarg-free call.
+  2. count_active — returns 0 on empty DB, correct count after inserts.
+
+Note: The ``notify`` parameter was removed from upsert (P1-3) — it was a dead
+parameter that was never read by the repository implementation.
 """
 
 from __future__ import annotations
@@ -68,33 +70,31 @@ def _make_repo(conn_provider: ConnectionProvider) -> SqliteLotRepository:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: upsert with notify=False is accepted and returns correct result
+# Test 1: upsert returns correct result (P1-3: notify parameter removed)
 # ---------------------------------------------------------------------------
 
-class TestUpsertNotifyFalse:
-    def test_upsert_notify_false_accepted(self, tmp_db: ConnectionProvider) -> None:
-        """notify=False is accepted as a kwarg; result is a valid LotUpsertResult."""
+class TestUpsertBasic:
+    def test_upsert_new_lot_returns_was_new_true(self, tmp_db: ConnectionProvider) -> None:
+        """New lot insertion returns was_new=True and an empty changes list."""
         repo = _make_repo(tmp_db)
         lot = _make_lot(1)
 
-        result = repo.upsert(lot, tracked=("status",), notify=False)
+        result = repo.upsert(lot, tracked=("status",))
 
         assert result.was_new is True
         assert isinstance(result.changes, list)
 
-    def test_upsert_notify_false_skips_no_db_side_effects(
+    def test_upsert_second_upsert_returns_was_new_false(
         self, tmp_db: ConnectionProvider
     ) -> None:
-        """notify=False does not change the persisted lot — same result as notify=True."""
+        """Second upsert for same lot returns was_new=False and lot is persisted."""
         repo = _make_repo(tmp_db)
         lot = _make_lot(2)
 
-        # First insert with notify=False
-        r1 = repo.upsert(lot, tracked=("status",), notify=False)
+        r1 = repo.upsert(lot, tracked=("status",))
         assert r1.was_new is True
 
-        # Second upsert — lot already exists → was_new=False
-        r2 = repo.upsert(lot, tracked=("status",), notify=False)
+        r2 = repo.upsert(lot, tracked=("status",))
         assert r2.was_new is False
 
         # Verify the lot is in DB
@@ -102,8 +102,8 @@ class TestUpsertNotifyFalse:
         assert fetched is not None
         assert fetched.id == 2
 
-    def test_upsert_notify_true_is_default(self, tmp_db: ConnectionProvider) -> None:
-        """Calling upsert without notify keyword works (default=True)."""
+    def test_upsert_without_notify_kwarg_works(self, tmp_db: ConnectionProvider) -> None:
+        """Calling upsert without any extra kwargs works — notify param was removed (P1-3)."""
         repo = _make_repo(tmp_db)
         lot = _make_lot(3)
 

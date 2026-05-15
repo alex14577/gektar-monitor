@@ -11,8 +11,8 @@ Test matrix:
 6. ``test_deadline_timeout``              — elapsed > deadline returns error="timeout".
 7. ``test_headless_false``                — launch_persistent_context called with headless=False.
 8. ``test_di_playwright_factory``         — custom playwright_factory is used (DI).
-9. ``test_map_exception_missing_binary``  — _map_exception maps missing-binary message to correct hint.
-10. ``test_map_exception_missing_deps``   — _map_exception maps missing-deps message to correct hint.
+9. ``test_map_exception_missing_binary``  — maps missing-binary message to correct hint.
+10. ``test_map_exception_missing_deps``   — maps missing-deps message to correct hint.
 11. ``test_map_exception_unmapped_logs_error`` — unmapped exception triggers ERROR log.
 12. ``test_initial_goto_called``           — page.goto() is invoked with the login start URL.
 13. ``test_initial_goto_failure_mapped``   — goto() exceptions are mapped to LoginOutcome.error.
@@ -273,26 +273,31 @@ def test_host_whitelist_route_registered(tmp_path: Path) -> None:
 
 
 def test_deadline_timeout(tmp_path: Path) -> None:
-    """When deadline <= 0 ms remain, open_headed_login returns error='timeout'."""
-    # Use a clock that starts at 1000s; deadline is 0.5s → remaining = 0 ms after overhead.
+    """When deadline is in the past (remaining_ms <= 0), open_headed_login returns error='timeout'.
+
+    Regression guard for P0-1: ``deadline`` is an absolute monotonic timestamp,
+    not a duration. ``remaining_ms`` must be computed as ``(deadline - start) * 1000``.
+    A deadline equal to the current monotonic value yields 0 ms remaining, which
+    the implementation must detect before calling Playwright.
+    """
+    # Clock starts at 1000.0 s monotonic.
     clock = FakeClock(start=1000.0)
 
-    # Patch monotonic to advance 5s between setup calls so remaining_ms → 0.
-    call_count = 0
-
-    def _advancing_monotonic() -> float:
-        nonlocal call_count
-        call_count += 1
-        return 1000.0 + call_count * 10.0  # each call advances 10s
-
-    clock.monotonic = _advancing_monotonic  # type: ignore[method-assign]
+    # Deadline already elapsed by the time _run_login is entered: pass an
+    # absolute timestamp that is in the past relative to clock.monotonic().
+    # With the correct fix:
+    #   remaining_ms = int((deadline - start) * 1000)
+    #   = int((1000.0 - 1000.0) * 1000) = 0   →  timeout path taken.
+    # With the old bug (remaining_ms = int(deadline * 1000)):
+    #   remaining_ms would be 1_000_000 ms  →  no timeout, regression detected.
+    deadline_absolute = clock.monotonic()  # = 1000.0, i.e. zero remaining
 
     page = _make_page_mock()
     context = _make_context_mock(page)
     factory = _make_pw_factory(context)
 
     session = _make_session(clock=clock, playwright_factory=factory, profile_dir=tmp_path)
-    outcome = session.open_headed_login(deadline=0.001)  # effectively 0 remaining
+    outcome = session.open_headed_login(deadline=deadline_absolute)
 
     assert outcome.success is False
     assert outcome.error == "timeout"
@@ -359,7 +364,10 @@ def test_di_playwright_factory(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "message",
     [
-        "BrowserType.launch_persistent_context: Executable doesn't exist at /home/alex/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome",
+        (
+            "BrowserType.launch_persistent_context: Executable doesn't exist at "
+            "/home/alex/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome"
+        ),
         "Looks like Playwright was just installed... Please run: playwright install",
     ],
 )

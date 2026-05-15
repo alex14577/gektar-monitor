@@ -42,7 +42,9 @@ _REGION_B = 50
 # ---------------------------------------------------------------------------
 
 class FakeHttpClient:
-    def get(self, url: str, *, params: Any = None, headers: Any = None, timeout: float | None = None) -> HttpResponse:
+    def get(
+        self, url: str, *, params: Any = None, headers: Any = None, timeout: float | None = None
+    ) -> HttpResponse:
         return HttpResponse(status=200, text="<html/>", headers={}, final_url=url)
 
 
@@ -57,7 +59,7 @@ class FakeEnrichmentService:
 
 
 class FakeLotRepository:
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField], notify: bool = True) -> LotUpsertResult:
+    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
         return LotUpsertResult(was_new=False, changes=[])
 
     def get(self, lot_id: int) -> Lot | None:
@@ -221,8 +223,6 @@ class TestRunForeverSkipsBackfilledRegions:
         stop = threading.Event()
 
         # We need to stop after one pass. Patch _wait_for_next_pass to stop immediately.
-        original_wait = svc._wait_for_next_pass
-
         def _stop_after_first_pass(stop_ev: threading.Event, timeout: float) -> None:
             stop_ev.set()
 

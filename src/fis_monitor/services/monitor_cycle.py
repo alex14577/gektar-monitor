@@ -52,14 +52,18 @@ from fis_monitor.domain.interfaces import (
     LotRepository,
 )
 from fis_monitor.domain.models import (
+    DEFAULT_TRACKED_FIELDS,
     CycleResult,
     ErrorCategory,
     Lot,
-    LotPublicDTO,
-    ParsedListRow,
     SseCycleError,
     SseLotNew,
-    TrackedField,
+)
+from fis_monitor.domain.models import (
+    lot_to_public_dto as _lot_to_public_dto,
+)
+from fis_monitor.domain.models import (
+    parsed_row_to_lot as _parsed_row_to_lot,
 )
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
@@ -70,18 +74,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# DEFAULT_TRACKED_FIELDS — fields written to lots_history on every upsert.
-# Derived from the TrackedField Literal; chosen as the minimal MVP set that
-# drives notifications (status, area) and history queries (date_update).
-# ---------------------------------------------------------------------------
-DEFAULT_TRACKED_FIELDS: tuple[TrackedField, ...] = (
-    "status",
-    "area_sqm",
-    "date_update",
-    "is_active",
-    "list_presence",
-)
+# DEFAULT_TRACKED_FIELDS and _parsed_row_to_lot are re-exported from domain/models.py
+# for backward-compat imports (e.g. tests that import from monitor_cycle directly).
+# The canonical definitions live in fis_monitor.domain.models.
+__all__ = ["DEFAULT_TRACKED_FIELDS", "MonitorCycleService"]
 
 _DEFAULT_URL_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
 
@@ -115,57 +111,6 @@ def _safe_error_str(exc: BaseException) -> str:
     raw_msg = str(exc)[:150]
     combined = f"{type_name}: {raw_msg}"
     return combined[:200]
-
-
-def _parsed_row_to_lot(row: ParsedListRow, now: datetime) -> Lot:
-    """Construct a minimal ``Lot`` from a ``ParsedListRow``.
-
-    Detail fields (lat, lon, raw_json, enrichment_status, …) are set to
-    sensible defaults — ``EnrichmentService`` will fill them in.
-    """
-    return Lot(
-        id=row.id,
-        cadastral_no=row.cadastral_no,
-        area_sqm=row.area_sqm,
-        region=row.region,
-        municipality=row.municipality,
-        land_category=row.land_category,
-        permitted_use=row.permitted_use,
-        ogv=row.ogv,
-        status=row.status,
-        date_create=row.date_create,
-        date_update=row.date_update,
-        lat=None,
-        lon=None,
-        has_boundaries=None,
-        raw_json={},
-        parser_version=1,
-        first_seen=now,
-        last_seen=now,
-        detail_fetched_at=None,
-        enrichment_status="pending",
-        last_seen_at=now,
-        is_active=True,
-        inactive_reason=None,
-        inactive_since=None,
-        inactive_confirmed_at=None,
-    )
-
-
-def _lot_to_public_dto(lot: Lot) -> LotPublicDTO:
-    """Construct a ``LotPublicDTO`` from a ``Lot`` with default presentation hints.
-
-    ``age_seconds``, ``tier``, and ``freshness`` are presentation hints that
-    are computed properly by the web layer.  For the EventBus fan-out we use
-    safe defaults — downstream consumers that need accurate tiers should
-    recompute from the lot's timestamps.
-    """
-    return LotPublicDTO(
-        **lot.model_dump(),
-        age_seconds=0,
-        tier="match",
-        freshness="hot",
-    )
 
 
 # ---------------------------------------------------------------------------

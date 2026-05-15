@@ -267,6 +267,15 @@ async def _lifespan_impl(
                 except Exception:
                     logger.exception("phase 1: dispatcher stop_event.set() failed")
 
+            # Cancel any running backfill before supervisor.shutdown() so the
+            # backfill thread exits cleanly rather than being abandoned (P0-4).
+            if container is not None:
+                try:
+                    container.services.backfill.cancel()
+                    logger.info("lifespan: backfill.cancel() called")
+                except Exception:
+                    logger.exception("lifespan: backfill.cancel() failed")
+
             if supervisor is not None:
                 try:
                     report = supervisor.shutdown(grace_timeout=35.0)
