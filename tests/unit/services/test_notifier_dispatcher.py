@@ -448,8 +448,8 @@ class FakeBrowserNotifier(FakeNotifier):
 # ---------------------------------------------------------------------------
 
 
-def _make_lot_public(lot_id: int = 12345) -> LotPublicDTO:
-    lot = make_lot(id=lot_id)
+def _make_lot_public(lot_id: int = 12345, region_id: int | None = 1) -> LotPublicDTO:
+    lot = make_lot(id=lot_id, region_id=region_id)
     return LotPublicDTO(
         **lot.model_dump(),
         age_seconds=3600,
@@ -1252,8 +1252,8 @@ def test_all_fake_config_source_methods_invoked():
 # Tests: dispatch() — subscribed_at cutoff filter (ADR-039)
 # ===========================================================================
 
-# make_lot() default: region="Хабаровский край" (ID 89), date_create=_NOW
-_REGION_ID_KHABAROVSK = 89
+# make_lot() default: date_create=_NOW; region_id=1 (ДФО macro-region)
+_MACRO_REGION_DFO = 1
 _SUBSCRIBED_AT_BEFORE = _NOW - timedelta(hours=1)   # date_create > subscribed_at → pass
 _SUBSCRIBED_AT_EQUAL = _NOW                          # date_create == subscribed_at → pass (>=)
 _SUBSCRIBED_AT_AFTER = _NOW + timedelta(hours=1)    # date_create < subscribed_at → drop
@@ -1262,7 +1262,7 @@ _SUBSCRIBED_AT_AFTER = _NOW + timedelta(hours=1)    # date_create < subscribed_a
 def test_dispatch_subscribed_at_drops_lot_older_than_cutoff(caplog):
     """date_create < subscribed_at → dispatch skipped, log emitted, queue empty."""
     region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_AFTER)
+    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
 
     dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
     lot = _make_lot_public()  # date_create = _NOW < _SUBSCRIBED_AT_AFTER
@@ -1282,7 +1282,7 @@ def test_dispatch_subscribed_at_drops_lot_older_than_cutoff(caplog):
 def test_dispatch_subscribed_at_allows_lot_equal_to_cutoff():
     """date_create == subscribed_at → dispatch allowed (>= condition)."""
     region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_EQUAL)
+    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_EQUAL)
 
     dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
     lot = _make_lot_public()  # date_create = _NOW == _SUBSCRIBED_AT_EQUAL
@@ -1295,7 +1295,7 @@ def test_dispatch_subscribed_at_allows_lot_equal_to_cutoff():
 def test_dispatch_subscribed_at_allows_lot_newer_than_cutoff():
     """date_create > subscribed_at → dispatch normal."""
     region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_BEFORE)
+    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_BEFORE)
 
     dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
     lot = _make_lot_public()  # date_create = _NOW > _SUBSCRIBED_AT_BEFORE
@@ -1306,16 +1306,29 @@ def test_dispatch_subscribed_at_allows_lot_newer_than_cutoff():
 
 
 def test_dispatch_subscribed_at_none_allows_dispatch():
-    """region_subs_repo.get_subscribed_at returns None → dispatch normal (graceful)."""
+    """get_subscribed_at returns None (no record) → dispatch normal (graceful)."""
     region_sub_repo = FakeRegionSubscriptionRepository()
     # No seed — get_subscribed_at returns None
 
     dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
-    lot = _make_lot_public()
+    lot = _make_lot_public()  # region_id=_MACRO_REGION_DFO, no subscribed_at row
 
     dispatcher.dispatch(lot)
 
     assert not dispatcher._queue.empty(), "lot must be enqueued when subscribed_at is None"
+
+
+def test_dispatch_region_id_none_allows_dispatch():
+    """lot.region_id=None (legacy lot) → filter skipped, dispatch normal (graceful)."""
+    region_sub_repo = FakeRegionSubscriptionRepository()
+    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+
+    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
+    lot = _make_lot_public(region_id=None)  # legacy lot: no region_id
+
+    dispatcher.dispatch(lot)
+
+    assert not dispatcher._queue.empty(), "lot must be enqueued when region_id is None"
 
 
 def test_dispatch_no_region_sub_repo_allows_dispatch():
@@ -1331,18 +1344,20 @@ def test_dispatch_no_region_sub_repo_allows_dispatch():
 def test_dispatch_subscribed_at_filter_applied_per_lot():
     """Multiple lots: filter applied per-lot based on their individual date_create."""
     region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_REGION_ID_KHABAROVSK, _SUBSCRIBED_AT_EQUAL)
+    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_EQUAL)
 
     dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
 
     # old lot: date_create before subscribed_at → dropped
     old_lot = LotPublicDTO(
-        **make_lot(id=1, date_create=_NOW - timedelta(hours=1)).model_dump(),
+        **make_lot(
+            id=1, date_create=_NOW - timedelta(hours=1), region_id=_MACRO_REGION_DFO
+        ).model_dump(),
         age_seconds=0, tier="match", freshness="warm",
     )
     # new lot: date_create == subscribed_at → allowed
     new_lot = LotPublicDTO(
-        **make_lot(id=2, date_create=_NOW).model_dump(),
+        **make_lot(id=2, date_create=_NOW, region_id=_MACRO_REGION_DFO).model_dump(),
         age_seconds=0, tier="match", freshness="warm",
     )
 
