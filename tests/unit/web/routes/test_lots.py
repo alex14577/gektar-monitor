@@ -210,6 +210,33 @@ def test_get_lot_no_raw_json_leak() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tests — GET /lots/{lot_id}/redirect
+# ---------------------------------------------------------------------------
+
+
+def test_redirect_returns_302_with_location_for_known_lot() -> None:
+    """Invariant: existing lot → 302 + Location pointing to torgi.gov.ru."""
+    dto = _make_lot_user_dto(lot_id=9963)
+    app, fake = _make_app(FakeLotQueryService(single=dto))
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/lots/9963/redirect", follow_redirects=False)
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert "9963" in location
+    assert location.startswith("https://")
+    assert fake.get_by_id_calls == [9963]
+
+
+def test_redirect_returns_404_for_unknown_lot() -> None:
+    """Invariant: unknown lot_id → 404, no redirect issued."""
+    app, fake = _make_app(FakeLotQueryService(single=None))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.get("/lots/99999/redirect", follow_redirects=False)
+    assert resp.status_code == 404
+    assert fake.get_by_id_calls == [99999]
+
+
+# ---------------------------------------------------------------------------
 # Anti-mock: exercise ALL fake methods in one test
 # ---------------------------------------------------------------------------
 

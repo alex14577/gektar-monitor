@@ -3,6 +3,7 @@
 Endpoints:
   GET  /lots                   — filtered, paginated lot catalog via LotQueryService.search()
   GET  /lots/{lot_id}          — single lot via LotQueryService.get_by_id()
+  GET  /lots/{lot_id}/redirect — 302 redirect to canonical lot page on torgi.gov.ru
   GET  /lots/{lot_id}/details  — HTMX partial: lot detail card + user state
   POST /lots/{lot_id}/star     — toggle starred flag (204)
   POST /lots/{lot_id}/archive  — toggle archived flag (204)
@@ -18,14 +19,18 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from fis_monitor.domain.models import LotUserDTO
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.lot_query import LotFilters, LotQueryService, Page
 from fis_monitor.services.lot_user_state import LotNotFoundError, LotUserStateService
 from fis_monitor.web.deps import get_lot_query, get_lot_user_state_service, get_templates
+
+# Canonical upstream base URL — domain constant, not user-configurable (ADR-024).
+_TORGI_URL_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
 
 # ---------------------------------------------------------------------------
 # Router
@@ -96,6 +101,23 @@ def get_lot(
     if lot is None:
         raise HTTPException(status_code=404, detail=f"Lot {lot_id} not found")
     return JSONResponse(content=lot.model_dump(mode="json"))
+
+
+@router.get("/{lot_id}/redirect")
+def redirect_to_torgi(
+    lot_id: int,
+    svc: LotQueryService = Depends(get_lot_query),
+) -> RedirectResponse:
+    """Redirect to the canonical lot page on torgi.gov.ru.
+
+    Returns 302 to the upstream detail URL when the lot exists in the local DB.
+    Returns 404 when the lot is not found — prevents open redirects to arbitrary IDs.
+    """
+    lot = svc.get_by_id(lot_id)
+    if lot is None:
+        raise HTTPException(status_code=404, detail=f"Lot {lot_id} not found")
+    external_url = _TORGI_URL_BUILDER.lot_detail_url(lot_id=lot_id)
+    return RedirectResponse(url=external_url, status_code=302)
 
 
 # ---------------------------------------------------------------------------
