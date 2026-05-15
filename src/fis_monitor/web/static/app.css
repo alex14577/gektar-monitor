@@ -42,6 +42,9 @@
   --err:          var(--hot);
   --err-soft:     var(--hot-soft);
 
+  /* layout */
+  --page-max-w: 1280px;
+
   /* radius / shadow / motion */
   --r-sm: 6px;
   --r:    10px;
@@ -122,17 +125,25 @@ code, kbd, .mono { font-family: var(--font-mono); }
   display: grid;
   grid-template-columns: 220px 1fr;
   min-height: 100vh;
+  max-width: var(--page-max-w);
+  margin-inline: auto;
 }
 .app__main { min-width: 0; padding: 24px clamp(16px, 2vw, 40px) 80px; }
 
 /* ---------- header ---------- */
+/* Full-bleed strip; inner content centred via .header__inner */
 .header {
   position: sticky; top: 0; z-index: 30;
   background: color-mix(in oklab, var(--bg) 88%, transparent);
   backdrop-filter: saturate(160%) blur(8px);
   -webkit-backdrop-filter: saturate(160%) blur(8px);
   border-bottom: 1px solid var(--line);
-  padding: 10px clamp(16px, 2vw, 40px);
+  padding-block: 10px;
+}
+.header__inner {
+  max-width: var(--page-max-w);
+  margin-inline: auto;
+  padding-inline: clamp(16px, 2vw, 40px);
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 16px;
