@@ -48,3 +48,35 @@ lint-imports    # layered architecture contracts (ADR-006)
 ```
 
 Контракты `layers` и `domain_purity` определены в `.importlinter` и проверяются тестом `tests/test_import_linter_contracts.py`.
+
+## Local staging (fake-torgi)
+
+`tools/fake_torgi/` — локальный staging-сервер, зеркалирующий торги.gov.ru достаточно для ручного E2E-прогона: оператор добавляет лот → сервис опрашивает → отправляет email + SSE.
+
+```bash
+# Запуск (нулевые новые зависимости — FastAPI+Jinja2+uvicorn уже в prod-deps)
+python tools/fake_torgi/server.py --port 8765
+
+# Указать сервису на fake-сервер
+FIS_TARGET__BASE_URL=http://localhost:8765 python -m fis_monitor
+
+# Открыть admin UI для добавления/удаления лотов
+# http://localhost:8765/admin
+
+# Health-check
+curl http://localhost:8765/status
+```
+
+Эндпоинты:
+
+| Endpoint | Назначение |
+|---|---|
+| `GET /cabinet/free-lot?region=N` | Список лотов (HTML, SelectolaxListParser) |
+| `GET /cabinet/free-lot-view?id=N` | Карточка лота (HTML, SelectolaxDetailParser) |
+| `GET /admin` | Admin UI — список лотов |
+| `POST /admin/lots` | Добавить лот (PRG) |
+| `POST /admin/lots/{id}/delete` | Удалить лот (PRG) |
+| `POST /admin/lots/{id}/status` | Изменить статус (PRG) |
+| `GET /status` | Health-check JSON |
+
+Данные хранятся в `tools/fake_torgi/lots.json` (gitignored). Пример: `tools/fake_torgi/lots.json.example`.
