@@ -50,6 +50,7 @@ _WHITELIST_PREFIXES: tuple[str, ...] = (
     "/api/health",
     "/onboarding/",
     "/auth/",
+    "/settings/smtp/suggest",
 )
 
 _REDIRECT_BODY = b""
