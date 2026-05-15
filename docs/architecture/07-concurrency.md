@@ -131,3 +131,13 @@ Decisions-log говорит «приоритет: monitor > enrichment > full_s
   - `interval_minutes: 15 → 5` (числовой scalar — это OK, не PII)
 - **Полные значения config-diff** — отдельный append-only `audit.jsonl`, **физически исключённый** из `DiagnosticsService` (как `smtp_credentials`). Файл собирается ТОЛЬКО для on-disk audit, не для отправки клиенту. См. [[decisions/ADR-012-diagnostic-zip-allowlist-redactor|ADR-012]], секция «audit.jsonl isolation».
 - **ACL на `config.json`** ([[ops/runbook]]/installer-чеклист): Windows — `Users: read, %USERNAME%: full`; Linux — `chmod 600`. Если кто-то с правами админа пишет в config — это вне нашей threat model.
+
+## 7.7 Pagination policy per trigger (ADR-036)
+
+MonitorCycleService, FullScanService и BackfillService используют `PaginatedListFetcher.iterate()` с **разными контрактами пагинации** — формализовано в [[decisions/ADR-036-head-poll-cycle-policy|ADR-036]]:
+
+- **MonitorCycleService** (`T-cycle` поток): **head-poll** — `iterate(region, per_page=20, max_pages=1)`. Только первая страница, 2 HTTP-запроса на проход (2 макрорегиона). Bound cost; discovery-latency ≤1 min.
+- **FullScanService** (`T-fullscan` поток): **full walk** — `iterate(region, per_page=50)`. Unlimited pages; весь каталог для active-set + mass-deactivation. Запускается раз в сутки, высокий SQLite write-pressure → именно поэтому пейсится inter-batch sleep и имеет наинизший приоритет по ADR-005.
+- **BackfillService** (on-demand поток): **full walk** — `iterate(region, per_page=50)`. Bootstrap; занимает write-lock на всё время работы; MonitorCycleService пропускает регионы в `_regions_in_backfill` на это время.
+
+Стоимость конкурентности: head-poll (2 req/min) не конкурирует с FullScan по HTTP — они работают в разное время суток. Конкуренция только за SQLite-writer-lock (ADR-005 busy_timeout достаточно).
