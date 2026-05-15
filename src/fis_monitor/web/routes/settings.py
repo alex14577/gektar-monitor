@@ -327,15 +327,14 @@ def post_schedule(
     request: Request,
     interval_minutes: Annotated[str, Form()],
     full_scan_time: Annotated[str, Form()],
-    full_scan_l2_priority_days: Annotated[str, Form()],
     config_source: Any = Depends(get_config_source),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> Response:
     """Replace monitoring schedule settings (ADR-033).
 
     Accepts application/x-www-form-urlencoded from the htmx form in
-    settings.html.jinja (no hx-ext="json-enc" required).  All three fields
-    are updated atomically to prevent compute-and-replace races.
+    settings.html.jinja (no hx-ext="json-enc" required).  Both fields are
+    updated atomically to prevent compute-and-replace races.
     Hot-reload is automatic: MonitorCycleService and FullScanService read
     config_source.current() on every iteration.
 
@@ -365,29 +364,9 @@ def post_schedule(
             detail=f"full_scan_time must match HH:MM (00:00–23:59), got {full_scan_time!r}",
         )
 
-    # Validate full_scan_l2_priority_days
-    try:
-        l2_days_int = int(full_scan_l2_priority_days)
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"full_scan_l2_priority_days must be an integer,"
-                f" got {full_scan_l2_priority_days!r}"
-            ),
-        ) from None
-    if not (1 <= l2_days_int <= 365):
-        raise HTTPException(
-            status_code=422,
-            detail=f"full_scan_l2_priority_days must be 1–365, got {l2_days_int}",
-        )
-
     current = config_source.current()
     new_monitoring = current.monitoring.model_copy(
-        update={
-            "full_scan_time": full_scan_time,
-            "full_scan_l2_priority_days": l2_days_int,
-        }
+        update={"full_scan_time": full_scan_time}
     )
     new_settings = current.model_copy(
         update={

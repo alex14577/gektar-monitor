@@ -10,10 +10,16 @@
 ## Context
 
 `settings.html.jinja:140-145` показывает расписание мониторинга как read-only
-(`<span>` без формы). Изменить `interval_minutes`, `monitoring.full_scan_time`,
-`monitoring.full_scan_l2_priority_days` можно только через ручное редактирование
-`var/config.json` и перезапуск. Это расходится с остальным UX где `/settings/regions`
-и `/settings/recipients` редактируются через веб.
+(`<span>` без формы). Изменить `interval_minutes` и `monitoring.full_scan_time`
+можно только через ручное редактирование `var/config.json` и перезапуск. Это
+расходится с остальным UX где `/settings/regions` и `/settings/recipients`
+редактируются через веб.
+
+**Update 2026-05-15**: поле `monitoring.full_scan_l2_priority_days` убрано из
+веб-формы — параметр относится к нереализованной L2 active verification
+(`services/full_scan.py` §MVP-scope) и непонятен пользователю. Атрибут остаётся
+в `MonitoringSettings` (default `7`) как extension point; редактируется только
+через `var/config.json` если/когда L2 verifier будет реализован.
 
 `MonitorCycleService.run_forever` читает `config_source.current()` на **каждой
 итерации** (подтверждено `monitor_cycle.py:230, 236`). `FullScanService.run_forever`
@@ -30,17 +36,15 @@
 
 Один endpoint с тремя полями в одном payload, по аналогии с `POST /settings/regions`.
 
-**Тело запроса** (`ScheduleBody: BaseModel`):
+**Тело запроса** (form-encoded, валидация в handler):
 ```python
-class ScheduleBody(BaseModel):
-    interval_minutes: Annotated[int, Field(ge=0, le=60)]
-    full_scan_time: str          # формат "HH:MM", regex-валидация
-    full_scan_l2_priority_days: Annotated[int, Field(ge=1, le=365)]
+interval_minutes: Annotated[str, Form()]   # 0–60
+full_scan_time:   Annotated[str, Form()]   # формат "HH:MM", regex-валидация
 ```
 
 **Обоснование единого endpoint**:
-- Три поля семантически связаны («расписание мониторинга»).
-- Три отдельных endpoint'а привели бы к partial-update races: если пользователь
+- Поля семантически связаны («расписание мониторинга»).
+- Отдельные endpoint'ы привели бы к partial-update races: если пользователь
   меняет `interval_minutes` и `full_scan_time` одновременно через два POST'а,
   второй может затереть изменение первого (ConfigSource compute-and-replace).
   Один payload атомарен.
@@ -50,11 +54,10 @@ class ScheduleBody(BaseModel):
 ```python
 current = config_source.current()
 new_monitoring = current.monitoring.model_copy(update={
-    "full_scan_time": body.full_scan_time,
-    "full_scan_l2_priority_days": body.full_scan_l2_priority_days,
+    "full_scan_time": full_scan_time,
 })
 new_settings = current.model_copy(update={
-    "interval_minutes": body.interval_minutes,
+    "interval_minutes": interval_int,
     "monitoring": new_monitoring,
 })
 config_source.save(new_settings)
@@ -82,9 +85,9 @@ Regex `^([01]\d|2[0-3]):[0-5]\d$` на уровне Pydantic field_validator в 
 
 В `settings.html.jinja` секция «Расписание мониторинга» заменяется на форму
 с `hx-post="/settings/schedule"`, `hx-target="#schedule-section"`,
-`hx-swap="outerHTML"`. Три поля: `<input type="number">` для interval и l2_days,
-`<input type="text" pattern="...">` для full_scan_time. После 204 htmx обновляет
-секцию.
+`hx-swap="outerHTML"`. Два поля: `<input type="number">` для interval и
+`<input type="text" pattern="...">` для full_scan_time. После 200 htmx обновляет
+секцию через outerHTML.
 
 ---
 

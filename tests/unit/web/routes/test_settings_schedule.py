@@ -5,10 +5,8 @@ Coverage:
   2. POST /settings/schedule does not clobber unrelated Settings fields.
   3. Validation: interval_minutes out of range (< 0, > 60) → 422.
   4. Validation: full_scan_time invalid format (not HH:MM) → 422.
-  5. Validation: full_scan_l2_priority_days < 1 → 422.
-  6. Boundary values: interval=0 (continuous) accepted; time=23:59 accepted;
-     l2_days=365 accepted.
-  7. Hot-reload smoke: config_source.current() reflects new schedule after save.
+  5. Boundary values: interval=0 (continuous) accepted; time=23:59 accepted.
+  6. Hot-reload smoke: config_source.current() reflects new schedule after save.
 """
 
 from __future__ import annotations
@@ -65,7 +63,6 @@ def _make_app(
 _VALID_PAYLOAD = {
     "interval_minutes": "15",
     "full_scan_time": "04:00",
-    "full_scan_l2_priority_days": "7",
 }
 
 
@@ -93,20 +90,18 @@ class TestPostScheduleHappyPath:
             )
         assert 'value="5"' in resp.text, "Expected saved interval_minutes in partial HTML"
 
-    def test_saves_all_three_fields(self) -> None:
-        """All three fields are persisted together (atomic update per ADR-033)."""
+    def test_saves_both_fields(self) -> None:
+        """Both fields are persisted together (atomic update per ADR-033)."""
         app, fc = _make_app()
         payload = {
             "interval_minutes": "5",
             "full_scan_time": "02:30",
-            "full_scan_l2_priority_days": "14",
         }
         with TestClient(app) as client:
             client.post("/settings/schedule", data=payload)
         saved = fc.save_calls[0]
         assert saved.interval_minutes == 5
         assert saved.monitoring.full_scan_time == "02:30"
-        assert saved.monitoring.full_scan_l2_priority_days == 14
 
     def test_does_not_clobber_other_fields(self) -> None:
         """Schedule update must preserve unrelated Settings fields."""
@@ -178,24 +173,6 @@ class TestPostScheduleBoundaries:
             )
         assert resp.status_code == 200, resp.text
 
-    def test_l2_days_1_accepted(self) -> None:
-        app, _ = _make_app()
-        with TestClient(app) as client:
-            resp = client.post(
-                "/settings/schedule",
-                data={**_VALID_PAYLOAD, "full_scan_l2_priority_days": "1"},
-            )
-        assert resp.status_code == 200, resp.text
-
-    def test_l2_days_365_accepted(self) -> None:
-        app, _ = _make_app()
-        with TestClient(app) as client:
-            resp = client.post(
-                "/settings/schedule",
-                data={**_VALID_PAYLOAD, "full_scan_l2_priority_days": "365"},
-            )
-        assert resp.status_code == 200, resp.text
-
 
 # ---------------------------------------------------------------------------
 # Validation errors
@@ -228,23 +205,12 @@ class TestPostScheduleValidation:
             )
         assert resp.status_code == 422, f"Expected 422 for full_scan_time={bad_time!r}"
 
-    @pytest.mark.parametrize("bad_days", ["0", "-1", "366", "1000"])
-    def test_l2_days_out_of_range_returns_422(self, bad_days: str) -> None:
-        """full_scan_l2_priority_days outside 1–365 → 422."""
-        app, _ = _make_app()
-        with TestClient(app) as client:
-            resp = client.post(
-                "/settings/schedule",
-                data={**_VALID_PAYLOAD, "full_scan_l2_priority_days": bad_days},
-            )
-        assert resp.status_code == 422, f"Expected 422 for l2_days={bad_days}"
-
     def test_missing_field_returns_422(self) -> None:
         """Omitting any required field → 422."""
         app, _ = _make_app()
         with TestClient(app) as client:
             resp = client.post(
                 "/settings/schedule",
-                data={"interval_minutes": "15"},  # missing full_scan_time and l2_days
+                data={"interval_minutes": "15"},  # missing full_scan_time
             )
         assert resp.status_code == 422, resp.text

@@ -197,17 +197,6 @@
         </p>
       </div>
 
-      <div class="field" style="margin-bottom: 16px;">
-        <label class="field__label" for="l2-days-input">Приоритетные дни L2-сканирования</label>
-        <input class="input mono" id="l2-days-input" name="full_scan_l2_priority_days"
-               type="number" min="1" max="365"
-               value="{{ settings.monitoring.full_scan_l2_priority_days }}"
-               style="max-width: 120px;" />
-        <p style="font-size: 0.75rem; color: var(--muted); margin: 4px 0 0;">
-          Лоты появившиеся за последние N дней проверяются в первую очередь. Допустимо: 1–365.
-        </p>
-      </div>
-
       <button class="btn btn--primary" type="submit">
         Сохранить расписание
       </button>
