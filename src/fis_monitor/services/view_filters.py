@@ -33,16 +33,6 @@ _log = logging.getLogger(__name__)
 # TODO(future-bd): add HMAC signing if the app ever binds on a non-loopback
 # interface.  Currently localhost-only per ADR-011, so plain JSON is fine.
 
-# MVP placeholder list — real subjects come from SettingsService.list_subjects()
-# once the corresponding bd task lands (separate bd).
-PLACEHOLDER_SUBJECTS: list[str] = [
-    "Московская область",
-    "Краснодарский край",
-    "Республика Татарстан",
-    "Свердловская область",
-    "Новосибирская область",
-]
-
 
 class ViewFilters(BaseModel):
     """Ephemeral view-filter state stored in a signed cookie.

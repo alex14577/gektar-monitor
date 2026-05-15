@@ -6,6 +6,8 @@ Endpoints:
   POST /settings/smtp/test    — send a test email to a given recipient.
   POST /settings/regions      — replace ``Settings.regions`` list; triggers hot-reload.
   POST /settings/recipients   — replace ``Settings.notifications.email.recipients``.
+  POST /settings/subjects     — replace ``Settings.subject_site_ids`` (fetch-scope, ADR-031).
+  POST /settings/schedule     — replace monitoring schedule fields (ADR-033).
 
 DI: all dependencies are injected via Depends(); routes are decoupled from
 Container and testable via app.dependency_overrides.
@@ -13,17 +15,19 @@ Container and testable via app.dependency_overrides.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, EmailStr, Field
 
 from fis_monitor.domain.errors import SmtpHostPolicyError
 from fis_monitor.domain.models import LotPublicDTO, SmtpCredentials
+from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID, subjects_for_macros
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 from fis_monitor.web.deps import (
@@ -84,6 +88,9 @@ class RecipientsBody(BaseModel):
     """
 
     recipients: list[EmailStr] = Field(default_factory=list)
+
+
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +173,12 @@ def get_settings(
     settings = config_source.current()
     accept = request.headers.get("accept", "")
     if _prefers_html(accept):
+        scoped_ids = subjects_for_macros(settings.regions)
+        available_subjects = [(sid, SUBJECT_TITLE_BY_ID[sid]) for sid in scoped_ids]
         ctx: dict[str, Any] = {
             "settings": settings,
+            # Subjects scoped to current macro-regions (ADR-031).
+            "available_subjects": available_subjects,
             # Stubs required by base.html.jinja header/partial rendering.
             "dnd": SimpleNamespace(active=False, until_hhmm=""),
             "session": SimpleNamespace(expired=False),
@@ -281,3 +292,112 @@ def post_recipients(
     new_settings = current.model_copy(update={"notifications": new_notifications})
     config_source.save(new_settings)
     return JSONResponse(content={"ok": True})
+
+
+@router.post("/subjects", status_code=204)
+def post_subjects(
+    subject_site_ids: Annotated[list[int], Form()] = [],  # noqa: B006 — FastAPI never mutates repeated-key default
+    config_source: Any = Depends(get_config_source),
+) -> Response:
+    """Replace the fetch-scope subject filter (ADR-031).
+
+    Accepts form-encoded repeated ``subject_site_ids`` keys (htmx-friendly).
+    Each id must belong to ``subjects_for_macros(settings.regions)``; any
+    out-of-scope id → 422.  An empty list is valid (fetch all subjects).
+
+    Returns:
+        204 No Content on success.
+        422 if any id is outside the macro-scoped subject set.
+    """
+    current = config_source.current()
+    valid_ids = set(subjects_for_macros(current.regions))
+    out_of_scope = [sid for sid in subject_site_ids if sid not in valid_ids]
+    if out_of_scope:
+        raise HTTPException(
+            status_code=422,
+            detail=f"subject_site_ids out of scope for current regions: {out_of_scope}",
+        )
+    new_settings = current.model_copy(update={"subject_site_ids": list(subject_site_ids)})
+    config_source.save(new_settings)
+    return Response(status_code=204)
+
+
+@router.post("/schedule", response_model=None)
+def post_schedule(
+    request: Request,
+    interval_minutes: Annotated[str, Form()],
+    full_scan_time: Annotated[str, Form()],
+    full_scan_l2_priority_days: Annotated[str, Form()],
+    config_source: Any = Depends(get_config_source),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> Response:
+    """Replace monitoring schedule settings (ADR-033).
+
+    Accepts application/x-www-form-urlencoded from the htmx form in
+    settings.html.jinja (no hx-ext="json-enc" required).  All three fields
+    are updated atomically to prevent compute-and-replace races.
+    Hot-reload is automatic: MonitorCycleService and FullScanService read
+    config_source.current() on every iteration.
+
+    Returns:
+        200 with _schedule_section.html.jinja partial; htmx swaps
+        ``#schedule-section`` outerHTML so the user sees the saved values.
+        422 on validation failure (out-of-range or bad HH:MM format).
+    """
+    # Validate interval_minutes
+    try:
+        interval_int = int(interval_minutes)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=422,
+            detail=f"interval_minutes must be an integer, got {interval_minutes!r}",
+        ) from None
+    if not (0 <= interval_int <= 60):
+        raise HTTPException(
+            status_code=422,
+            detail=f"interval_minutes must be 0–60, got {interval_int}",
+        )
+
+    # Validate full_scan_time
+    if not _HHMM_RE.match(full_scan_time):
+        raise HTTPException(
+            status_code=422,
+            detail=f"full_scan_time must match HH:MM (00:00–23:59), got {full_scan_time!r}",
+        )
+
+    # Validate full_scan_l2_priority_days
+    try:
+        l2_days_int = int(full_scan_l2_priority_days)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"full_scan_l2_priority_days must be an integer,"
+                f" got {full_scan_l2_priority_days!r}"
+            ),
+        ) from None
+    if not (1 <= l2_days_int <= 365):
+        raise HTTPException(
+            status_code=422,
+            detail=f"full_scan_l2_priority_days must be 1–365, got {l2_days_int}",
+        )
+
+    current = config_source.current()
+    new_monitoring = current.monitoring.model_copy(
+        update={
+            "full_scan_time": full_scan_time,
+            "full_scan_l2_priority_days": l2_days_int,
+        }
+    )
+    new_settings = current.model_copy(
+        update={
+            "interval_minutes": interval_int,
+            "monitoring": new_monitoring,
+        }
+    )
+    config_source.save(new_settings)
+    return templates.TemplateResponse(
+        request,
+        "partials/_schedule_section.html.jinja",
+        {"settings": new_settings},
+    )

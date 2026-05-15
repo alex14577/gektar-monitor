@@ -105,7 +105,8 @@ def test_get_settings_html_accept() -> None:
     assert 'id="scope"' in body
     assert 'id="smtp"' in body
     assert 'id="notifications"' in body
-    assert 'id="monitoring"' in body
+    # Monitoring section was renamed to schedule-section per ADR-033.
+    assert 'id="schedule-section"' in body
 
 
 def test_get_settings_no_accept_defaults_to_json() -> None:

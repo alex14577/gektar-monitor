@@ -24,18 +24,18 @@ DI: ViewFiltersService is injected via get_view_filters_service() from deps.py.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID, subjects_for_macros
 from fis_monitor.services.view_filters import (
-    PLACEHOLDER_SUBJECTS,
     ViewFilters,
     ViewFiltersService,
 )
-from fis_monitor.web.deps import get_templates, get_view_filters_service
+from fis_monitor.web.deps import get_config_source, get_templates, get_view_filters_service
 
 __all__ = ["router"]
 
@@ -119,19 +119,22 @@ def get_subjects(
     request: Request,
     templates: Jinja2Templates = Depends(get_templates),
     svc: ViewFiltersService = Depends(get_view_filters_service),
+    config_source: Any = Depends(get_config_source),
 ) -> HTMLResponse:
-    """Return partial HTML with subject checkboxes.
+    """Return partial HTML with subject checkboxes scoped to current macro-regions.
 
-    Subject list: MVP uses PLACEHOLDER_SUBJECTS (3-5 items).
-    TODO(future-bd): replace with SettingsService.list_subjects() once
-    the full geo-data layer lands.
+    Subject list is derived from subjects_for_macros(settings.regions) per ADR-031.
+    Labels are human-readable names from SUBJECT_TITLE_BY_ID; values are site-ids.
 
     The checkboxes carry ``form="filters"`` so they participate in the main
     #filters form submission even though they live in a popover outside it.
     """
+    settings = config_source.current()
+    scoped_ids = subjects_for_macros(settings.regions)
+    subjects = [(sid, SUBJECT_TITLE_BY_ID[sid]) for sid in scoped_ids]
     current = _current_filters(request, svc)
     ctx = {
-        "subjects": PLACEHOLDER_SUBJECTS,
+        "subjects": subjects,
         "selected_subjects": current.subjects,
     }
     return templates.TemplateResponse(

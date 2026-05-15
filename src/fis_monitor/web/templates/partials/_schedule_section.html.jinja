@@ -1,0 +1,56 @@
+{# ========================================================================
+   _schedule_section.html.jinja — partial for monitoring schedule section.
+   Returned by POST /settings/schedule so htmx can swap #schedule-section
+   outerHTML with the saved values visible immediately.
+   Context: settings (Settings model instance).
+   ======================================================================== #}
+<section id="schedule-section" style="margin-bottom: 40px;">
+  <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 8px;">Расписание мониторинга</h2>
+  <p style="font-size: 0.875rem; color: var(--muted); margin: 0 0 16px;">
+    Параметры цикла опроса и ежедневного полного сканирования.
+  </p>
+
+  <form hx-post="/settings/schedule"
+        hx-target="#schedule-section"
+        hx-swap="outerHTML"
+        style="max-width: 480px;">
+
+    <div class="field" style="margin-bottom: 16px;">
+      <label class="field__label" for="interval-input">Интервал опроса (минут)</label>
+      <input class="input mono" id="interval-input" name="interval_minutes"
+             type="number" min="0" max="60"
+             value="{{ settings.interval_minutes }}"
+             style="max-width: 120px;" />
+      <p style="font-size: 0.75rem; color: var(--muted); margin: 4px 0 0;">
+        0 — непрерывный режим. Допустимо: 0–60.
+      </p>
+    </div>
+
+    <div class="field" style="margin-bottom: 16px;">
+      <label class="field__label" for="full-scan-time-input">Время полного сканирования</label>
+      <input class="input mono" id="full-scan-time-input" name="full_scan_time"
+             type="text" pattern="^([01][0-9]|2[0-3]):[0-5][0-9]$"
+             placeholder="04:00"
+             value="{{ settings.monitoring.full_scan_time }}"
+             style="max-width: 120px;" />
+      <p style="font-size: 0.75rem; color: var(--muted); margin: 4px 0 0;">
+        Формат ЧЧ:ММ, например <span class="mono">04:00</span>.
+      </p>
+    </div>
+
+    <div class="field" style="margin-bottom: 16px;">
+      <label class="field__label" for="l2-days-input">Приоритетные дни L2-сканирования</label>
+      <input class="input mono" id="l2-days-input" name="full_scan_l2_priority_days"
+             type="number" min="1" max="365"
+             value="{{ settings.monitoring.full_scan_l2_priority_days }}"
+             style="max-width: 120px;" />
+      <p style="font-size: 0.75rem; color: var(--muted); margin: 4px 0 0;">
+        Лоты появившиеся за последние N дней проверяются в первую очередь. Допустимо: 1–365.
+      </p>
+    </div>
+
+    <button class="btn btn--primary" type="submit">
+      Сохранить расписание
+    </button>
+  </form>
+</section>

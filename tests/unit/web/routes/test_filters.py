@@ -13,6 +13,7 @@ Coverage:
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 from urllib.parse import unquote
 
@@ -20,8 +21,9 @@ from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
+from fis_monitor.domain.models import Settings
 from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
-from fis_monitor.web.deps import get_templates, get_view_filters_service
+from fis_monitor.web.deps import get_config_source, get_templates, get_view_filters_service
 from fis_monitor.web.routes.filters import router
 from fis_monitor.web.templates import TEMPLATES_DIR
 
@@ -30,15 +32,36 @@ from fis_monitor.web.templates import TEMPLATES_DIR
 # ---------------------------------------------------------------------------
 
 
-def _build_app(svc: ViewFiltersService | None = None) -> FastAPI:
+class _FakeConfigSource:
+    """Minimal fake config source for filter route tests."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self._settings = settings or Settings()
+
+    def current(self) -> Settings:
+        return self._settings
+
+    def subscribe(self, cb: object) -> object:
+        return object()
+
+    def save(self, settings: Settings) -> None:
+        self._settings = settings
+
+
+def _build_app(
+    svc: ViewFiltersService | None = None,
+    config_source: _FakeConfigSource | None = None,
+) -> FastAPI:
     """Build a minimal FastAPI app with the filters router and real templates."""
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     used_svc = svc or ViewFiltersService()
+    used_cs = config_source or _FakeConfigSource()
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_templates] = lambda: templates
     app.dependency_overrides[get_view_filters_service] = lambda: used_svc
+    app.dependency_overrides[get_config_source] = lambda: used_cs
     return app
 
 
@@ -306,13 +329,43 @@ class TestGetSubjects:
             resp = client.get("/filters/subjects")
         assert 'type="checkbox"' in resp.text, "Expected checkbox input in response"
 
-    def test_selected_subjects_pre_checked(self) -> None:
-        """Subjects from current cookie should appear with checked attribute."""
-        app = _build_app()
+    def test_subject_names_displayed(self) -> None:
+        """Template must render subject names from SUBJECT_TITLE_BY_ID (ADR-031)."""
+        # Settings with regions=[1] (ДФО) → subjects include site-id 87 (Якутия).
+        cs = _FakeConfigSource(Settings(regions=[1]))
+        app = _build_app(config_source=cs)
         with TestClient(app) as client:
-            client.post(
-                "/filters/view",
-                data={"subjects": "Московская область"},
-            )
             resp = client.get("/filters/subjects")
-        assert "Московская область" in resp.text
+        # Якутия is a well-known ДФО subject — must appear in the rendered list.
+        assert "Якутия" in resp.text, "Expected subject name in response"
+
+    def test_selected_subjects_pre_checked(self) -> None:
+        """Checkbox for a subject in the view_filters cookie must have checked attribute.
+
+        ViewFilters.subjects = list[str]; the template uses ``sid | string in selected_subjects``
+        so the cookie value "87" (string) must match site-id 87.
+        """
+        from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
+
+        cs = _FakeConfigSource(Settings(regions=[1]))
+        svc = ViewFiltersService()
+        app = _build_app(svc=svc, config_source=cs)
+
+        # Serialise a ViewFilters with subjects=["87"] into the cookie.
+        # serialize() returns a percent-encoded JSON string; pass it directly
+        # so the route reads the percent-encoded value and can unquote it.
+        cookie_value = svc.serialize(ViewFilters(subjects=["87"]))
+
+        with TestClient(app) as client:
+            client.cookies.set("view_filters", cookie_value)
+            resp = client.get("/filters/subjects")
+
+        body = resp.text
+        # site-id 87 (Якутия) must be pre-checked.
+        assert re.search(r'<input[^>]*value="87"[^>]*\bchecked\b', body), (
+            "Expected value=87 input to be checked"
+        )
+        # site-id 88 (Бурятия) must NOT be checked.
+        assert not re.search(r'<input[^>]*value="88"[^>]*\bchecked\b', body), (
+            "Expected value=88 input to NOT be checked"
+        )
