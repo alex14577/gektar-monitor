@@ -109,8 +109,10 @@ ensures idempotency.  `GET /backfill/status` exposes progress; `POST
 ### Negative
 - Backfill may take several minutes for large regions (rate-limit pacing).
 - During backfill, monitor cycle skips the region — new lots may be delayed.
-- Lots discovered during backfill do not generate notifications (by design —
-  mass-notify on cold-start would spam users).
+- Lots discovered during backfill do NOT generate email notifications (by design —
+  mass-notify on cold-start would spam users). SSE/UI feed IS updated in real-time via
+  direct `EventBus.publish(SseLotNew)` after each upsert; email suppression is enforced
+  by `SubscribedAtFilteredNotifier` at the channel level, not at `BackfillService` level.
 
 ---
 

@@ -59,17 +59,26 @@ class RegionSubscriptionRepository(Protocol):
 
 ### Точка фильтра
 
-`notifier_dispatcher.dispatch(lot, ...)` — domain-уровень. Один дополнительный check перед
-`FilterMatcher.matches`:
+`SubscribedAtFilteredNotifier` — decorator-класс в `notifier_dispatcher.py`, оборачивает `SmtpEmailNotifier`.
+Применяет subscribed_at check **только для email-канала** в `send()`:
 
 ```python
-subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
-if subscribed_at is not None and lot.date_create < subscribed_at:
-    return  # intentional suppression — лот старее подписки
+if lot.region_id is not None:
+    subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
+    if subscribed_at is not None and lot.date_create < subscribed_at:
+        return NotifyResult(ok=True, detail="suppressed (subscribed_at)", retryable=False)
 ```
 
-Domain-уровень выбран намеренно: прикрывает `MonitorCycleService`, `FullScanService`,
-`BackfillService` и любого будущего caller'а — единая точка контроля (H3 из ADR-036).
+`NotifierDispatcher.dispatch()` — фильтр убран. Dispatcher передаёт все лоты без предварительной проверки.
+`BrowserSseNotifier` — регистрируется в registry без wrapper'а; browser-канал получает все лоты.
+
+Composition root:
+```python
+registry.register(SubscribedAtFilteredNotifier(inner=email_notifier, region_sub_repo=region_sub_repo))
+registry.register(BrowserSseNotifier(event_bus=event_bus))  # no filter
+```
+
+Разделение concerns: email — suppress old lots (spam protection); browser — всегда показывать (live UI feed).
 
 ### Delta-trigger threshold
 
@@ -101,8 +110,9 @@ SLO определён над notifications, которые система **р�
 
 - **Schema**: новая таблица `region_subscriptions(region_id PK, subscribed_at)` в state DB.
 - **Protocol**: `RegionSubscriptionRepository` — новый Protocol в domain layer.
-- **`notifier_dispatcher`**: получает `RegionSubscriptionRepository` dep; check добавляется в
-  `dispatch()`.
+- **`SubscribedAtFilteredNotifier`**: новый decorator-класс в `notifier_dispatcher.py`. Получает
+  `RegionSubscriptionRepository` dep; применяет subscribed_at check только для email-канала в `send()`.
+  `NotifierDispatcher.dispatch()` фильтр убран — dispatcher передаёт все лоты без фильтрации.
 - **`WatchdogConfigSource`**: получает `RegionSubscriptionRepository` + `Clock` deps; реализует
   migration-логику (set-if-absent + delete).
 - **`composition.py`**: `SqliteRegionSubscriptionRepository` создаётся и инжектируется в оба места.

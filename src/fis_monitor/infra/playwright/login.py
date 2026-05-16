@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -119,11 +120,17 @@ class PlaywrightLoginSession:
         Raises:
             BusyError: if another login is already in progress.
         """
+        _log.debug(
+            "login.start.entry",
+            extra={"trigger": "headed", "profile_dir": str(self._profile_dir)},
+        )
         acquired = self._lock.acquire(blocking=False)
         if not acquired:
+            _log.debug("login.lock.timeout", extra={"trigger": "headed"})
             raise BusyError(
                 "PlaywrightLoginSession: open_headed_login is already in progress"
             )
+        _log.debug("login.lock.acquired", extra={"trigger": "headed"})
         try:
             return self._run_login(deadline=deadline)
         finally:
@@ -142,11 +149,17 @@ class PlaywrightLoginSession:
             BusyError: if another login/refresh is already in progress
                 (shares the same ``_lock`` as ``open_headed_login``).
         """
+        _log.debug(
+            "login.start.entry",
+            extra={"trigger": "silent_refresh", "profile_dir": str(self._profile_dir)},
+        )
         acquired = self._lock.acquire(blocking=False)
         if not acquired:
+            _log.debug("login.lock.timeout", extra={"trigger": "silent_refresh"})
             raise BusyError(
                 "PlaywrightLoginSession: a login/refresh is already in progress"
             )
+        _log.debug("login.lock.acquired", extra={"trigger": "silent_refresh"})
         try:
             return self._run_silent_refresh(deadline=deadline)
         finally:
@@ -215,8 +228,8 @@ class PlaywrightLoginSession:
             outcome, unmapped = self._map_exception(exc)
             if unmapped:
                 _log.error(
-                    "PlaywrightLoginSession._run_silent_refresh: unexpected exception type=%s",
-                    type(exc).__name__,
+                    "login.exception",
+                    extra={"trigger": "silent_refresh", "exc_type": type(exc).__name__},
                     exc_info=exc,
                 )
             else:
@@ -342,8 +355,8 @@ class PlaywrightLoginSession:
             outcome, unmapped = self._map_exception(exc)
             if unmapped:
                 _log.error(
-                    "PlaywrightLoginSession._run_login: unexpected exception type=%s",
-                    type(exc).__name__,
+                    "login.exception",
+                    extra={"trigger": "headed", "exc_type": type(exc).__name__},
                     exc_info=exc,
                 )
             else:
@@ -403,6 +416,10 @@ class PlaywrightLoginSession:
         timeout_ms = max(remaining_ms - elapsed_ms, 0)
 
         if timeout_ms <= 0:
+            _log.warning(
+                "login.deadline.reached",
+                extra={"elapsed_ms": elapsed_ms, "trigger": "headed"},
+            )
             return LoginOutcome(success=False, cookies_updated=False, error="timeout")
 
         try:
@@ -455,11 +472,19 @@ class PlaywrightLoginSession:
             return False
         try:
             cookies = context.cookies()
+            t0_export = time.monotonic()
             _log.debug(
-                "PlaywrightLoginSession._export_cookies: exporting %d cookies",
-                len(cookies),
+                "login.cookie_export.start",
+                extra={"cookies_count": len(cookies)},
             )
             self._cookie_store.store(cookies)
+            _log.debug(
+                "login.cookie_export.finish",
+                extra={
+                    "cookies_count": len(cookies),
+                    "duration_ms": int((time.monotonic() - t0_export) * 1000),
+                },
+            )
             return True
         except Exception:
             _log.warning(

@@ -81,7 +81,10 @@ from fis_monitor.services.login import LoginService
 from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.lot_user_state import LotUserStateService
 from fis_monitor.services.monitor_cycle import MonitorCycleService
-from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
+from fis_monitor.services.notifier_dispatcher import (
+    NotifierDispatcher,
+    SubscribedAtFilteredNotifier,
+)
 from fis_monitor.services.onboarding import OnboardingService
 from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
 from fis_monitor.services.session_expired_email import SessionExpiredEmailService
@@ -317,7 +320,10 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         host_policy=smtp_host_policy,
     )
     registry = ExplicitNotifierRegistry()
-    registry.register(email_notifier)
+    registry.register(SubscribedAtFilteredNotifier(
+        inner=email_notifier,
+        region_sub_repo=region_sub_repo,
+    ))
     registry.register(BrowserSseNotifier(event_bus=event_bus))
 
     # ── Layer 4: use cases ──────────────────────────────────────────────────
@@ -335,7 +341,6 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         event_bus=event_bus,
         stop_event=dispatcher_stop_event,
         dnd_service=dnd,
-        region_sub_repo=region_sub_repo,
         settings_repo=settings_repo,
         retry_attempts=3,
         retry_backoff=(2.0, 4.0, 8.0),
@@ -394,6 +399,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         lot_repo=lot_repo,
         config_source=config_source,
         monitor_cycle=monitor_cycle,
+        event_bus=event_bus,
     )
     # Late-bind backfill into monitor_cycle (breaks circular dep: monitor_cycle
     # was built before backfill, so it received backfill=None in its constructor).
@@ -420,6 +426,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     def _backfill_on_login_success(_outcome: object) -> None:
         # Secondary fallback only. Primary backfill trigger is delta-check in
         # MonitorCycleService. Activate when total_count=None ≥ N cycles AND db is empty.
+        _log.debug("on_login_success.callback.fired", extra={"trigger": "headed_login_success"})
         onboarding_state = onboarding.current()
         from fis_monitor.domain.models import OnboardingState  # local to avoid circular
         if onboarding_state != OnboardingState.COMPLETED:

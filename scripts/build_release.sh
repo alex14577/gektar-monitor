@@ -24,9 +24,11 @@
 set -euo pipefail
 
 CLEAN_BUILD=0
+DEBUG_BUILD=0
 for arg in "$@"; do
     case "$arg" in
         --clean) CLEAN_BUILD=1 ;;
+        --debug) DEBUG_BUILD=1 ;;
         *) printf 'Unknown flag: %s\n' "$arg" >&2; exit 2 ;;
     esac
 done
@@ -59,7 +61,13 @@ PYINSTALLER_DIST="$BUILD_DIR/_dist"
 PYINSTALLER_WORK="$BUILD_DIR/_work"
 STAGE_DIR="$BUILD_DIR/_stage"
 TEMPLATES_DIR="$SCRIPT_DIR/templates"
-SPEC_FILE="$BUILD_DIR/fis-monitor.spec"
+if [[ $DEBUG_BUILD -eq 1 ]]; then
+    SPEC_FILE="$BUILD_DIR/fis-monitor-debug.spec"
+    BINARY_NAME="fis-monitor-debug"
+else
+    SPEC_FILE="$BUILD_DIR/fis-monitor.spec"
+    BINARY_NAME="fis-monitor"
+fi
 
 # ---------------------------------------------------------------------------
 # Validate preconditions
@@ -79,7 +87,7 @@ log "Python $PYTHON_VERSION detected"
 # Read version (single source of truth: pyproject.toml)
 # ---------------------------------------------------------------------------
 VERSION=$(version)
-ARCHIVE_NAME="fis-monitor-linux-x86_64-${VERSION}"
+ARCHIVE_NAME="${BINARY_NAME}-linux-x86_64-${VERSION}"
 ARCHIVE_PATH="$DIST_DIR/${ARCHIVE_NAME}.tar.gz"
 
 log "Building version $VERSION → $ARCHIVE_PATH"
@@ -148,15 +156,15 @@ if [[ $CLEAN_BUILD -eq 1 ]]; then
 fi
 "$VENV_DIR/bin/pyinstaller" "$SPEC_FILE" "${PI_FLAGS[@]}"
 
-BINARY_DIR="$PYINSTALLER_DIST/fis-monitor"
+BINARY_DIR="$PYINSTALLER_DIST/$BINARY_NAME"
 [[ -d "$BINARY_DIR" ]] || die "PyInstaller output not found at $BINARY_DIR"
-[[ -f "$BINARY_DIR/fis-monitor" ]] || die "Binary fis-monitor not found in $BINARY_DIR"
+[[ -f "$BINARY_DIR/$BINARY_NAME" ]] || die "Binary $BINARY_NAME not found in $BINARY_DIR"
 
 # ---------------------------------------------------------------------------
 # Step 5: Assemble staging tree
 # ---------------------------------------------------------------------------
 log "Assembling staging tree..."
-STAGE_ROOT="$STAGE_DIR/fis-monitor"
+STAGE_ROOT="$STAGE_DIR/$BINARY_NAME"
 mkdir -p "$STAGE_ROOT"
 
 # bin/ ← PyInstaller --onedir output
@@ -180,10 +188,10 @@ mkdir -p "$DIST_DIR"
 # Use pigz (parallel gzip) if available — ~4-6× faster than gzip on multicore
 # for a 350-900 MB tarball. Output format is identical (.tar.gz, gzip stream).
 if command -v pigz >/dev/null 2>&1; then
-    tar -cf - -C "$STAGE_DIR" fis-monitor/ | pigz > "$ARCHIVE_PATH"
+    tar -cf - -C "$STAGE_DIR" "$BINARY_NAME/" | pigz > "$ARCHIVE_PATH"
 else
     log "  (install \`pigz\` for parallel gzip — 4-6× faster)"
-    tar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" fis-monitor/
+    tar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" "$BINARY_NAME/"
 fi
 
 ARCHIVE_SIZE=$(du -sh "$ARCHIVE_PATH" | cut -f1)

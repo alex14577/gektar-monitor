@@ -15,6 +15,7 @@ See micro-decision in ADR-??? (to be created by oxy.6 task).
 from __future__ import annotations
 
 import contextlib
+import itertools
 import logging
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -91,6 +92,8 @@ class SseStreamer:
         self._event_encoder: Callable[[SseEvent], bytes] = (
             event_encoder if event_encoder is not None else encode_sse_event
         )
+        self._client_counter = itertools.count(1)
+        self._active_subscribers: int = 0
 
     def bind_executor(self, executor: ThreadPoolExecutor) -> None:
         """Bind the executor pool (called in lifespan, ADR-014 late-binding pattern).
@@ -149,6 +152,12 @@ class SseStreamer:
             )
         sse_executor = self._sse_executor
 
+        client_id = next(self._client_counter)
+        self._active_subscribers += 1
+        logger.debug(
+            "sse.subscribe",
+            extra={"client_id": client_id, "total_subscribers": self._active_subscribers},
+        )
         subscription: EventSubscription[SseEvent] = self._event_bus.subscribe()
         try:
             # Initial keep-alive so the client knows the connection is alive.
@@ -163,7 +172,10 @@ class SseStreamer:
                 )
                 if events is None:
                     # Bus force-unsubscribed us (slow consumer or explicit removal).
-                    logger.debug("SseStreamer: subscription dead, closing stream")
+                    logger.debug(
+                        "sse.unsubscribe",
+                        extra={"client_id": client_id, "reason": "dead_subscription"},
+                    )
                     return
                 if not events:
                     # Timeout — emit keep-alive ping.
@@ -175,6 +187,11 @@ class SseStreamer:
                             continue  # dropped by schema-drift guard
                         yield encoded
         finally:
+            self._active_subscribers -= 1
+            logger.debug(
+                "sse.unsubscribe",
+                extra={"client_id": client_id, "reason": "disconnect"},
+            )
             with contextlib.suppress(Exception):
                 subscription.unsubscribe()
 

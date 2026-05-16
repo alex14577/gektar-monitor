@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -212,8 +213,6 @@ class FullScanService:
           4. Iterate active lots in batches; mark_seen / mark_inactive per lot.
         """
         # MVP: no SseFullScanStarted event (type not yet defined). Log instead.
-        logger.info("full_scan: run_once started")
-
         # If no stop_event was provided (e.g. manual/test call), use a
         # never-set sentinel so _process_batches always has a real Event.
         _stop = stop_event if stop_event is not None else threading.Event()
@@ -222,6 +221,12 @@ class FullScanService:
         settings = self._config_source.current()
         now = self._clock.now()
 
+        t0_scan = time.monotonic()
+        logger.info(
+            "full_scan.start",
+            extra={"regions_count": len(settings.regions)},
+        )
+
         # Step 2 — collect seen ids from list pages (all pages per region via paginator).
         # Track region completeness: if pagination for any region fails mid-way,
         # mass-deactivation is suppressed for that run to avoid false-positive
@@ -229,8 +234,17 @@ class FullScanService:
         seen_ids: set[int] = set()
         all_regions_completed = True
         for region in settings.regions:
+            logger.debug("full_scan.region.start", extra={"region_id": region})
             region_ids, pagination_completed = self._fetch_region_ids(region, _stop)
             seen_ids.update(region_ids)
+            logger.debug(
+                "full_scan.region.finish",
+                extra={
+                    "region_id": region,
+                    "ids_count": len(region_ids),
+                    "pagination_completed": pagination_completed,
+                },
+            )
             if not pagination_completed:
                 all_regions_completed = False
                 logger.warning(
@@ -248,6 +262,11 @@ class FullScanService:
             )
             return
 
+        logger.debug(
+            "full_scan.removal_candidates.detected",
+            extra={"total_seen_ids": len(seen_ids)},
+        )
+
         # Step 4 — iterate active lots in batches, mark seen / inactive.
         # mass_deactivation_enabled=False when any region had partial pagination.
         self._process_batches(
@@ -257,7 +276,10 @@ class FullScanService:
             stop_event=_stop,
         )
 
-        logger.info("full_scan: run_once completed")
+        logger.info(
+            "full_scan.finish",
+            extra={"duration_ms": int((time.monotonic() - t0_scan) * 1000)},
+        )
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -437,12 +459,12 @@ class FullScanService:
 
             if mass_deactivation_enabled:
                 for lot_id in missing_in_batch:
-                    logger.info(
-                        "full_scan: marking lot %d inactive (reason=full_scan_missing)",
-                        lot_id,
-                    )
                     self._lot_repo.mark_inactive(
                         lot_id, reason="full_scan_missing", at=now
+                    )
+                    logger.info(
+                        "full_scan.mark_inactive",
+                        extra={"lot_id": lot_id, "reason": "full_scan_missing"},
                     )
 
             offset += self._batch_size

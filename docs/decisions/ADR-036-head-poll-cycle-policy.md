@@ -1,6 +1,6 @@
 # ADR-036 — Head-Poll Cycle Policy: MonitorCycle vs FullScan vs Backfill
 
-**Status**: Accepted (Updated 2026-05-15: ParsedListPage.total_count field + delta-trigger contract)
+**Status**: Accepted (Updated 2026-05-15: ParsedListPage.total_count field + delta-trigger contract; Updated 2026-05-16: BackfillService переведён на per_page=20 после прод-таймаутов 90s на per-page=50)
 **Date**: 2026-05-15
 **Deciders**: Backend Architect
 **Tags**: monitor-cycle, full-scan, backfill, pagination, head-poll, per_page, PaginatedListFetcher, total_count, delta-trigger
@@ -33,9 +33,9 @@ Three trigger types with distinct pagination contracts:
 |---|---|---|---|---|
 | `MonitorCycleService` | every `interval_minutes` (default 1 min) | **20** | page=1 only — no walk | New-lot discovery → upsert → notify via `FilterMatcher` |
 | `FullScanService` | daily at `monitoring.full_scan_time` (default 04:00) | 50 | full walk until empty | Active-set for mass-deactivation |
-| `BackfillService` | one-shot at first-successful-login | 50 | full walk | Bootstrap catalogue |
+| `BackfillService` | one-shot at first-successful-login | **20** | full walk | Bootstrap catalogue |
 
-MonitorCycle fetches only page=1 with `per_page=20`. This is a **head-poll**: it captures the freshest lots (server returns newest-first via `sort=-DATE_CREATE`, `url_builder.py:25`) and exits without walking deeper pages. FullScan and Backfill keep full pagination with `per_page=50` (unchanged in semantics; parameter plumbing is new in `gektar_monitor-3pw`).
+MonitorCycle fetches only page=1 with `per_page=20`. This is a **head-poll**: it captures the freshest lots (server returns newest-first via `sort=-DATE_CREATE`, `url_builder.py:25`) and exits without walking deeper pages. FullScan keeps full pagination with `per_page=50`. BackfillService uses `per_page=20` (reduced from 50 on 2026-05-16 after production ReadTimeout 90s failures on cold-start regions; more HTTP roundtrips is the accepted trade-off).
 
 ---
 
@@ -56,7 +56,7 @@ MonitorCycle fetches only page=1 with `per_page=20`. This is a **head-poll**: it
 - **`PaginatedListFetcher.iterate`** gains two new kwargs: `per_page: int = 50` and `max_pages: int | None = None` (None = unbounded). Implemented in bd `gektar_monitor-3pw`. Existing callers (FullScan, Backfill) pass no new arguments and retain current semantics via defaults.
 - **`MonitorCycleService._run_cycle_inner`** (`monitor_cycle.py:382`) transitions from a direct single HTTP call to invoking `PaginatedListFetcher.iterate(region, per_page=20, max_pages=1)`. Implemented in bd `gektar_monitor-3pw`.
 - **`FullScanService._fetch_region_ids_paginated`** (`full_scan.py:310`) invokes `iterate(region, stop_event, per_page=50)` — semantically unchanged, new kwarg only.
-- **`BackfillService._process_region`** (`backfill.py:270`) invokes `iterate(region, stop, per_page=50)` — semantically unchanged.
+- **`BackfillService._process_region`** (`backfill.py:270`) invokes `iterate(region, stop, per_page=20)` — reduced from 50 (2026-05-16, `gektar_monitor-alps`) to avoid ReadTimeout 90s on cold-start regions.
 - **`infra/http/url_builder.lot_list_url`** (`url_builder.py:49`) does NOT currently support a `per_page` query param. bd `gektar_monitor-3pw` must verify whether the Yii2 front-end (`надальнийвосток.рф`) honours a `FreeLotSearch[per-page]` or equivalent parameter. If supported, `lot_list_url` gains a `per_page` kwarg and appends the param. If the site ignores the param, head-poll falls back to the site's native default page size (graceful degradation — correctness of discovery is unaffected; only the batch size differs).
 
 **Updated 2026-05-15: `ParsedListPage.total_count` and delta-trigger contract**
