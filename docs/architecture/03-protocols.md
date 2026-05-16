@@ -273,11 +273,11 @@ class SmtpHostPolicy(Protocol):
     # Бросает SmtpHostPolicyError если хотя бы один адрес fail (fail-closed).
 ```
 
-`SmtpEmailNotifier.send()` использует `endpoint.ip` для `smtplib.SMTP(host=endpoint.ip, port=endpoint.port, timeout=...)`, далее `smtp.ehlo(endpoint.original_host)`. STARTTLS делается **вручную** (см. [[decisions/ADR-021-manual-starttls-connect-by-ip|ADR-021]], R4-C2 — `smtplib.SMTP.starttls()` передаёт `self._host = endpoint.ip` как `server_hostname` → TLS cert verify валится против IP-литерала; вызов `context.wrap_socket(smtp.sock, server_hostname=endpoint.original_host)` напрямую — корректное решение).
+`SmtpEmailNotifier._deliver()` определяет TLS-режим из порта (`port == 465` → implicit TLS, иначе STARTTLS) и делегирует в соответствующий приватный метод. Поле `use_starttls` в `SmtpCredentials` отсутствует — режим derive on-the-fly (см. [[decisions/ADR-021-manual-starttls-connect-by-ip|ADR-021]]). Оба пути используют connect-by-IP + правильный SNI через `ctx.wrap_socket(server_hostname=endpoint.original_host)`.
 
 ```python
-# infra/smtp/email_notifier.py::SmtpEmailNotifier.send()
-endpoint = self.host_policy.resolve_and_check(self.creds.smtp_host, self.creds.smtp_port)
+# infra/smtp/email_notifier.py::SmtpEmailNotifier._deliver()
+endpoint = self._host_policy.resolve_and_check(creds.smtp_host, creds.smtp_port)
 # NB (R4-M2): resolve_and_check (включая socket.getaddrinfo, до 5с) — ВНЕ любой БД-tx.
 # В SettingsService.set_smtp_credentials() и SmtpTestService.test_send() порядок:
 #   1) Pydantic формат-валидация (мгновенно)
@@ -285,37 +285,43 @@ endpoint = self.host_policy.resolve_and_check(self.creds.smtp_host, self.creds.s
 #   3) BEGIN IMMEDIATE; INSERT OR REPLACE smtp_credentials; COMMIT (короткая tx)
 # Держать writer-lock пока DNS резолвится — недопустимо (блокирует cycle/enrichment).
 
-smtp = smtplib.SMTP(host=endpoint.ip, port=endpoint.port, timeout=connect_timeout)
-smtp.ehlo(endpoint.original_host)
+implicit_tls = (endpoint.port == 465)
 
-if self.creds.use_starttls:
-    # CRITICAL (R4-C2, ADR-021): smtplib.starttls() передаёт self._host (= IP) как
-    # server_hostname → cert verify валится против IP-литерала.
-    # Поэтому STARTTLS делаем вручную с правильным server_hostname.
-    code, _ = smtp.docmd("STARTTLS")
-    if code != 220:
-        raise SmtpStarttlsError(code)
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = True
-    smtp.sock = ctx.wrap_socket(smtp.sock, server_hostname=endpoint.original_host)
-    smtp.file = None
-    smtp.ehlo(endpoint.original_host)   # обязательный повторный EHLO после TLS
-    # > **Note (R5 review — косметика)**: параметр `ehlo()` — это идентификация *клиента*
-    # > (EHLO-name), не SNI сервера. Корректнее `smtp.ehlo(socket.getfqdn() or
-    # > 'fis-monitor.local')`. Текущее `endpoint.original_host` — это имя сервера,
-    # > MTA-валидация EHLO-name нестрогая, не критично. Реализовать при первом
-    # > написании кода.
+# --- STARTTLS path (port 587) ---
+# smtp = smtplib.SMTP(host=endpoint.ip, port=endpoint.port, timeout=connect_timeout)
+# smtp.ehlo(endpoint.original_host)
+# code, _ = smtp.docmd("STARTTLS")
+# if code != 220:
+#     raise _StarttlsRefused(code)
+# ctx = ssl.create_default_context()
+# ctx.check_hostname = True
+# smtp.sock = ctx.wrap_socket(smtp.sock, server_hostname=endpoint.original_host)
+# smtp.file = None   # invalidate cached file-wrapper (ADR-021)
+# smtp.ehlo(endpoint.original_host)   # обязательный повторный EHLO после TLS
 
-smtp.login(self.creds.smtp_user, self.creds.smtp_password.get_secret_value())
+# --- Implicit TLS path (port 465, amendment 2026-05-16) ---
+# ctx = ssl.create_default_context()
+# ctx.check_hostname = True
+# raw_sock = socket.create_connection((endpoint.ip, endpoint.port), timeout=connect_timeout)
+# try:
+#     tls_sock = ctx.wrap_socket(raw_sock, server_hostname=endpoint.original_host)
+# except BaseException:
+#     raw_sock.close()   # FD cleanup — raw_sock не owned TLS-обёрткой при исключении
+#     raise
+# smtp = smtplib.SMTP(timeout=connect_timeout)   # host='' → нет auto-connect
+# smtp.sock = tls_sock
+# smtp.getreply()   # читает 220-banner
+# smtp.ehlo(endpoint.original_host)
+
+# Единый error-mapping (один try-блок для обоих paths):
+# ssl.SSLError precedes OSError (SSLError наследует OSError)
+# smtplib.SMTPServerDisconnected precedes OSError (тоже наследует OSError)
+smtp.login(creds.smtp_user, creds.smtp_password.get_secret_value())
 
 # R4-C5: at-least-once. Детерминированный Message-ID — MTA дедупликация.
-message_bytes = self.build_message(lot, recipient)
-# build_message() выставляет Message-ID:
-#   <{lot_id}.{channel_id}.{sha256(recipient)[:16]}@fis-monitor.local>
+# Message-ID: <{lot_id}.{channel_id}.{sha256(recipient)[:16]}@fis-monitor.local>
 # (RFC 5322 §3.6.4). recipient hashed против появления email в логах MTA.
-
-smtp.sendmail(from_addr, [recipient], message_bytes)
-smtp.quit()
+smtp.send_message(msg)
 ```
 
 DNS-rebinding закрыт. TLS-cert valid через SNI. MITM невозможен. At-least-once дубль (crash между «250 OK» и `mark_sent` COMMIT) — митигирован детерминированным Message-ID (см. [[notifications]] → «Семантика доставки» + [[decisions/ADR-019-notification-state-machine|ADR-019]] ext R4-C5).

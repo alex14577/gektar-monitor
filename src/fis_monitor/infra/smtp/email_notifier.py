@@ -315,14 +315,21 @@ class SmtpEmailNotifier:
 
         Error mapping — PII-free codes; recipient/password NEVER in detail:
 
-        * ``socket.timeout`` / ``ConnectionError`` / ``ssl.SSLError``
-          → retryable=True, detail="connect_error_<ExcType>" or "tls_<ExcType>"
+        * ``ssl.SSLError`` → retryable=True, detail="tls_<ExcType>"
+          (precedes OSError in handler order — ssl.SSLError inherits OSError)
+        * ``SMTPServerDisconnected`` → retryable=True, detail="server_disconnected"
+          (precedes OSError in handler order — SMTPServerDisconnected inherits OSError)
+        * ``TimeoutError`` / ``ConnectionError`` / ``OSError``
+          → retryable=True, detail="connect_error_<ExcType>"
         * ``SMTPAuthenticationError`` → retryable=False, detail="auth_failed"
         * ``SMTPRecipientsRefused`` → retryable=False, detail="recipient_refused"
-        * ``SMTPServerDisconnected`` → retryable=True, detail="server_disconnected"
         * ``SMTPResponseException`` 4xx → retryable=True, detail="smtp_<code>"
         * ``SMTPResponseException`` 5xx → retryable=False, detail="smtp_<code>"
         * ``SmtpHostPolicyError`` → raised (programming/config error)
+
+        Connect and send phases share a single try block so that
+        ``SMTPServerDisconnected`` from the implicit-TLS banner/ehlo sequence
+        is handled identically to the send-phase disconnect.
         """
         # SmtpHostPolicyError is intentionally NOT caught — let it propagate.
         endpoint = self._host_policy.resolve_and_check(
@@ -331,34 +338,22 @@ class SmtpEmailNotifier:
 
         implicit_tls = endpoint.port == _IMPLICIT_TLS_PORT
 
+        smtp: smtplib.SMTP | None = None
         try:
             if implicit_tls:
                 smtp = self._connect_implicit_tls(endpoint)
             else:
                 smtp = self._connect_starttls(endpoint)
+
+            smtp.login(creds.smtp_user, creds.smtp_password.get_secret_value())
+            smtp.send_message(msg)
+
         except _StarttlsRefused as exc:
             return NotifyResult(
                 ok=False,
                 detail=f"starttls_refused_code_{exc.code}"[:500],
                 retryable=True,
             )
-        except ssl.SSLError as exc:
-            # Must precede OSError: ssl.SSLError inherits from OSError.
-            return NotifyResult(
-                ok=False,
-                detail=f"tls_{type(exc).__name__}"[:500],
-                retryable=True,
-            )
-        except (TimeoutError, OSError) as exc:
-            return NotifyResult(
-                ok=False,
-                detail=f"connect_error_{type(exc).__name__}"[:500],
-                retryable=True,
-            )
-
-        try:
-            smtp.login(creds.smtp_user, creds.smtp_password.get_secret_value())
-            smtp.send_message(msg)
 
         except smtplib.SMTPAuthenticationError:
             return NotifyResult(ok=False, detail=_DETAIL_AUTH_FAILED, retryable=False)
@@ -369,6 +364,7 @@ class SmtpEmailNotifier:
             )
 
         except smtplib.SMTPServerDisconnected:
+            # Must precede OSError: SMTPServerDisconnected inherits from OSError.
             return NotifyResult(
                 ok=False, detail=_DETAIL_SERVER_DISCONNECTED, retryable=True
             )
@@ -379,22 +375,24 @@ class SmtpEmailNotifier:
             return NotifyResult(ok=False, detail=detail, retryable=retryable)
 
         except ssl.SSLError as exc:
+            # Must precede OSError: ssl.SSLError inherits from OSError.
             detail = f"tls_{type(exc).__name__}"[:500]
             return NotifyResult(ok=False, detail=detail, retryable=True)
 
         except (TimeoutError, ConnectionError, OSError) as exc:
-            detail = f"network_{type(exc).__name__}"[:500]
+            detail = f"connect_error_{type(exc).__name__}"[:500]
             return NotifyResult(ok=False, detail=detail, retryable=True)
 
         else:
             return NotifyResult(ok=True, detail=_DETAIL_SENT, retryable=False)
 
         finally:
-            try:
-                smtp.quit()
-            except (smtplib.SMTPException, OSError, ssl.SSLError):
-                logger.debug("smtp quit failed", exc_info=True)
-                smtp.close()
+            if smtp is not None:
+                try:
+                    smtp.quit()
+                except (smtplib.SMTPException, OSError, ssl.SSLError):
+                    logger.debug("smtp quit failed", exc_info=True)
+                    smtp.close()
 
     def _connect_starttls(self, endpoint: ResolvedSmtpEndpoint) -> smtplib.SMTP:
         """Open a plain TCP connection then upgrade to TLS via manual STARTTLS.
@@ -444,10 +442,13 @@ class SmtpEmailNotifier:
             (endpoint.ip, endpoint.port),
             timeout=self._connect_timeout,
         )
-        tls_sock = ctx.wrap_socket(raw_sock, server_hostname=endpoint.original_host)
+        try:
+            tls_sock = ctx.wrap_socket(raw_sock, server_hostname=endpoint.original_host)
+        except BaseException:
+            raw_sock.close()
+            raise
         smtp = smtplib.SMTP(timeout=self._connect_timeout)
         smtp.sock = tls_sock
-        smtp.file = None
         smtp.getreply()  # read the 220 banner
         smtp.ehlo(endpoint.original_host)
         return smtp

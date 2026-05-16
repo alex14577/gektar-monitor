@@ -56,4 +56,6 @@ TLS-режим определяется из порта: `port == 465` → impli
 
 **Consequences.** TLS-cert verification корректен для обоих path (cert против `smtp.yandex.ru`, connect по pin'нутому IP). MITM/DNS-rebinding закрыт. Оба path в одном модуле (high cohesion), общий error-mapping. Цена: ~30 строк boilerplate.
 
+**Exception ordering invariant.** `ssl.SSLError` наследует `OSError` — в error-mapping `except ssl.SSLError` **должен идти ДО** `except OSError`, иначе TLS-ошибки маскируются под network-ошибки с неверным `detail`-кодом. Аналогично, `smtplib.SMTPServerDisconnected` наследует `OSError` — обрабатывается отдельным `except` раньше OSError-fallback'а. Оба path (STARTTLS и implicit TLS) разделяют единый try-блок, поэтому нарушение ordering в одном месте затрагивает оба.
+
 См. также: [[decisions-log]], [[decisions/ADR-015-smtp-host-validation|ADR-015]], [[decisions/ADR-038-smtp-provider-catalog|ADR-038]], [[architecture/03-protocols]] §3.3.

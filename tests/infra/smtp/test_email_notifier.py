@@ -1065,7 +1065,11 @@ def test_implicit_tls_no_starttls_command_sent():
     ],
 )
 def test_both_tls_paths_send_ok(port, use_implicit):
-    """T25 — STARTTLS (587) and implicit TLS (465) both produce ok=True on success."""
+    """T25 — STARTTLS (587) and implicit TLS (465) both produce ok=True on success.
+
+    Also asserts ADR-021 SNI invariant for both paths: wrap_socket must be called
+    with server_hostname=original_host (DNS name), never with the pinned IP.
+    """
     lot = _make_lot()
     creds = _make_creds(smtp_host=_HOST, smtp_port=port)
     repo = FakeSmtpCredentialsRepository(creds=creds)
@@ -1100,3 +1104,14 @@ def test_both_tls_paths_send_ok(port, use_implicit):
     else:
         # STARTTLS command sent for port 587
         mock_smtp_instance.docmd.assert_called_once_with("STARTTLS")
+
+    # ADR-021 SNI invariant: wrap_socket must use DNS hostname, not pinned IP
+    mock_ctx.wrap_socket.assert_called_once()
+    _, kw = mock_ctx.wrap_socket.call_args
+    assert kw.get("server_hostname") == _HOST, (
+        f"ADR-021: server_hostname must be DNS hostname {_HOST!r}, "
+        f"got {kw.get('server_hostname')!r} (port={port})"
+    )
+    assert kw.get("server_hostname") != _IP, (
+        f"ADR-021: server_hostname must not be the pinned IP {_IP!r} (port={port})"
+    )
