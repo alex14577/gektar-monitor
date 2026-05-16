@@ -1,5 +1,7 @@
 [importlinter]
-root_package = fis_monitor
+root_packages =
+    fis_monitor
+    tests
 include_external_packages = True
 # include_external_packages = True требуется для domain_purity:
 #   forbidden_modules перечисляет stdlib/3rd-party (sqlite3, requests, fastapi,
@@ -26,3 +28,11 @@ name = Domain doesn't import the stdlib logging module
 type = forbidden
 source_modules = fis_monitor.domain
 forbidden_modules = logging
+
+[importlinter:contract:no-sqlite-in-unit-services]
+name = No sqlite3 in unit service or domain tests (ADR-041 §Layer location rule)
+type = forbidden
+source_modules =
+    tests.unit.services
+    tests.unit.domain
+forbidden_modules = sqlite3
