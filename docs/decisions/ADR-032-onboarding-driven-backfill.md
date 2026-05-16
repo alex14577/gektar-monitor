@@ -1,17 +1,24 @@
 # ADR-032 — Backfill Auto-trigger: Login-success event (revised)
 
-**Status**: Deprecated to secondary fallback — superseded as primary trigger by delta-based mechanism in ADR-028 §Generation 3 (Updated 2026-05-15)
+**Status**: Active — login-success is PRIMARY trigger (Updated 2026-05-16)
 **Date (original)**: 2026-05-15
-**Date (revision)**: 2026-05-15 (f5u race-condition fix)
+**Date (revision 1)**: 2026-05-15 (f5u race-condition fix — move trigger from onboarding to login)
+**Date (revision 2)**: 2026-05-16 (ty0x — login = primary trigger, remove secondary-fallback guards)
 **Deciders**: Backend Architect
 **Tags**: backfill, onboarding, login, trigger, race-condition
 
-> **Note (Updated 2026-05-15)**: This ADR describes the `on_login_success` callback trigger, now
-> **secondary fallback only**. It fires exclusively when `ParsedListPage.total_count is None` —
-> i.e., the site did not return paginator markup and the delta-trigger (ADR-028 §Generation 3)
-> cannot operate. When `total_count` is available, the delta-trigger in `MonitorCycleService` is
-> the primary mechanism. `on_login_success` + `count_active() == 0` guard remains active code;
-> it is not removed.
+> **Amendment (2026-05-16, gektar_monitor-ty0x)**: The `on_login_success` callback is now the
+> **primary trigger** for backfill, not a secondary fallback. Two guards were removed:
+>
+> 1. `count_active() == 0` guard: removed. DB may contain stale data; re-backfill on every
+>    login is correct. `BackfillService.start()` is single-flight — concurrent delta-check
+>    cannot produce a double-backfill.
+> 2. `all_skip_none` delta-trigger check: removed. This check was added to avoid double
+>    backfill when delta-trigger was operative, but idempotency is already enforced by
+>    `BackfillService._flight_lock`. The guard was therefore redundant and incorrectly
+>    suppressed backfill on every normal login (login 09:55 → backfill 09:56 via delta).
+>
+> Remaining guards: onboarding COMPLETED + regions configured + supervisor bound.
 
 Supersedes the «Auto-trigger heuristic» section of
 [[decisions/ADR-028-paginated-catalogue-backfill|ADR-028]] only.
@@ -65,15 +72,14 @@ Onboarding step4 → `svc.advance(COMPLETED)` → backfill trigger — всё е
 `LoginService.__init__`. Callback вызывается в `_on_login_done` — только при
 `start_login()` (headed login), НЕ при `start_refresh()` (silent cookie refresh).
 
-В `composition.py` создаётся closure `_backfill_on_login_success`:
+В `composition.py` создаётся closure `_trigger_backfill_on_login`:
 
 ```python
-def _backfill_on_login_success(_outcome: object) -> None:
-    # Guards:
+def _trigger_backfill_on_login(_outcome: object) -> None:
+    # Primary trigger — fires on every successful headed login.
+    # BackfillService.start() is single-flight; concurrent delta-check race is safe.
     if onboarding.current() != OnboardingState.COMPLETED:
         return           # онбординг не завершён
-    if lot_repo.count_active() != 0:
-        return           # каталог уже заполнен
     if not config_source.current().regions:
         return           # регионы не настроены
     sup = _supervisor_cell[0]
@@ -81,6 +87,8 @@ def _backfill_on_login_success(_outcome: object) -> None:
         return           # supervisor ещё не создан (тест без lifespan)
     sup.start("backfill-auto", lambda stop: backfill.start(stop))
 ```
+
+*(rev2, 2026-05-16): убраны guards `count_active() == 0` и `all_skip_none` — см. Amendment выше.)*
 
 **Почему callback на `LoginService`, а не route handler:**
 - Route handler `_handle_step4_next` выполняется **до** завершения login.
@@ -99,12 +107,13 @@ def _backfill_on_login_success(_outcome: object) -> None:
 - `_on_login_done` (новый метод) подключается только через `start_login()`;
   `start_refresh()` по-прежнему использует `_on_done` напрямую.
 
-**Guard conditions** (все должны быть true, проверяются в callback):
+**Guard conditions** (rev2, 2026-05-16 — все должны быть true, проверяются в callback):
 1. `onboarding.current() == COMPLETED` — backfill для завершённого онбординга.
-2. `lot_repo.count_active() == 0` — каталог пустой (первый запуск).
-3. `config_source.current().regions != []` — регионы настроены.
-4. `_supervisor_cell[0] is not None` — lifespan уже создал supervisor.
-5. Single-flight: `BackfillService.start()` idempotent — повторный вызов returns `False`.
+2. `config_source.current().regions != []` — регионы настроены.
+3. `_supervisor_cell[0] is not None` — lifespan уже создал supervisor.
+4. Single-flight: `BackfillService.start()` idempotent — повторный вызов returns `False`.
+
+*(Removed guards: `count_active() == 0` — см. Amendment. `all_skip_none` delta check — см. Amendment.)*
 
 ---
 

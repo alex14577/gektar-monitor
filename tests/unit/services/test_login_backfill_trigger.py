@@ -1,30 +1,26 @@
-"""Unit tests for the login-driven backfill auto-trigger (f5u race-condition fix).
+"""Unit tests for the login-driven backfill auto-trigger (ADR-032).
 
-ADR-032 / f5u: backfill must start ONLY after successful headed-login, not at
-onboarding-completion time.  The Playwright headed-login takes 10-60 s; triggering
-backfill immediately after onboarding-completion (before login succeeds) caused
-ParseBugErrors from missing session cookies → 0 rows → historical data lost
-permanently.
+ADR-032 rev2: successful headed-login is the PRIMARY trigger for backfill.
+Guards removed from callback:
+  - count_active() == 0: removed. DB may be stale; re-running backfill is correct.
+    BackfillService.start() single-flight lock prevents double runs.
+  - all_skip_none delta check: removed. Idempotency is already enforced by
+    BackfillService._flight_lock — login-callback and delta-check race is safe.
 
-ADR-032 (updated): callback is secondary fallback only. It fires only when
-MonitorCycleService.last_delta_decision returns 'skip_none' for ALL configured
-regions (total_count=None in DOM) AND count_active==0.  When delta-trigger is
-operative (total_count present), the callback must not start backfill.
+Remaining guards:
+  - onboarding COMPLETED
+  - regions configured
+  - supervisor bound
 
-Coverage (11 tests):
-  1. Backfill starts: login.succeeded + onboarding==COMPLETED + count_active==0 +
-     all regions skip_none (cold-start with broken DOM — secondary fallback fires).
+Coverage (8 tests):
+  1. Backfill starts: login.succeeded + onboarding==COMPLETED + regions configured.
   2. Backfill does NOT start if onboarding not COMPLETED.
-  3. Backfill does NOT start if count_active > 0.
+  3. Backfill starts even when count_active > 0 (stale DB — primary trigger fires).
   4. Backfill does NOT start on start_refresh() (only headed login triggers it).
   5. Re-trigger idempotency: second login with backfill running → start() returns False.
   6. Backfill does NOT start on failed login.
-  7. Backfill does NOT start if ANY region's last_delta_decision != 'skip_none'
-     (delta-trigger operative — primary path, callback must stay silent).
-  8. Backfill does NOT start if ALL regions have no decision yet (None → guard = False).
-  9. Backfill does NOT start if count_active>0 even when all regions skip_none.
- 10. Backfill starts when ALL regions skip_none AND count_active==0 (multi-region).
- 11. Backfill does NOT start if only SOME regions skip_none (mixed decisions).
+  7. Backfill starts regardless of delta-trigger decision (delta operative or skip_none).
+  8. Anti-mock: all Fake methods exercised.
 
 Layer: Application services (Layer 2 per docs/architecture/09-test-strategy.md).
 All dependencies injected via Fake Protocol implementations.
@@ -124,18 +120,6 @@ class FakeOnboardingService:
         return "/"
 
 
-class FakeLotRepository:
-    """Fake LotRepository — records count_active() calls."""
-
-    def __init__(self, active_count: int = 0) -> None:
-        self._active_count = active_count
-        self.count_active_calls: int = 0
-
-    def count_active(self) -> int:
-        self.count_active_calls += 1
-        return self._active_count
-
-
 class FakeBackfillService:
     """Fake BackfillService — records start() calls; simulates single-flight."""
 
@@ -167,17 +151,6 @@ class FakeSupervisor:
         target(self._stop)
 
 
-class FakeMonitorCycleService:
-    """Fake MonitorCycleService exposing last_delta_decision used by the callback guard."""
-
-    def __init__(self, decisions: dict[int, str | None] | None = None) -> None:
-        # decisions maps region_id → last decision string, or None if not yet run.
-        self._decisions: dict[int, str | None] = decisions or {}
-
-    def last_delta_decision(self, region_id: int) -> str | None:
-        return self._decisions.get(region_id)
-
-
 # ---------------------------------------------------------------------------
 # Anti-mock: exercise ALL Fake methods
 # ---------------------------------------------------------------------------
@@ -201,9 +174,6 @@ def test_all_fakes_all_methods_exercised() -> None:
     onb.advance(OnboardingState.RECIPIENTS_SET, OnboardingState.COMPLETED)
     onb.skip_email()
 
-    lot_repo = FakeLotRepository(active_count=0)
-    assert lot_repo.count_active() == 0
-
     bf = FakeBackfillService()
     assert bf.start(threading.Event()) is True
     assert bf.is_running() is True
@@ -211,11 +181,6 @@ def test_all_fakes_all_methods_exercised() -> None:
     sup = FakeSupervisor()
     sup.start("test", lambda _stop: None)
     assert "test" in sup.started
-
-    mc = FakeMonitorCycleService(decisions={1: "skip_none", 2: None})
-    assert mc.last_delta_decision(1) == "skip_none"
-    assert mc.last_delta_decision(2) is None
-    assert mc.last_delta_decision(99) is None
 
 
 # ---------------------------------------------------------------------------
@@ -225,35 +190,25 @@ def test_all_fakes_all_methods_exercised() -> None:
 
 def _make_callback(
     onboarding: FakeOnboardingService,
-    lot_repo: FakeLotRepository,
     backfill: FakeBackfillService,
     supervisor: FakeSupervisor,
     regions: list[int] | None = None,
-    monitor_cycle: FakeMonitorCycleService | None = None,
 ) -> Callable[[LoginOutcome], None]:
-    """Build the on_login_success closure mirroring composition.py logic."""
+    """Build the on_login_success closure mirroring composition.py logic (ADR-032 rev2).
+
+    Guards: onboarding COMPLETED + regions configured + supervisor bound.
+    Removed guards: count_active==0, all_skip_none.
+    """
     from tests.factories import make_settings
 
     _regions = regions if regions is not None else [1, 2]
     _settings = make_settings(regions=_regions)
     _supervisor_cell: list[object] = [supervisor]
-    _monitor_cycle = monitor_cycle or FakeMonitorCycleService(
-        decisions={r: "skip_none" for r in _regions}
-    )
 
     def _trigger(_outcome: object) -> None:
         if onboarding.current() != OnboardingState.COMPLETED:
             return
-        active = lot_repo.count_active()
-        if active != 0:
-            return
         if not _settings.regions:
-            return
-        region_ids = list(_settings.regions)
-        all_skip_none = all(
-            _monitor_cycle.last_delta_decision(rid) == "skip_none" for rid in region_ids
-        )
-        if not all_skip_none:
             return
         sup = _supervisor_cell[0]
         if sup is None:
@@ -300,7 +255,7 @@ def _run_refresh(
 
 
 # ---------------------------------------------------------------------------
-# Test 1: Backfill starts on login.succeeded + onboarding.COMPLETED + count_active==0
+# Test 1: Backfill starts on login.succeeded + onboarding.COMPLETED + regions set
 # ---------------------------------------------------------------------------
 
 
@@ -310,11 +265,10 @@ def test_backfill_starts_after_successful_login_when_guards_pass() -> None:
         outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
     )
     onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
     backfill = FakeBackfillService()
     supervisor = FakeSupervisor()
 
-    cb = _make_callback(onb, lot_repo, backfill, supervisor)
+    cb = _make_callback(onb, backfill, supervisor)
     outcome = _run_headed_login(session, cb)
 
     assert outcome.success is True
@@ -342,11 +296,10 @@ def test_backfill_not_started_when_onboarding_incomplete(state: OnboardingState)
         outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
     )
     onb = FakeOnboardingService(state=state)
-    lot_repo = FakeLotRepository(active_count=0)
     backfill = FakeBackfillService()
     supervisor = FakeSupervisor()
 
-    cb = _make_callback(onb, lot_repo, backfill, supervisor)
+    cb = _make_callback(onb, backfill, supervisor)
     _run_headed_login(session, cb)
 
     assert supervisor.started == [], f"Expected no backfill for state={state}"
@@ -354,25 +307,27 @@ def test_backfill_not_started_when_onboarding_incomplete(state: OnboardingState)
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Backfill does NOT start if count_active > 0
+# Test 3: Backfill DOES start even when catalogue is already populated
 # ---------------------------------------------------------------------------
 
 
-def test_backfill_not_started_when_catalogue_already_populated() -> None:
-    """If count_active() > 0 the catalogue already exists — skip backfill."""
+def test_backfill_starts_even_when_catalogue_already_populated() -> None:
+    """ADR-032 rev2: count_active guard removed. Login = primary trigger regardless of DB state."""
     session = FakeLoginSession(
         outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
     )
     onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=42)  # catalogue not empty
     backfill = FakeBackfillService()
     supervisor = FakeSupervisor()
 
-    cb = _make_callback(onb, lot_repo, backfill, supervisor)
+    # DB already has data — old guard would have skipped; new behaviour fires.
+    cb = _make_callback(onb, backfill, supervisor, regions=[1, 2])
     _run_headed_login(session, cb)
 
-    assert supervisor.started == []
-    assert backfill.start_calls == 0
+    assert supervisor.started == ["backfill-auto"], (
+        "login must trigger backfill even with existing data"
+    )
+    assert backfill.start_calls == 1
 
 
 # ---------------------------------------------------------------------------
@@ -386,11 +341,10 @@ def test_silent_refresh_does_not_trigger_backfill() -> None:
         refresh_outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
     )
     onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
     backfill = FakeBackfillService()
     supervisor = FakeSupervisor()
 
-    cb = _make_callback(onb, lot_repo, backfill, supervisor)
+    cb = _make_callback(onb, backfill, supervisor)
     outcome = _run_refresh(session, cb)
 
     assert outcome.success is True
@@ -410,20 +364,17 @@ def test_backfill_not_started_twice_when_already_running() -> None:
         outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
     )
     onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
     # Simulate first backfill already started (running=True).
     backfill = FakeBackfillService(already_running=True)
     supervisor = FakeSupervisor()
 
-    cb = _make_callback(onb, lot_repo, backfill, supervisor)
+    cb = _make_callback(onb, backfill, supervisor)
     _run_headed_login(session, cb)
 
     # Supervisor did enqueue "backfill-auto" (it always calls start via lambda),
     # but BackfillService.start() returned False (single-flight guard).
     assert supervisor.started == ["backfill-auto"]  # supervisor was called
-    assert backfill.start_calls == 1  # start() was called once
-    # The first call returned False because already_running=True.
-    # No second backfill started — single-flight invariant holds.
+    assert backfill.start_calls == 1  # start() was called once but returned False
 
 
 # ---------------------------------------------------------------------------
@@ -437,11 +388,10 @@ def test_backfill_not_started_on_failed_login() -> None:
         outcome=LoginOutcome(success=False, cookies_updated=False, error="login_timeout")
     )
     onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
     backfill = FakeBackfillService()
     supervisor = FakeSupervisor()
 
-    cb = _make_callback(onb, lot_repo, backfill, supervisor)
+    cb = _make_callback(onb, backfill, supervisor)
     outcome = _run_headed_login(session, cb)
 
     assert outcome.success is False
@@ -451,102 +401,29 @@ def test_backfill_not_started_on_failed_login() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests 7–11: Secondary fallback guard — delta-trigger operative check
+# Test 7: Backfill starts regardless of delta-trigger decision state
 # ---------------------------------------------------------------------------
 
 
-def test_backfill_not_started_when_delta_operative_for_one_region() -> None:
-    """Invariant 1: total_count present for ≥1 region → delta-trigger operative → no fallback."""
+def test_backfill_starts_when_delta_trigger_was_operative() -> None:
+    """ADR-032 rev2: all_skip_none guard removed. Login fires backfill even when delta operative.
+
+    BackfillService.start() single-flight lock prevents double-backfill if delta-check
+    also triggered one concurrently — that race is safe.
+    """
     session = FakeLoginSession(
         outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
     )
     onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
+    # Simulate situation where delta-trigger was running ('trigger' decision) —
+    # old guard would have blocked; new behaviour fires because start() is idempotent.
     backfill = FakeBackfillService()
     supervisor = FakeSupervisor()
-    # Region 1 = skip_none (DOM broken), region 2 = 'skip' (total_count was present).
-    mc = FakeMonitorCycleService(decisions={1: "skip_none", 2: "skip"})
 
-    cb = _make_callback(onb, lot_repo, backfill, supervisor, regions=[1, 2], monitor_cycle=mc)
+    cb = _make_callback(onb, backfill, supervisor, regions=[1, 2])
     _run_headed_login(session, cb)
 
-    assert supervisor.started == [], "delta-trigger operative for region 2 — fallback must not fire"
-    assert backfill.start_calls == 0
-
-
-def test_backfill_not_started_when_no_cycles_run_yet() -> None:
-    """Invariant 2: no delta-check run for any region (decisions=None) → fallback must not fire."""
-    session = FakeLoginSession(
-        outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
+    assert supervisor.started == ["backfill-auto"], (
+        "login must fire backfill even if delta triggered recently"
     )
-    onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
-    backfill = FakeBackfillService()
-    supervisor = FakeSupervisor()
-    # No decisions recorded yet (monitor has never run).
-    mc = FakeMonitorCycleService(decisions={})
-
-    cb = _make_callback(onb, lot_repo, backfill, supervisor, regions=[1, 2], monitor_cycle=mc)
-    _run_headed_login(session, cb)
-
-    assert supervisor.started == [], "no cycles run yet → guard must not fire"
-    assert backfill.start_calls == 0
-
-
-def test_backfill_not_started_when_count_active_positive_despite_all_skip_none() -> None:
-    """Invariant 3: all regions skip_none but count_active>0 → db not empty → no backfill."""
-    session = FakeLoginSession(
-        outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
-    )
-    onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=5)
-    backfill = FakeBackfillService()
-    supervisor = FakeSupervisor()
-    mc = FakeMonitorCycleService(decisions={1: "skip_none", 2: "skip_none"})
-
-    cb = _make_callback(onb, lot_repo, backfill, supervisor, regions=[1, 2], monitor_cycle=mc)
-    _run_headed_login(session, cb)
-
-    assert supervisor.started == []
-    assert backfill.start_calls == 0
-
-
-def test_backfill_starts_when_all_regions_skip_none_and_db_empty() -> None:
-    """Invariant 4 (regression): cold-start with broken DOM — all skip_none + db empty → fire."""
-    session = FakeLoginSession(
-        outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
-    )
-    onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
-    backfill = FakeBackfillService()
-    supervisor = FakeSupervisor()
-    mc = FakeMonitorCycleService(decisions={1: "skip_none", 2: "skip_none", 3: "skip_none"})
-
-    cb = _make_callback(
-        onb, lot_repo, backfill, supervisor, regions=[1, 2, 3], monitor_cycle=mc
-    )
-    _run_headed_login(session, cb)
-
-    assert supervisor.started == ["backfill-auto"]
     assert backfill.start_calls == 1
-
-
-def test_backfill_not_started_when_some_regions_skip_none_others_not() -> None:
-    """Invariant 5: mixed decisions — not all skip_none → delta-trigger still operative."""
-    session = FakeLoginSession(
-        outcome=LoginOutcome(success=True, cookies_updated=True, error=None)
-    )
-    onb = FakeOnboardingService(state=OnboardingState.COMPLETED)
-    lot_repo = FakeLotRepository(active_count=0)
-    backfill = FakeBackfillService()
-    supervisor = FakeSupervisor()
-    # Region 3 has 'trigger' decision — delta operative.
-    mc = FakeMonitorCycleService(decisions={1: "skip_none", 2: "skip_none", 3: "trigger"})
-
-    cb = _make_callback(
-        onb, lot_repo, backfill, supervisor, regions=[1, 2, 3], monitor_cycle=mc
-    )
-    _run_headed_login(session, cb)
-
-    assert supervisor.started == [], "region 3 triggered — fallback must not fire"
-    assert backfill.start_calls == 0

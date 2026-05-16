@@ -406,16 +406,20 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     monitor_cycle.set_backfill(backfill)
 
     # ---------------------------------------------------------------------------
-    # on_login_success: backfill auto-trigger on headed-login completion (f5u fix).
+    # on_login_success: backfill primary trigger on headed-login completion.
     #
     # ADR-032 originally triggered backfill from onboarding step-4 completion.
     # Prod logs showed the race: Playwright headed-login takes 10-60 s, but the
     # trigger fired immediately — backfill ran without valid session cookies,
-    # got ParseBugErrors, produced 0 rows.  After the first monitor_cycle writes
-    # lots, count_active() > 0, and the guard blocks all future auto-backfills.
+    # got ParseBugErrors, produced 0 rows.
     #
-    # Fix: trigger on *login success* (headed login only, not silent refresh).
-    # Guards remain identical: onboarding_completed AND count_active() == 0.
+    # Fix (ADR-032 rev1): trigger on login success (headed login only, not refresh).
+    # Fix (ADR-032 rev2): login success = primary trigger. Removed guards that made
+    # this callback a secondary fallback:
+    #   - count_active() == 0 check: removed. DB may be stale; re-backfill is correct.
+    #   - all_skip_none delta check: removed. BackfillService.start() is single-flight
+    #     under _flight_lock — idempotency is guaranteed without this guard.
+    # Remaining guards: onboarding COMPLETED + regions configured + supervisor bound.
     # The supervisor reference is captured lazily as a mutable cell to avoid a
     # circular dependency (supervisor is created in app.py lifespan, after
     # build_container returns; None-guard prevents premature invocation during
@@ -423,9 +427,9 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     # ---------------------------------------------------------------------------
     _supervisor_cell: list[object] = [None]  # mutable cell; filled by app.py lifespan
 
-    def _backfill_on_login_success(_outcome: object) -> None:
-        # Secondary fallback only. Primary backfill trigger is delta-check in
-        # MonitorCycleService. Activate when total_count=None ≥ N cycles AND db is empty.
+    def _trigger_backfill_on_login(_outcome: object) -> None:
+        # Primary trigger: fire on every successful headed login.
+        # BackfillService.start() is single-flight — concurrent delta-check race is safe.
         _log.debug("on_login_success.callback.fired", extra={"trigger": "headed_login_success"})
         onboarding_state = onboarding.current()
         from fis_monitor.domain.models import OnboardingState  # local to avoid circular
@@ -435,25 +439,9 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
                 onboarding_state,
             )
             return
-        active = lot_repo.count_active()
-        if active != 0:
-            _log.debug(
-                "on_login_success: catalogue not empty (count_active=%d) — skip backfill",
-                active,
-            )
-            return
         current_settings = config_source.current()
         if not current_settings.regions:
             _log.debug("on_login_success: regions empty — skip backfill")
-            return
-        region_ids = list(current_settings.regions)
-        all_skip_none = all(
-            monitor_cycle.last_delta_decision(rid) == "skip_none" for rid in region_ids
-        )
-        if not all_skip_none:
-            _log.debug(
-                "on_login_success: delta-trigger operative for ≥1 region — skip secondary fallback"
-            )
             return
         sup = _supervisor_cell[0]
         if sup is None:
@@ -461,7 +449,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
                 "on_login_success: supervisor not yet bound — backfill NOT started"
             )
             return
-        _log.info("on_login_success: secondary fallback guards passed → auto-backfill scheduled")
+        _log.info("on_login_success: guards passed → auto-backfill scheduled")
         sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
 
     # Build SessionExpiredEmailService before login so the reset callback can
@@ -484,7 +472,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     login = LoginService(
         login_session=login_session,
         clock=clock,
-        on_login_success=_backfill_on_login_success,
+        on_login_success=_trigger_backfill_on_login,
         on_any_success=_reset_session_expired_flag,
     )
     # Expose the supervisor cell so app.py lifespan can fill it after building
