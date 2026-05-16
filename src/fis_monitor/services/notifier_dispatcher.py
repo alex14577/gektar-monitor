@@ -208,6 +208,14 @@ class NotifierDispatcher:
         logged — monitor-cycle throughput takes priority over notifications.
         subscribed_at filtering is applied per-channel by SubscribedAtFilteredNotifier.
         """
+        logger.debug(
+            "dispatcher.dispatch.entry",
+            extra={
+                "lot_id": lot.id,
+                "region_id": lot.region_id,
+                "channels_count": len(list(self._registry.all())),
+            },
+        )
         try:
             self._queue.put_nowait(lot)
         except queue.Full:
@@ -260,8 +268,18 @@ class NotifierDispatcher:
             logger.info("dispatch suppressed (DnD active)")
             return
         for notifier in self._registry.all():
-            for recipient in self._recipients_of(notifier):
+            channel_id_log: str = type(notifier).channel_id  # type: ignore[attr-defined]
+            recipients = self._recipients_of(notifier)
+            for recipient in recipients:
                 self._send_one(lot, notifier, recipient)
+            logger.debug(
+                "dispatcher.channel.invoked",
+                extra={
+                    "lot_id": lot.id,
+                    "channel_id": channel_id_log,
+                    "recipients_count": len(recipients),
+                },
+            )
 
     def _recipients_of(self, notifier: object) -> list[str]:
         """Derive the recipient list for a given notifier instance.

@@ -156,6 +156,8 @@ class SessionExpiredEmailService:
         On DnD active: suppress silently WITHOUT setting the guard so the
         next event after DnD expires can trigger a send.
         """
+        logger.info("session_expired.detected", extra={"event_type": type(event).__name__})
+
         cfg = self._config_source.current()
         email_cfg = cfg.notifications.email
 
@@ -165,7 +167,8 @@ class SessionExpiredEmailService:
 
         if self._state_repo.get(SESSION_EXPIRED_EMAIL_SENT_KEY) is not None:
             logger.debug(
-                "session_expired_email: guard set (already sent this epoch) — skipping"
+                "session_expired.idempotency_skip",
+                extra={"guard_key": SESSION_EXPIRED_EMAIL_SENT_KEY},
             )
             return
 
@@ -204,3 +207,7 @@ class SessionExpiredEmailService:
         # The operator will see the warning in logs and can re-trigger manually.
         if any_sent or recipients:
             self._state_repo.set(SESSION_EXPIRED_EMAIL_SENT_KEY, "1")
+            logger.debug(
+                "session_expired.notification.queued",
+                extra={"recipients_count": len(recipients)},
+            )

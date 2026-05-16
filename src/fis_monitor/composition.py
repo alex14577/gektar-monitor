@@ -426,6 +426,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     def _backfill_on_login_success(_outcome: object) -> None:
         # Secondary fallback only. Primary backfill trigger is delta-check in
         # MonitorCycleService. Activate when total_count=None ≥ N cycles AND db is empty.
+        _log.debug("on_login_success.callback.fired", extra={"trigger": "headed_login_success"})
         onboarding_state = onboarding.current()
         from fis_monitor.domain.models import OnboardingState  # local to avoid circular
         if onboarding_state != OnboardingState.COMPLETED:

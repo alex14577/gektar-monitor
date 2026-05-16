@@ -400,6 +400,10 @@ class MonitorCycleService:
         See module docstring for the full exception-handling contract.
         """
         started_at = self._clock.now()
+        logger.debug(
+            "monitor_cycle.cycle.start",
+            extra={"region_id": region},
+        )
         cycle_id = self._cycles_repo.open(region=region, at=started_at)
 
         try:
@@ -434,12 +438,26 @@ class MonitorCycleService:
         # ---------- Step 2: fetch list page --------------------------------
         # ADR-036: head-poll — page=1 with per_page=20 (newest lots first).
         url = self._url_builder.lot_list_url(region=region, per_page=20)
+        logger.debug(
+            "monitor_cycle.region.fetch.start",
+            extra={"region_id": region, "cycle_id": cycle_id},
+        )
+        t0_fetch = time.monotonic()
         try:
             self.cycle_progress_signal.set()
             try:
                 response = self._http.get(url, headers=_PJAX_HEADERS)
             finally:
                 self.cycle_progress_signal.clear()
+            logger.debug(
+                "monitor_cycle.region.fetch.finish",
+                extra={
+                    "region_id": region,
+                    "cycle_id": cycle_id,
+                    "http_status": response.status,
+                    "duration_ms": int((time.monotonic() - t0_fetch) * 1000),
+                },
+            )
         except UpstreamError as exc:
             return self._close_with_upstream_error(
                 exc, cycle_id=cycle_id, region=region, started_at=started_at
@@ -573,6 +591,15 @@ class MonitorCycleService:
         new_lots_count = 0
         for lot in enriched_lots:
             upsert_result = self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
+            logger.debug(
+                "monitor_cycle.region.upsert",
+                extra={
+                    "region_id": region,
+                    "lot_id": lot.id,
+                    "was_new": upsert_result.was_new,
+                    "changes_count": len(upsert_result.changes) if upsert_result.changes else 0,
+                },
+            )
 
             if upsert_result.was_new:
                 new_lots_count += 1
@@ -613,6 +640,16 @@ class MonitorCycleService:
             error=None,
         )
         self._cycles_repo.close(cycle_id, result)
+        logger.debug(
+            "monitor_cycle.cycle.finish",
+            extra={
+                "region_id": region,
+                "cycle_id": cycle_id,
+                "status": result.status,
+                "lots_fetched": result.lots_fetched,
+                "new_lots": result.new_lots,
+            },
+        )
         return result
 
     # ------------------------------------------------------------------

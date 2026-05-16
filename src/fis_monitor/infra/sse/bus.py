@@ -80,11 +80,17 @@ class ThreadEventBus:
                             timeout; update per-type last_critical slot.
         """
         priority: str = event.priority  # type: ignore[attr-defined]
+        event_type: str = event.event  # type: ignore[attr-defined]
 
         # Take a snapshot of subscribers under lock so we don't hold the lock
         # while doing potentially blocking queue operations.
         with self._lock:
             snapshot = list(self._subscribers)
+
+        logger.debug(
+            "sse.event.queued",
+            extra={"event_type": event_type, "subscriber_count": len(snapshot)},
+        )
 
         if priority == "critical":
             self._publish_critical(event, snapshot)
@@ -138,6 +144,11 @@ class ThreadEventBus:
                 sub._q.put_nowait(event)
             except queue.Full:
                 # Drop-from-tail: evict the oldest item, then enqueue the new one.
+                _ev_type: str = event.event  # type: ignore[attr-defined]
+                logger.warning(
+                    "sse.queue.drop",
+                    extra={"event_type": _ev_type, "drop_reason": "overflow"},
+                )
                 with contextlib.suppress(queue.Empty):
                     sub._q.get_nowait()
                 with contextlib.suppress(queue.Full):

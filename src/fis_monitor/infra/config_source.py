@@ -337,6 +337,7 @@ class WatchdogConfigSource:
         if self._region_subs_repo is None:
             return
         now = self._clock.now()
+        seeded_count = 0
         for region_id in sorted(self._current.regions):
             if self._region_subs_repo.get_subscribed_at(region_id) is None:
                 self._region_subs_repo.set_if_absent(region_id, now)
@@ -345,6 +346,11 @@ class WatchdogConfigSource:
                     region_id=region_id,
                     subscribed_at=now.isoformat(),
                 )
+                seeded_count += 1
+        logger.debug(
+            "config.bootstrap_subscriptions",
+            extra={"regions_seeded_count": seeded_count},
+        )
 
     # ------------------------------------------------------------------
     # Internal — env overrides
@@ -410,11 +416,19 @@ class WatchdogConfigSource:
 
     def _on_event(self) -> None:
         """Schedule/reset the debounce timer on a relevant FS event."""
+        logger.debug(
+            "config.file_event",
+            extra={"path": self._path.name},
+        )
         with self._lock:
             if self._pending_timer is not None:
                 self._pending_timer.cancel()
             timer = threading.Timer(_DEBOUNCE_SECONDS, self._do_reload)
             self._pending_timer = timer
+        logger.debug(
+            "config.debounce.scheduled",
+            extra={"delay_ms": int(_DEBOUNCE_SECONDS * 1000)},
+        )
         timer.start()
 
     def _do_reload(self) -> None:
@@ -461,6 +475,13 @@ class WatchdogConfigSource:
             if digest == self._last_content_hash:
                 return  # identical content, skip parse entirely
             old_current = self._current
+            old_hash_short = self._last_content_hash.hex()[:8]
+
+        hash_new_short = digest.hex()[:8]
+        logger.debug(
+            "config.reload.start",
+            extra={"hash_old": old_hash_short, "hash_new": hash_new_short},
+        )
 
         # --- Parse ---
         try:
@@ -498,6 +519,18 @@ class WatchdogConfigSource:
             self.reload_count += 1
             self.last_reload_at = self._clock.now()
             subscribers_snapshot = list(self._subscribers)
+
+        old_regions = set(old_current.regions)
+        new_regions = set(new_settings.regions)
+        regions_diff_count = len(old_regions.symmetric_difference(new_regions))
+        logger.debug(
+            "config.reload.finish",
+            extra={
+                "hash_old": old_hash_short,
+                "hash_new": hash_new_short,
+                "regions_diff_count": regions_diff_count,
+            },
+        )
 
         # Skip callback delivery if Settings identical (Settings is frozen/comparable).
         if new_settings == old_current:
