@@ -327,7 +327,7 @@ Wizard первого запуска. FSM: `not_started → regions_set → smtp
 
 HTML главного экрана (feed). Доступен только при `OnboardingState=COMPLETED` (gate middleware гарантирует это до роута). Шаблон `feed.html.jinja`.
 
-**Помечен** `include_in_schema=False`. Контекст: `SessionStatus` (через `SessionProbe`), `Settings.interval_minutes`, активные лоты через `LotQueryService`. Cookie `view_filters` читается через `ViewFiltersService.deserialize` и конвертируется в `LotFilters.region_names` через `_view_filters_to_lot_filters`. Рендеринг `#feed` происходит через `build_feed_context` (shared helper с `POST /filters/view`). Шаблон подключается к SSE-каналам `/sse/lots` и `/sse/status` самостоятельно через htmx-sse.
+**Помечен** `include_in_schema=False`. Контекст: `SessionStatus` (через `SessionProbe`), `Settings.interval_minutes`, активные лоты через `LotQueryService`. Cookie `view_filters` читается через `ViewFiltersService.deserialize` и конвертируется в `LotFilters.subject_display_names` через `build_feed_context` (в `web/feed_context.py`). Рендеринг `#feed` происходит через `build_feed_context` (shared helper с `POST /filters/view`). Шаблон подключается к SSE-каналам `/sse/lots` и `/sse/status` самостоятельно через htmx-sse.
 
 ---
 
@@ -349,7 +349,7 @@ HTML главного экрана (feed). Доступен только при 
 - `hx-target="#feed"`, `hx-swap="outerHTML"` — заменяет `#feed` основным телом ответа.
 - OOB-блок `id="filter-trigger"` обновляет кнопку-триггер в сайдбаре (вне `#feed`), используя htmx out-of-band swap (см. [[glossary#htmx OOB swap]]).
 
-**Cookie persistence:** сохранённые фильтры читаются `GET /` при следующей загрузке страницы через `ViewFiltersService.deserialize` → `_view_filters_to_lot_filters` → `LotFilters.region_names`.
+**Cookie persistence:** сохранённые фильтры читаются `GET /` при следующей загрузке страницы через `ViewFiltersService.deserialize` → `build_feed_context` (в `web/feed_context.py`) → `LotFilters.subject_display_names`.
 
 **Empty-state:** «Ничего не подходит» рендерится ВНУТРИ `<div id="feed">` (не снаружи) — иначе outerHTML-swap его не задевает.
 

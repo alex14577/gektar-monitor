@@ -24,7 +24,7 @@ DI: ViewFiltersService is injected via get_view_filters_service() from deps.py.
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -47,11 +47,29 @@ from fis_monitor.web.deps import (
     get_templates,
     get_view_filters_service,
 )
-from fis_monitor.web.routes.main import build_feed_context
+from fis_monitor.web.feed_context import build_feed_context
 
 __all__ = ["router"]
 
 _log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SessionStubForFilter:
+    """Minimal session context for the filter POST endpoint.
+
+    The filter POST handler has no SessionProbe dependency — the user is on
+    the main page so the session is active.
+
+    Only ``expired`` is accessed by the partials rendered by this endpoint
+    (``_lot_poster.html.jinja`` / ``_lot_list.html.jinja``). ``expires_soon``
+    and ``expires_at_hhmm`` are included for forward-compat if the partial
+    set widens; defaults are safe no-ops.
+    """
+
+    expired: bool = False
+    expires_soon: bool = False
+    expires_at_hhmm: str = ""
 
 _COOKIE_NAME = "view_filters"
 _COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
@@ -218,10 +236,7 @@ def post_view_filters(
         settings=settings,
         active_lot_count=lot_repo.count_active(),
     )
-    # Lot partials check session.expired to disable links when session is gone.
-    # The filter POST endpoint has no session probe dep; the user is on the main
-    # page so the session is active. A default non-expired stub is sufficient.
-    ctx["session"] = SimpleNamespace(expired=False, expires_soon=False, expires_at_hhmm="")
+    ctx["session"] = SessionStubForFilter()
     # Emit out-of-band button so htmx refreshes the subject-filter trigger
     # (id="filter-trigger") that lives outside #feed and is not touched by the
     # primary outerHTML swap.

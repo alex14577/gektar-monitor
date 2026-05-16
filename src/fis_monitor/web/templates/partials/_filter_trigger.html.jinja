@@ -14,7 +14,7 @@
         data-toggle-menu="filter-subjects-menu"
         aria-haspopup="listbox" aria-expanded="false"
         hx-get="/filters/subjects" hx-target="#filter-subjects-menu" hx-swap="innerHTML"
-        hx-trigger="click once"
+        hx-trigger="click once" {# 'once' OK: OOB swap replaces node, new node gets fresh listener #}
         {% if oob %}hx-swap-oob="true"{% endif %}>
   <span>
     {% if filters.subjects %}{{ filters.subjects | length }} выбран{{ 'о' if filters.subjects | length != 1 else '' }}{% else %}Все · {{ scope.subjects_count }}{% endif %}

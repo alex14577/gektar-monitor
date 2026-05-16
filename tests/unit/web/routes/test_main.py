@@ -492,7 +492,7 @@ def test_feed_only_stars_filter_hides_unstarred() -> None:
 
 
 def test_feed_subjects_filter_passed_to_lot_query() -> None:
-    """ViewFilters.subjects flow through to LotFilters.region_names via display names.
+    """ViewFilters.subjects flow through to LotFilters.subject_display_names via display names.
 
     Site-ids are looked up in SUBJECT_TITLE_BY_ID and translated to the
     TEXT display names stored in lots.region (e.g. 27 → "Республика Карелия").
@@ -510,8 +510,8 @@ def test_feed_subjects_filter_passed_to_lot_query() -> None:
     assert len(fake_lot_query.search_calls) == 1
     used = fake_lot_query.search_calls[0]
     # Translated to display names; "garbage" silently dropped
-    assert set(used.region_names) == {SUBJECT_TITLE_BY_ID[27], SUBJECT_TITLE_BY_ID[34]}
-    assert used.regions == ()  # int-based field no longer used for subject filtering
+    assert set(used.subject_display_names) == {SUBJECT_TITLE_BY_ID[27], SUBJECT_TITLE_BY_ID[34]}
+    assert used.regions == ()  # int-based field not used for subject filtering
 
 
 def test_scope_subjects_count_reflects_full_catalog() -> None:

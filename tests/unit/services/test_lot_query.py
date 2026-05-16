@@ -325,6 +325,24 @@ def test_decode_cursor_non_integer_content_raises_value_error() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_lot_filters_regions_and_subject_display_names_raises() -> None:
+    """Setting both regions and subject_display_names raises ValueError (AND-footgun guard)."""
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        LotFilters(regions=(1,), subject_display_names=("Мурманская область",))
+
+
+def test_lot_filters_only_regions_ok() -> None:
+    f = LotFilters(regions=(1, 2))
+    assert f.regions == (1, 2)
+    assert f.subject_display_names == ()
+
+
+def test_lot_filters_only_subject_display_names_ok() -> None:
+    f = LotFilters(subject_display_names=("Мурманская область",))
+    assert f.subject_display_names == ("Мурманская область",)
+    assert f.regions == ()
+
+
 def test_lot_filters_unknown_status_raises() -> None:
     with pytest.raises(ValueError, match="Unknown lot status"):
         LotFilters(status="НеизвестныйСтатус")

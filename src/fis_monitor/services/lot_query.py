@@ -76,10 +76,9 @@ class LotFilters:
     column stores TEXT strings; codes are compared as strings
     (``str(region_code)``).  Pass an empty tuple to disable the filter.
 
-    ``region_names``: whitelist of RF subject display names as they appear in
-    the ``lots.region`` TEXT column (e.g. "Мурманская область").  Used by the
-    subject-filter UI; mutually additive with ``regions`` — both conditions are
-    ANDed if both are non-empty.  Pass an empty tuple to disable.
+    ``subject_display_names``: whitelist of RF subject display names as they
+    appear in the ``lots.region`` TEXT column (e.g. "Мурманская область").
+    Used by the subject-filter UI.  Pass an empty tuple to disable.
 
     ``area_sqm_min`` / ``area_sqm_max``: filter by ``lots.area_sqm``.
     Values are truncated to ``int`` for SQL.
@@ -91,13 +90,20 @@ class LotFilters:
     """
 
     regions: tuple[int, ...] = ()
-    region_names: tuple[str, ...] = ()
+    subject_display_names: tuple[str, ...] = ()
     area_sqm_min: Decimal | None = None
     area_sqm_max: Decimal | None = None
     status: str | None = None
     fts_query: str | None = None
 
     def __post_init__(self) -> None:
+        if self.regions and self.subject_display_names:
+            raise ValueError(
+                "LotFilters.regions and .subject_display_names are mutually exclusive: "
+                "both filter the same 'region' column using incompatible value types "
+                "(int codes vs. display names), so ANDing them always yields zero rows. "
+                "Pass only one of the two."
+            )
         if self.status is not None and self.status not in _KNOWN_STATUSES:
             raise ValueError(
                 f"Unknown lot status {self.status!r}. "
@@ -329,8 +335,8 @@ class LotQueryService:
 
         Filter mapping:
         - ``regions``: ``lots.region IN (?, ...)`` — region codes cast to str.
-        - ``region_names``: ``lots.region IN (?, ...)`` — display names matched
-          directly against the TEXT ``lots.region`` column.
+        - ``subject_display_names``: ``lots.region IN (?, ...)`` — display names
+          matched directly against the TEXT ``lots.region`` column.
         - ``area_sqm_min`` / ``area_sqm_max``: mapped to ``lots.area_sqm``.
         - ``status``: exact ``lots.status = ?`` match.
         - ``cursor``: ``lots.id > ?`` keyset condition.
@@ -343,10 +349,10 @@ class LotQueryService:
             conditions.append(f"region IN ({placeholders})")
             params.extend(str(r) for r in filters.regions)
 
-        if filters.region_names:
-            placeholders = ", ".join("?" * len(filters.region_names))
+        if filters.subject_display_names:
+            placeholders = ", ".join("?" * len(filters.subject_display_names))
             conditions.append(f"region IN ({placeholders})")
-            params.extend(filters.region_names)
+            params.extend(filters.subject_display_names)
 
         if filters.area_sqm_min is not None:
             conditions.append("area_sqm >= ?")

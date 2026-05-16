@@ -10,7 +10,7 @@ Coverage:
       checkboxes on/off, unknown field ignored.
   (g) Filter content invariants: response body reflects active filters.
   (h) OOB button: POST /filters/view emits hx-swap-oob button outside #feed.
-  (i) Data-flow: subject site-ids → region_names in SQL layer (not int codes).
+  (i) Data-flow: subject site-ids → subject_display_names in SQL layer (not int codes).
   (j) Round-trip: cookie from POST applies on GET.
 """
 
@@ -364,22 +364,22 @@ class TestPostViewFiltersFilterContent:
         assert resp.status_code == 200
         assert 'id="feed"' in resp.text
 
-    def test_empty_filter_passes_empty_region_names_to_query(self) -> None:
-        """Empty subjects → LotFilters.region_names == () (no region restriction)."""
+    def test_empty_filter_passes_empty_subject_display_names_to_query(self) -> None:
+        """Empty subjects → LotFilters.subject_display_names == () (no region restriction)."""
         lot_query = FakeLotQueryService()
         app = _build_app(lot_query=lot_query)
         with TestClient(app) as client:
             client.post("/filters/view", data={})
         assert lot_query.search_calls
         last = lot_query.search_calls[-1]
-        assert last.region_names == ()
-        assert last.regions == ()  # legacy field also empty
+        assert last.subject_display_names == ()
+        assert last.regions == ()  # int-codes field also empty
 
-    def test_subject_filter_translated_to_region_names(self) -> None:
+    def test_subject_filter_translated_to_subject_display_names(self) -> None:
         """Subject site-ids are translated to display names for SQL region filter.
 
         Invariant: POST with subjects=["27","34"] must pass
-        LotFilters.region_names containing the display names from
+        LotFilters.subject_display_names containing the display names from
         SUBJECT_TITLE_BY_ID — NOT integer codes in .regions.
         This ensures SQL WHERE region IN ('Республика Карелия', 'Мурманская область')
         matches the TEXT lots.region column.
@@ -393,15 +393,15 @@ class TestPostViewFiltersFilterContent:
             )
         assert lot_query.search_calls
         last = lot_query.search_calls[-1]
-        assert set(last.region_names) == {
+        assert set(last.subject_display_names) == {
             SUBJECT_TITLE_BY_ID[27],
             SUBJECT_TITLE_BY_ID[34],
         }
-        # regions (int-based legacy field) must be empty — site-ids are not stored there
+        # regions (int-based field) must be empty — site-ids are not stored there
         assert last.regions == ()
 
     def test_unknown_subject_id_silently_dropped(self) -> None:
-        """Subject IDs not in SUBJECT_TITLE_BY_ID are dropped from region_names."""
+        """Subject IDs not in SUBJECT_TITLE_BY_ID are dropped from subject_display_names."""
         lot_query = FakeLotQueryService()
         app = _build_app(lot_query=lot_query)
         with TestClient(app) as client:
@@ -412,7 +412,7 @@ class TestPostViewFiltersFilterContent:
             )
         assert lot_query.search_calls
         last = lot_query.search_calls[-1]
-        assert set(last.region_names) == {SUBJECT_TITLE_BY_ID[27]}
+        assert set(last.subject_display_names) == {SUBJECT_TITLE_BY_ID[27]}
 
     def test_empty_filter_no_lots_shows_feed_div(self) -> None:
         """With no lots, feed div is still rendered (empty state or loading)."""
@@ -524,19 +524,19 @@ class TestOobFilterTrigger:
 
 
 class TestRoundTripCookieApplied:
-    def test_post_cookie_encodes_subjects_and_query_receives_region_names(self) -> None:
-        """POST sets cookie with subjects; re-applying the cookie translates to region_names.
+    def test_post_cookie_encodes_subjects_and_query_receives_subject_display_names(self) -> None:
+        """POST sets cookie with subjects; re-applying it translates to subject_display_names.
 
         Invariant (M-2):
           1. POST /filters/view with subjects=["34"] → cookie encodes subjects=["34"].
           2. Deserialising that cookie into ViewFilters and running build_feed_context
-             passes LotFilters.region_names containing SUBJECT_TITLE_BY_ID[34].
+             passes LotFilters.subject_display_names containing SUBJECT_TITLE_BY_ID[34].
 
         This tests the full cookie → query bridge without needing a running GET / route.
         """
         from fis_monitor.domain.models import Settings
         from fis_monitor.services.view_filters import deserialize
-        from fis_monitor.web.routes.main import build_feed_context
+        from fis_monitor.web.feed_context import build_feed_context
 
         # Step 1: POST /filters/view to obtain the cookie value
         app = _build_app()
@@ -567,7 +567,7 @@ class TestRoundTripCookieApplied:
         )
         assert tracking_query.search_calls, "build_feed_context must call search()"
         last = tracking_query.search_calls[-1]
-        assert SUBJECT_TITLE_BY_ID[34] in last.region_names
+        assert SUBJECT_TITLE_BY_ID[34] in last.subject_display_names
 
 
 # ---------------------------------------------------------------------------
