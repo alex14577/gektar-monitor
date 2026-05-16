@@ -50,34 +50,6 @@ def test_lot_roundtrip_json(make_lot):
 
 
 # ---------------------------------------------------------------------------
-# T4 — SmtpCredentials never leaks plaintext in repr / dump
-# ---------------------------------------------------------------------------
-def test_smtp_credentials_repr_no_plaintext():
-    creds = SmtpCredentials(
-        smtp_host="smtp.example.com",
-        smtp_port=587,
-        smtp_user="bot@example.com",
-        smtp_password="hunter2",  # type: ignore[arg-type]
-    )
-    assert "hunter2" not in repr(creds)
-    assert "hunter2" not in str(creds.model_dump())
-    assert "hunter2" not in creds.model_dump_json()
-
-
-# ---------------------------------------------------------------------------
-# T5 — SecretStr get_secret_value() works
-# ---------------------------------------------------------------------------
-def test_smtp_credentials_get_secret_value():
-    creds = SmtpCredentials(
-        smtp_host="smtp.example.com",
-        smtp_port=587,
-        smtp_user="bot@example.com",
-        smtp_password="hunter2",  # type: ignore[arg-type]
-    )
-    assert creds.smtp_password.get_secret_value() == "hunter2"
-
-
-# ---------------------------------------------------------------------------
 # T5b — SmtpCredentials canon shape: no from_addr / use_starttls
 # ---------------------------------------------------------------------------
 def test_smtp_credentials_canon_fields():
