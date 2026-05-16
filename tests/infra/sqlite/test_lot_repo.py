@@ -52,6 +52,7 @@ class FixedClock:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_repo(
     tmp_db: ConnectionProvider,
     clock: FixedClock | None = None,
@@ -70,14 +71,10 @@ def _rtree_count(tmp_db: ConnectionProvider, lot_id: int) -> int:
     return count
 
 
-def _rtree_coords(
-    tmp_db: ConnectionProvider, lot_id: int
-) -> tuple[float, float] | None:
+def _rtree_coords(tmp_db: ConnectionProvider, lot_id: int) -> tuple[float, float] | None:
     """Return (lat, lon) stored in lots_rtree, or None if absent."""
     conn = tmp_db.get()
-    cur = conn.execute(
-        "SELECT min_lat, min_lon FROM lots_rtree WHERE id = ?", (lot_id,)
-    )
+    cur = conn.execute("SELECT min_lat, min_lon FROM lots_rtree WHERE id = ?", (lot_id,))
     row = cur.fetchone()
     cur.close()
     if row is None:
@@ -88,6 +85,21 @@ def _rtree_coords(
 # ---------------------------------------------------------------------------
 # Tests: upsert + diff
 # ---------------------------------------------------------------------------
+
+
+def test_upsert_notify_kwarg_removed(tmp_db: ConnectionProvider) -> None:
+    """Regression: `notify` kwarg removed from LotRepository.upsert (P1-3 API change).
+
+    Extracted from tests/unit/infra/sqlite/repositories/test_lot_repo.py (bd 2inf).
+    Calling upsert without any extra kwargs must work — `notify` was a dead
+    parameter never read by the repository implementation.
+    """
+    repo = _make_repo(tmp_db)
+    lot = make_lot(id=1000)
+
+    result = repo.upsert(lot, tracked=("status",))
+
+    assert result.was_new is True
 
 
 def test_upsert_new_lot_is_new_true_no_changes(tmp_db: ConnectionProvider) -> None:
@@ -187,16 +199,15 @@ def test_upsert_rollback_on_error_leaves_lot_unchanged(
 
 
 def test_upsert_toctou_second_writer_reads_committed_state(
-    tmp_db: ConnectionProvider, tmp_db_path  # type: ignore[no-untyped-def]
+    tmp_db: ConnectionProvider,
+    tmp_db_path,  # type: ignore[no-untyped-def]
 ) -> None:
     """Two sequential upserts on the same lot_id are ordered deterministically.
 
     (True concurrent TOCTOU is a property of BEGIN IMMEDIATE; here we verify
     the sequential path: second upsert sees the first's committed state.)
     """
-    schema_sql_path = (
-        Path(__file__).resolve().parents[3] / "docs" / "db" / "schema.sql"
-    )
+    schema_sql_path = Path(__file__).resolve().parents[3] / "docs" / "db" / "schema.sql"
     schema_sql = schema_sql_path.read_text(encoding="utf-8")
 
     provider2 = ConnectionProvider(db_path=tmp_db_path)
@@ -391,19 +402,11 @@ def test_needing_enrichment_returns_pending_and_null(
     """needing_enrichment returns lots with NULL or 'pending' enrichment_status
     and detail_fetched_at IS NULL.  'done' lots are excluded."""
     repo = _make_repo(tmp_db)
-    lot_null = make_lot(
-        id=50, enrichment_status=None, detail_fetched_at=None
-    )
-    lot_pending = make_lot(
-        id=51, enrichment_status="pending", detail_fetched_at=None
-    )
-    lot_done = make_lot(
-        id=52, enrichment_status="done", detail_fetched_at=_BASE_TIME
-    )
+    lot_null = make_lot(id=50, enrichment_status=None, detail_fetched_at=None)
+    lot_pending = make_lot(id=51, enrichment_status="pending", detail_fetched_at=None)
+    lot_done = make_lot(id=52, enrichment_status="done", detail_fetched_at=_BASE_TIME)
     # pending but already fetched — should NOT be returned.
-    lot_pending_fetched = make_lot(
-        id=53, enrichment_status="pending", detail_fetched_at=_BASE_TIME
-    )
+    lot_pending_fetched = make_lot(id=53, enrichment_status="pending", detail_fetched_at=_BASE_TIME)
 
     for lot in [lot_null, lot_pending, lot_done, lot_pending_fetched]:
         repo.upsert(lot, tracked=["status"])
@@ -562,9 +565,7 @@ def test_first_upsert_with_coords_creates_exactly_one_rtree_row(
     lot = make_lot(id=100, lat=48.48, lon=135.08)
     repo.upsert(lot, tracked=[])
 
-    cur = tmp_db.get().execute(
-        "SELECT COUNT(*) FROM lots_rtree WHERE id = 100"
-    )
+    cur = tmp_db.get().execute("SELECT COUNT(*) FROM lots_rtree WHERE id = 100")
     assert cur.fetchone()[0] == 1
     cur.close()
 
@@ -636,3 +637,38 @@ def test_region_id_roundtrip_via_list_active(tmp_db: ConnectionProvider) -> None
 
     assert len(matched) == 1
     assert matched[0].region_id == 2
+
+
+# ---------------------------------------------------------------------------
+# date_registry round-trip (svqi — EGRN registration date)
+# ---------------------------------------------------------------------------
+
+_REGISTRY_DATE = datetime(2026, 4, 22, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "date_registry",
+    [None, _REGISTRY_DATE],
+    ids=["null", "datetime"],
+)
+def test_date_registry_roundtrip(
+    tmp_db: ConnectionProvider,
+    date_registry: datetime | None,
+) -> None:
+    """INSERT and UPDATE both persist date_registry; get() returns the same value."""
+    repo = _make_repo(tmp_db)
+    lot = make_lot(id=501, date_registry=date_registry)
+    repo.upsert(lot, tracked=[])
+
+    fetched = repo.get(501)
+    assert fetched is not None
+    assert fetched.date_registry == date_registry
+
+    # Also verify UPDATE path: flip the value and re-upsert.
+    flipped = _REGISTRY_DATE if date_registry is None else None
+    updated_lot = lot.model_copy(update={"date_registry": flipped})
+    repo.upsert(updated_lot, tracked=[])
+
+    re_fetched = repo.get(501)
+    assert re_fetched is not None
+    assert re_fetched.date_registry == flipped
