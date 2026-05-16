@@ -8,14 +8,22 @@ Tests:
 - frozen dataclass rejects attribute mutation
 - default sort=-DATE_CREATE is appended raw (RFC 3986 unreserved chars)
 - custom sort=-DATE_UPDATE is substituted correctly
+- page param uses Yii2 default `page` name, not model-specific FreeLotSearch_page
+- page 1 omits page param; page 2+ appends &page=N
+- built URL matches pager href from live HTML fixture
 """
 from __future__ import annotations
 
 import dataclasses
+import html as html_lib
+import re
+from pathlib import Path
 
 import pytest
 
 from fis_monitor.infra.http.url_builder import DEFAULT_LIST_SORT, TorgiUrlBuilder
+
+_FIXTURES_DIR = Path(__file__).parents[3] / "fixtures"
 
 _DEFAULT_BASE = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai"
 _CUSTOM_BASE = "http://localhost:8765"
@@ -95,9 +103,55 @@ class TestLotListUrl:
     def test_lot_list_url_per_page_zero_raises(self) -> None:
         """per_page=0 is rejected with ValueError."""
         builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
-        import pytest
         with pytest.raises(ValueError, match="per_page must be > 0"):
             builder.lot_list_url(region=1, per_page=0)
+
+    def test_lot_list_url_page_uses_yii2_default_param_name(self) -> None:
+        """Pagination param is `page`, not model-specific `FreeLotSearch_page`.
+
+        Invariant: page=1 omits page param entirely (canonical URL);
+        page=2 appends exactly `&page=2`; FreeLotSearch_page never appears.
+        Confirmed from live HTML pager hrefs (?region=1&page=2 …).
+        """
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+
+        url_p1 = builder.lot_list_url(region=1, page=1)
+        assert "&page=" not in url_p1
+        assert "FreeLotSearch_page" not in url_p1
+
+        url_p2 = builder.lot_list_url(region=1, page=2)
+        assert "&page=2" in url_p2
+        assert "FreeLotSearch_page" not in url_p2
+
+    def test_lot_list_url_page2_matches_fixture_pager_href(self) -> None:
+        """URL for page 2 must share path+param with pager__btn href in fixture.
+
+        Extracts `href` from first non-active `pager__btn` anchor in
+        list_region1_perpage50.html and confirms our builder emits the same
+        `page=2` parameter on the same path.
+        """
+        fixture = _FIXTURES_DIR / "list_region1_perpage50.html"
+        if not fixture.exists():
+            pytest.skip("fixture not available")
+
+        html = fixture.read_text(encoding="utf-8")
+        # Extract hrefs of non-active pager buttons (page 2+)
+        hrefs = re.findall(
+            r'class="pager__btn"[^>]+href="([^"]+)"', html
+        )
+        assert hrefs, "no pager__btn hrefs found in fixture"
+        # First non-active button should be page 2
+        page2_href = hrefs[0]  # e.g. /cabinet/free-lot?region=1&amp;page=2 (HTML-escaped)
+        page2_href_unescaped = html_lib.unescape(page2_href)
+
+        assert "&page=2" in page2_href_unescaped, f"unexpected href: {page2_href}"
+        assert "FreeLotSearch_page" not in page2_href_unescaped
+
+        # Our builder must produce the same page= param and path
+        builder = TorgiUrlBuilder(base_url=_DEFAULT_BASE)
+        url = builder.lot_list_url(region=1, page=2)
+        assert "&page=2" in url
+        assert "FreeLotSearch_page" not in url
 
 
 class TestLotDetailUrl:

@@ -277,7 +277,7 @@ class TestParseBugError:
 
 class TestPageUrls:
     def test_page1_url_has_no_page_param(self) -> None:
-        """Page 1 URL does NOT include FreeLotSearch_page."""
+        """Page 1 URL does NOT include a page param (canonical URL)."""
         http = FakeHttpClient(["<p1/>"])
         parser = FakeListParser([[]])  # empty → stops after page 1
 
@@ -285,10 +285,11 @@ class TestPageUrls:
         stop = threading.Event()
         list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0))
 
+        assert "&page=" not in http.calls[0]
         assert "FreeLotSearch_page" not in http.calls[0]
 
     def test_page2_url_has_page_param(self) -> None:
-        """Page 2 URL includes FreeLotSearch_page=2."""
+        """Page 2 URL includes &page=2 (Yii2 default param, not model-specific)."""
         http = FakeHttpClient(["<p1/>", "<p2/>"])
         parser = FakeListParser([[_make_row(1)], []])  # page 1 has rows, page 2 empty
 
@@ -297,7 +298,8 @@ class TestPageUrls:
         list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0))
 
         assert len(http.calls) == 2
-        assert "FreeLotSearch_page=2" in http.calls[1]
+        assert "&page=2" in http.calls[1]
+        assert "FreeLotSearch_page" not in http.calls[1]
 
 
 # ---------------------------------------------------------------------------

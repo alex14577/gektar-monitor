@@ -49,3 +49,8 @@ man-in-the-middle между нашим сервером и upstream — out of 
 - Hot-reload `TorgiUrlBuilder` на reload `Settings` — out of scope (future work); builder пересоздаётся только на рестарт (restart = pересборка Container).
 - Migration: существующие `config.json` не содержат `target.*` ключей — поведение совпадает с default (real domain). Backward-compat через pydantic `extra="forbid"` с `default_factory=TargetConfig`.
 - `migrations_v1_to_v2.py` — frozen, `smtp.yandex.ru` в нём остаётся (applied migration).
+
+**Amendment 2026-05-16:** pagination param corrected to `page` (Yii2 default, not model-specific).
+`_LIST_PAGE_PARAM` was incorrectly set to `&FreeLotSearch_page={page}`; the server silently
+ignored it and returned page 1 every time. Confirmed from pager `href` in live HTML fixture:
+`/cabinet/free-lot?region=1&page=2`. Fixed to `&page={page}`. See [[glossary#TorgiUrlBuilder]].

@@ -14,9 +14,10 @@ _LIST_PATH = "/cabinet/free-lot"
 # field accepts only site-id values (72–96), not macro-ids — passing 1 or 2
 # there is silently ignored by the server (ADR-031).
 _LIST_QUERY = "?region={region}&use_filter_pocket=1&sort={sort}"
-# Yii2 pagination parameter.  Page 1 is the default (omit for first page to
-# keep URLs canonical); page 2+ appends "&FreeLotSearch_page={page}".
-_LIST_PAGE_PARAM = "&FreeLotSearch_page={page}"
+# Yii2 default pagination parameter confirmed from live HTML pager hrefs
+# (/cabinet/free-lot?region=1&page=2 …).  Page 1 is the default (omit for
+# first page to keep URLs canonical); page 2+ appends "&page={page}".
+_LIST_PAGE_PARAM = "&page={page}"
 # Yii2 per-page parameter (confirmed from live HTML fixtures: select name="per-page").
 # None = site default (≈50 rows). ADR-036: MonitorCycle uses 20, FullScan/Backfill use 50.
 _LIST_PER_PAGE_PARAM = "&per-page={per_page}"
@@ -73,9 +74,10 @@ class TorgiUrlBuilder:
         Callers passing values with ``&``/``=``/space must encode themselves.
 
         *page* selects the Yii2 pagination page (1-based).  Page 1 is
-        the default; for page >= 2 the ``FreeLotSearch_page`` param is
-        appended.  ``page`` MUST be a positive integer — no validation is
-        performed here; callers enforce the 1..1000 guard.
+        the default; for page >= 2 the ``page`` param is appended.
+        Param name confirmed from live HTML pager hrefs (``?region=1&page=2``
+        …).  ``page`` MUST be a positive integer — no validation is performed
+        here; callers enforce the 1..1000 guard.
 
         *per_page* controls the Yii2 ``per-page`` query parameter (site key
         confirmed from live HTML: ``<select name="per-page">``).  ``None``
