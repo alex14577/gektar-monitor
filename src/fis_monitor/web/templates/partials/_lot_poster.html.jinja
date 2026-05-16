@@ -10,12 +10,10 @@
          data-seen="{{ 'true' if lot.is_seen else 'false' }}"
          data-status="{{ lot.status | default('active') }}"
          {% if lot.event == 'gone' %}data-event="gone"{% endif %}
-         data-appeared-at="{{ lot.appeared_at_epoch_ms }}"
          tabindex="0"
          aria-labelledby="lot-{{ lot.id }}-title">
 
   <div class="lot__row1">
-    <span class="lot__age" data-role="age" title="{{ lot.appeared_at_iso }}">{{ lot.age_initial_hhmmss }}</span>
     <div class="lot__chips">
       {% if not lot.is_seen %}<span class="chip chip--new" aria-label="Новый лот">NEW</span>{% endif %}
       {% if lot.in_subscribed_subjects %}<span class="chip chip--cool" title="В подписанных субъектах">подписан</span>{% endif %}

@@ -389,16 +389,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
 /* ============== POSTER variant (hot / warm) ============== */
 .lot--poster { padding: 18px 20px 18px 28px; }
 .lot--poster .lot__row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
-.lot--poster .lot__age {
-  font-family: var(--font-mono);
-  font-size: 2rem; font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-  line-height: 1;
-}
-.lot--poster[data-temp="hot"]  .lot__age { color: var(--hot); }
-.lot--poster[data-temp="warm"] .lot__age { color: var(--warm); }
 .lot--poster .lot__chips { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .lot--poster .lot__title { margin: 0 0 4px; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
@@ -602,7 +592,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
 @media (max-width: 1366px) {
   .app { grid-template-columns: 200px 1fr; }
   .header__center { font-size: 0.8125rem; }
-  .lot--poster .lot__age { font-size: 1.625rem; }
 }
 @media (max-width: 1100px) {
   .app { grid-template-columns: 1fr; }
@@ -641,10 +630,9 @@ code, kbd, .mono { font-family: var(--font-mono); }
 
 /* Density toggle: force compact or poster regardless of temp */
 body[data-density="compact"] .lot--poster {
-  /* compress poster into list-like density (keep age large) */
+  /* compress poster into list-like density */
   padding: 12px 14px 12px 22px;
 }
-body[data-density="compact"] .lot--poster .lot__age { font-size: 1.25rem; }
 body[data-density="compact"] .lot--poster .lot__vri,
 body[data-density="compact"] .lot--poster .lot__ogv { display: none; }
 body[data-density="compact"] .lot--poster .lot__cta { margin-top: 8px; }
@@ -656,7 +644,6 @@ body[data-density="poster"] .lot--list {
 }
 body[data-density="poster"] .lot--list .lot__title { white-space: normal; font-size: 1.0625rem; font-weight: 600; }
 body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
-body[data-density="poster"] .lot--list .lot__age   { font-size: 1.5rem; font-weight: 600; color: var(--ink); }
 
 /* Density toggle UI in sidebar */
 .density-toggle {

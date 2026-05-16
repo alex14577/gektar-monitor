@@ -1,6 +1,5 @@
 /* ========================================================================
    Монитор гектара — minimal client JS
-   - age ticker (visible cards only, via IntersectionObserver)
    - clipboard copy + toast
    - SSE-listener stub (with comment markers)
    - IntersectionObserver "seen" reporter for [NEW] badge
@@ -17,21 +16,6 @@
   // ---------- helpers ----------
   const $  = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
-
-  const pad2 = n => String(n).padStart(2, '0');
-  function formatAge(seconds) {
-    if (seconds < 0) seconds = 0;
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
-  }
-  function tempForSeconds(s) {
-    if (s < 10 * 60) return 'hot';
-    if (s < 60 * 60) return 'warm';
-    if (s < 24 * 60 * 60) return 'cool';
-    return 'cold';
-  }
 
   // ---------- toaster ----------
   function ensureToaster() {
@@ -74,40 +58,6 @@
     // tick the DOM so SR re-reads
     setTimeout(() => { el.textContent = msg; }, 30);
   }
-
-  // ---------- age ticker (visible only) ----------
-  const visible = new Set();
-  const ageIO = ('IntersectionObserver' in window)
-    ? new IntersectionObserver(entries => {
-        entries.forEach(e => {
-          if (e.isIntersecting) visible.add(e.target);
-          else visible.delete(e.target);
-        });
-      }, { rootMargin: '120px' })
-    : null;
-
-  function registerLot(el) {
-    if (!el.dataset.appearedAt) return;
-    if (ageIO) ageIO.observe(el);
-    else visible.add(el);
-  }
-  function tickAges() {
-    const nowMs = Date.now();
-    visible.forEach(el => {
-      const t0 = Number(el.dataset.appearedAt);
-      if (!t0) return;
-      const secs = Math.floor((nowMs - t0) / 1000);
-      const ageEl = el.querySelector('[data-role="age"]');
-      if (ageEl) ageEl.textContent = formatAge(secs);
-      const temp = tempForSeconds(secs);
-      if (el.dataset.temp !== temp) el.dataset.temp = temp;
-    });
-  }
-  setInterval(tickAges, 1000);
-  tickAges();
-
-  // initial registration
-  $$('.lot[data-appeared-at]').forEach(registerLot);
 
   // ---------- "seen" reporter (NEW badge clears once scrolled into view ≥1s) ----------
   const seenTimers = new WeakMap();
@@ -496,8 +446,6 @@
             // 4. Freshness flash (Tier 3, #4)
             n.dataset.fresh = 'true';
             setTimeout(() => { delete n.dataset.fresh; }, 2400);
-            // re-register for age ticker
-            if (n.dataset.appearedAt) registerLot(n);
             if (window.scrollY > 200) { pending += 1; show(); }
           }
         });
@@ -721,6 +669,5 @@
   window.Monitor = {
     toast, announce, copyText,
     onLotNew, onLotStatusChange, onCycleTick, onSessionWarn, onSessionExpired,
-    registerLot, formatAge, tempForSeconds,
   };
 })();

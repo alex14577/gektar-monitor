@@ -172,21 +172,6 @@ class LotViewModel:
         return f"{_decimal_to_dms(lat, 'N', 'S')}, {_decimal_to_dms(lon, 'E', 'W')}"
 
     @property
-    def appeared_at_epoch_ms(self) -> int:
-        """Epoch milliseconds of ``first_seen`` for the browser age counter."""
-        return int(self._dto.first_seen.timestamp() * 1000)
-
-    @property
-    def appeared_at_iso(self) -> str:
-        """ISO 8601 datetime string for the ``title`` attribute."""
-        return self._dto.first_seen.isoformat()
-
-    @property
-    def age_initial_hhmmss(self) -> str:
-        """Static age label rendered on first paint (JS updates it afterwards)."""
-        return "0с"
-
-    @property
     def first_seen_at_human(self) -> str:
         """Human-readable first-seen date (locale-agnostic short format)."""
         return self._dto.first_seen.strftime("%d.%m.%Y %H:%M")
