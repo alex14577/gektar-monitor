@@ -278,8 +278,8 @@ class TestBasicBackfill:
         assert len(lot_repo.upsert_calls) == 3
         assert set(c["lot_id"] for c in lot_repo.upsert_calls) == {1, 2, 10}
 
-    def test_iterate_called_with_per_page_50(self) -> None:
-        """BackfillService passes per_page=50 (ADR-036: full walk with explicit page size)."""
+    def test_iterate_called_with_per_page_20(self) -> None:
+        """BackfillService passes per_page=20 (ADR-036 updated 2026-05-16: reduced from 50)."""
         svc, _lot_repo, _mc, fetcher = _make_service(
             rows_by_region={_REGION_A: [_make_row(1)]},
             regions=[_REGION_A],
@@ -289,7 +289,7 @@ class TestBasicBackfill:
         svc.start(stop)
         _wait_until_done(svc)
 
-        assert fetcher.iterate_kwargs[0]["per_page"] == 50
+        assert fetcher.iterate_kwargs[0]["per_page"] == 20
         assert fetcher.iterate_kwargs[0]["max_pages"] is None
 
 

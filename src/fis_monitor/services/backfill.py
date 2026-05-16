@@ -518,7 +518,7 @@ class BackfillService:
                 region,
                 stop,
                 sleep_between_pages=self._sleep_between_pages,
-                per_page=50,  # ADR-036: full walk with explicit page size
+                per_page=20,  # ADR-036 updated 2026-05-16: reduced from 50 (timeout risk)
                 page_callback=_on_page,
             ):
                 if stop.is_set():
