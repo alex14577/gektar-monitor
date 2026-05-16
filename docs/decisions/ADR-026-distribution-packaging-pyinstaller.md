@@ -49,6 +49,28 @@ source+install.sh was considered: rejected because it requires Python 3.12, pip,
 - Linux: `.tar.gz` (preserves POSIX executable bits on `bin/fis-monitor` and `run.sh`).
 - Windows: `.zip` (native Windows tooling).
 
+### Build variants: prod and debug
+
+Two build targets are produced per release:
+
+| Variant | Binary name | Archive | Default log level |
+|---------|-------------|---------|------------------|
+| prod | `fis-monitor` | `fis-monitor-linux-x86_64-<ver>.tar.gz` | INFO |
+| debug | `fis-monitor-debug` | `fis-monitor-debug-linux-x86_64-<ver>.tar.gz` | DEBUG |
+
+Both variants share the same `run.sh`, `var/` data dir, and `browsers/`. To switch from prod to debug during an incident: stop the service, replace `bin/` with the debug archive's `bin/`, restart. No data migration needed.
+
+**Implementation mechanism**: The debug spec (`build/fis-monitor-debug.spec`) uses a PyInstaller runtime hook (`build/rthook_debug.py`) to inject `FIS_LOG_LEVEL_DEFAULT=DEBUG` before any application code runs. The app reads this via `fis_monitor.utils.log_level.default_log_level()` in the lifespan startup. The env var can be overridden by the operator at launch time.
+
+**Debug-only behavior**: When `level <= DEBUG`, `setup_logging` automatically attaches `_DebugExcInfoFilter` to the console handler. This filter captures the active exception context (`sys.exc_info()`) and attaches it to WARNING+ records that don't already have one — producing stack traces in `app.jsonl` for warnings emitted inside exception handlers.
+
+**Build commands**:
+```bash
+scripts/build_release.sh              # prod build
+scripts/build_release.sh --debug      # debug build
+scripts/build_release.sh --clean --debug   # clean debug build
+```
+
 ## Consequences
 
 - **Archive size**: ~340 MB (Chromium ≈ 280 MB, Python runtime + deps ≈ 60 MB).

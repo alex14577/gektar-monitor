@@ -251,6 +251,23 @@ def _remove_file_handlers(logger: logging.Logger, channel: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+class _DebugExcInfoFilter(logging.Filter):
+    """Attach exc_info to WARNING+ records that don't already have one.
+
+    Active only in debug builds (level <= DEBUG).  Enables stack traces in
+    structured logs for warnings that occur during real incidents.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.WARNING and not record.exc_info:
+            import sys as _sys
+
+            exc_info = _sys.exc_info()
+            if exc_info[0] is not None:
+                record.exc_info = exc_info
+        return True
+
+
 def setup_logging(
     *,
     clock: Clock,
@@ -316,6 +333,9 @@ def setup_logging(
     # Attach caller-supplied filters (e.g. StackPIIFilter for PII scrubbing).
     for f in filters or []:
         handler.addFilter(f)
+
+    if level <= logging.DEBUG:
+        handler.addFilter(_DebugExcInfoFilter())
 
     root_logger.setLevel(level)
     # propagate=True: records can still reach root (e.g. pytest caplog fixture).

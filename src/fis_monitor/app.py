@@ -86,6 +86,7 @@ from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.thread_supervisor import ThreadSupervisor
 from fis_monitor.utils.log import setup_logging
 from fis_monitor.utils.log_filters import StackPIIFilter
+from fis_monitor.utils.log_level import default_log_level
 from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
 from fis_monitor.web.routes import (
@@ -183,7 +184,7 @@ async def _lifespan_impl(
     # startup error path).
     try:
         # --- STARTUP -----------------------------------------------------------
-        # Reconfigure logging for full runtime (stdout, INFO).
+        # Reconfigure logging for full runtime (stdout, INFO or DEBUG).
         # setup_logging is idempotent — replaces the bootstrap stderr handler.
         import os as _os
         import sys as _sys2
@@ -192,7 +193,7 @@ async def _lifespan_impl(
         setup_logging(
             clock=SystemClock(),
             stream=_sys2.stdout,
-            level=logging.INFO,
+            level=default_log_level(),
             json_format=_json_fmt,
             filters=[StackPIIFilter()],
             data_dir=data_dir,

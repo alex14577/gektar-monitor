@@ -354,10 +354,12 @@ class TestSetupLoggingIntegration:
 
     def test_setup_logging_no_filters_works(self) -> None:
         """``setup_logging`` without ``filters`` kwarg works (backward compat)."""
-        from fis_monitor.utils.log import setup_logging
+        from fis_monitor.utils.log import _DebugExcInfoFilter, setup_logging
 
         stream = io.StringIO()
         setup_logging(clock=FakeClock(), stream=stream, level=logging.DEBUG)
         root = logging.getLogger("fis_monitor")
         assert len(root.handlers) == 1
-        assert root.handlers[0].filters == []
+        # At DEBUG level, _DebugExcInfoFilter is automatically attached.
+        assert len(root.handlers[0].filters) == 1
+        assert isinstance(root.handlers[0].filters[0], _DebugExcInfoFilter)
