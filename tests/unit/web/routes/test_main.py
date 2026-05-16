@@ -539,3 +539,19 @@ def test_sidebar_subjects_button_uses_toggle_menu_pattern() -> None:
     html = resp.text
     assert 'data-toggle-menu="filter-subjects-menu"' in html
     assert 'data-menu' in html
+
+
+def test_health_widget_shows_only_total_lots() -> None:
+    """Health widget: only 'Всего лотов в базе:' present; removed labels absent from the widget."""
+    app, _, _ = _make_app()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    html = resp.text
+    # Extract just the health widget div (scoped to aria-label="Здоровье мониторинга")
+    start = html.index('aria-label="Здоровье мониторинга"')
+    end = html.index("</div>", start)
+    health_html = html[start:end]
+    assert "Всего лотов в базе:" in health_html
+    assert "Последний успешный цикл" not in health_html
+    assert "Последний новый" not in health_html
+    assert "Вы за лентой" not in health_html

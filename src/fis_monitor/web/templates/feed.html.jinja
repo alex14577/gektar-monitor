@@ -74,13 +74,7 @@
 
   {# ------- Health widget ------- #}
   <div class="health" role="region" aria-label="Здоровье мониторинга">
-    <span>Последний успешный цикл: <b>{{ health.last_cycle_human }}</b></span>
-    <span>·</span>
     <span>Всего лотов в базе: <b>{{ '{:,}'.format(health.total_lots).replace(',', '\u00A0') }}</b></span>
-    <span>·</span>
-    <span>Последний новый: <b>{{ health.last_new_human }}</b></span>
-    <span>·</span>
-    <span>Вы за лентой: <b data-since-arrived>0 секунд</b></span>
   </div>
 
   {# ------- Session-warning banner (10 min before expiry) ------- #}
