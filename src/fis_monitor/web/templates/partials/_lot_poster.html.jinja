@@ -15,15 +15,7 @@
 
   <div class="lot__row1">
     <div class="lot__chips">
-      {% if not lot.is_seen %}<span class="chip chip--new" aria-label="Новый лот">NEW</span>{% endif %}
       {% if lot.in_subscribed_subjects %}<span class="chip chip--cool" title="В подписанных субъектах">подписан</span>{% endif %}
-      <button class="starbtn chip--star" type="button"
-              data-action="star" data-lot-id="{{ lot.id }}"
-              hx-post="/lots/{{ lot.id }}/star" hx-swap="none"
-              aria-pressed="{{ 'true' if lot.is_starred else 'false' }}"
-              aria-label="{{ 'Убрать из избранного' if lot.is_starred else 'В избранное' }}">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2 3.1 6.3 7 1-5 4.9 1.2 6.8L12 17.8 5.7 21l1.2-6.8-5-4.9 7-1L12 2Z"/></svg>
-      </button>
     </div>
   </div>
 
@@ -41,6 +33,7 @@
             aria-label="Скопировать кадастровый номер">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     </button>
+    <span class="lot__appeared" title="Дата появления на сайте">· {{ lot.published_at_human }}</span>
   </span>
 
   {% if lot.ogv %}<p class="lot__ogv" title="Орган государственной власти">ОГВ: {{ lot.ogv }}</p>{% endif %}
@@ -51,16 +44,10 @@
       Открыть на сайте
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
     </a>
-    <button class="btn btn--ghost btn--sm" type="button" data-action="expand">▼ Детали</button>
   </div>
 
-  {# Hidden until expanded #}
   <div class="lot__details">
     <div class="lot__details-row">
-      <dl class="lot__kv">
-        <dt>Появился</dt>
-        <dd>{{ lot.published_at_human }}</dd>
-      </dl>
       {% if lot.external_id %}
       <dl class="lot__kv">
         <dt>ID на сайте</dt>

@@ -589,7 +589,7 @@ class TestHtmlSseEncoding:
         assert warning_records, "Encoder must log a warning for unsupported fragment_template"
 
     def test_poster_shows_published_at_human(self) -> None:
-        """Poster renders lot.date_create via published_at_human in the «Появился» cell."""
+        """Poster renders lot.date_create via published_at_human inline in .lot__cad."""
         from datetime import UTC, datetime
 
         pub_dt = datetime(2026, 3, 14, 9, 5, tzinfo=UTC)
@@ -606,5 +606,9 @@ class TestHtmlSseEncoding:
 
         payload = b"".join(chunks).decode()
         assert "14.03.2026 09:05" in payload, (
-            "Poster must render lot.date_create as published_at_human inside «Появился» <dd>"
+            "Poster must render lot.date_create as published_at_human in .lot__appeared span"
         )
+        assert "chip--new" not in payload, "NEW chip must be absent from poster"
+        assert 'data-action="star"' not in payload, "Star button must be absent from poster"
+        assert "▼ Детали" not in payload, "Expand button must be absent from poster"
+        assert "lot__appeared" in payload, "published_at must appear in .lot__appeared span"

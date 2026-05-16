@@ -270,7 +270,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
   background: var(--surface-2); color: var(--ink-2);
   border: 1px solid var(--line);
 }
-.chip--new   { background: var(--hot);  color: #fff; border-color: var(--hot); }
 .chip--warm  { background: var(--warm); color: #fff; border-color: var(--warm); }
 .chip--cool  { background: var(--cool); color: #fff; border-color: var(--cool); }
 .chip--ok      { background: var(--ok-soft);  color: var(--ok);  border-color: color-mix(in oklab, var(--ok)  30%, var(--line)); }
@@ -401,7 +400,8 @@ code, kbd, .mono { font-family: var(--font-mono); }
   background: var(--code-bg); padding: 4px 8px; border-radius: var(--r-sm);
   color: var(--ink);
 }
-.lot--poster .lot__ogv   { color: var(--muted); font-size: 0.8125rem; margin-top: 6px; }
+.lot--poster .lot__ogv     { color: var(--muted); font-size: 0.8125rem; margin-top: 6px; }
+.lot--poster .lot__appeared { color: var(--muted); font-size: 0.8125rem; }
 
 .lot--poster .lot__cta {
   display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center;
@@ -419,8 +419,9 @@ code, kbd, .mono { font-family: var(--font-mono); }
 }
 .copy:hover { background: var(--surface-2); color: var(--ink); }
 
-/* details */
+/* details — hidden by default, revealed via JS toggle; always expanded in poster variant */
 .lot__details { display: none; padding: 14px 16px 0; border-top: 1px dashed var(--line); margin-top: 14px; }
+.lot--poster .lot__details { display: block; }
 .lot[data-open="true"] .lot__details { display: block; }
 .lot__details-row { display: flex; gap: 24px; flex-wrap: wrap; }
 .lot__kv { font-size: 0.875rem; }
