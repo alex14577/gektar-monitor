@@ -20,13 +20,12 @@ from fis_monitor.domain.models import (
     CycleResult,
     HttpResponse,
     LotPublicDTO,
-    LotUpsertResult,
     ParsedListRow,
     Settings,
-    TrackedField,
 )
 from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
+from tests.fakes.lot_repository import FakeLotRepository
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -57,34 +56,6 @@ class FakeEnrichmentService:
     def enrich_lots(self, lots: Sequence[Lot], *, max_workers: int) -> list[Lot]:
         return list(lots)
 
-
-class FakeLotRepository:
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
-        return LotUpsertResult(was_new=False, changes=[])
-
-    def get(self, lot_id: int) -> Lot | None:
-        return None
-
-    def list_active(self, *, limit: int, offset: int) -> list[Lot]:
-        return []
-
-    def get_last_known_id(self, region: int) -> int | None:
-        return None
-
-    def set_last_known_id(self, region: int, value: int) -> None:
-        pass
-
-    def mark_seen(self, lot_ids: Sequence[int], at: datetime) -> None:
-        pass
-
-    def mark_inactive(self, lot_id: int, reason: str, at: datetime) -> None:
-        pass
-
-    def needing_enrichment(self, limit: int) -> list[int]:
-        return []
-
-    def count_active(self) -> int:
-        return 0
 
 
 class FakeCyclesRepository:
