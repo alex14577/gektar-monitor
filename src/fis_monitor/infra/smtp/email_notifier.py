@@ -3,18 +3,28 @@
 Implements the ``Notifier`` Protocol (domain/interfaces.py §Layer 3) for the
 ``email`` channel.
 
-**Why manual STARTTLS (ADR-021):**
+**Why manual STARTTLS / manual implicit-TLS (ADR-021 + amendment):**
 ``smtplib.SMTP.starttls()`` passes ``self._host`` as ``server_hostname`` for
 SNI / TLS-cert verification.  When we connect by pinned IP (closing TOCTOU per
 ADR-015 R3-C4, ``SMTP(host=endpoint.ip)``), ``self._host = endpoint.ip``.
 TLS cert verification then runs ``ip_literal`` against the server certificate
 whose CN/SANs contain the DNS hostname → ``ssl.SSLCertVerificationError``.
 
-Fix: skip ``smtp.starttls()`` entirely, send the ``STARTTLS`` command via
-``smtp.docmd("STARTTLS")``, then call ``ctx.wrap_socket(smtp.sock,
-server_hostname=endpoint.original_host)`` directly.  ``smtp.file = None``
-invalidates smtplib's cached file-wrapper so subsequent reads/writes go
-through the upgraded TLS socket.
+STARTTLS fix (port 587): skip ``smtp.starttls()`` entirely, send the
+``STARTTLS`` command via ``smtp.docmd("STARTTLS")``, then call
+``ctx.wrap_socket(smtp.sock, server_hostname=endpoint.original_host)``
+directly.  ``smtp.file = None`` invalidates smtplib's cached file-wrapper.
+
+Implicit-TLS fix (port 465): ``smtplib.SMTP_SSL(host=endpoint.ip)`` sets
+``self._host = endpoint.ip``, so SNI is wrong for the same reason.  Instead:
+open a raw TCP socket to the pinned IP, wrap it with the correct SNI via
+``ctx.wrap_socket(sock, server_hostname=endpoint.original_host)``, then pass
+the wrapped socket to ``smtplib.SMTP(sock=wrapped_sock)``.  No STARTTLS
+command needed — TLS is established before the SMTP banner.
+
+TLS mode is derived from the port: port 465 → implicit TLS; all other ports →
+STARTTLS.  This matches the semantics in ``infra/smtp/provider_catalog.py``
+without requiring a separate ``use_starttls`` field in ``SmtpCredentials``.
 
 **Message-ID determinism (ADR-019 R4-C5):**
 ``<{lot_id}.{channel_id}.{sha256(recipient)[:16]}@fis-monitor.local>`` —
@@ -28,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import smtplib
+import socket
 import ssl
 from email.headerregistry import Address
 from email.message import EmailMessage
@@ -44,11 +55,21 @@ from fis_monitor.domain.models import (
     LotPublicDTO,
     NotifierConfig,
     NotifyResult,
+    ResolvedSmtpEndpoint,
     SmtpCredentials,
 )
 from fis_monitor.infra.smtp.host_policy import SmtpHostPolicy
 
 logger = logging.getLogger(__name__)
+
+_IMPLICIT_TLS_PORT = 465
+
+
+class _StarttlsRefused(Exception):
+    """Internal sentinel: STARTTLS command rejected by server (non-220 response)."""
+
+    def __init__(self, code: int) -> None:
+        self.code = code
 
 # ---------------------------------------------------------------------------
 # EmailNotifierConfig — plugin config schema (high cohesion: lives next to notifier)
@@ -283,13 +304,19 @@ class SmtpEmailNotifier:
         recipient: str,
         creds: SmtpCredentials,
     ) -> NotifyResult:
-        """Perform manual STARTTLS connect + login + send.
+        """Connect, authenticate, and send via SMTP.
 
-        Error mapping — PII-free dynamic codes derived from exception type names
-        and SMTP response codes; recipient/password are NEVER in detail:
+        Supports two TLS modes derived from the port number:
+        - Port 465 → implicit TLS (SMTPS): TLS handshake before SMTP banner.
+        - Any other port → STARTTLS: plain TCP connect, then upgrade via manual
+          STARTTLS command (ADR-021).
+
+        Both paths use connect-by-IP + explicit SNI to avoid ADR-021 hostname bug.
+
+        Error mapping — PII-free codes; recipient/password NEVER in detail:
 
         * ``socket.timeout`` / ``ConnectionError`` / ``ssl.SSLError``
-          → retryable=True, detail="network_<ExcType>" or "tls_<ExcType>"
+          → retryable=True, detail="connect_error_<ExcType>" or "tls_<ExcType>"
         * ``SMTPAuthenticationError`` → retryable=False, detail="auth_failed"
         * ``SMTPRecipientsRefused`` → retryable=False, detail="recipient_refused"
         * ``SMTPServerDisconnected`` → retryable=True, detail="server_disconnected"
@@ -302,11 +329,25 @@ class SmtpEmailNotifier:
             creds.smtp_host, creds.smtp_port
         )
 
+        implicit_tls = endpoint.port == _IMPLICIT_TLS_PORT
+
         try:
-            smtp = smtplib.SMTP(
-                host=endpoint.ip,
-                port=endpoint.port,
-                timeout=self._connect_timeout,
+            if implicit_tls:
+                smtp = self._connect_implicit_tls(endpoint)
+            else:
+                smtp = self._connect_starttls(endpoint)
+        except _StarttlsRefused as exc:
+            return NotifyResult(
+                ok=False,
+                detail=f"starttls_refused_code_{exc.code}"[:500],
+                retryable=True,
+            )
+        except ssl.SSLError as exc:
+            # Must precede OSError: ssl.SSLError inherits from OSError.
+            return NotifyResult(
+                ok=False,
+                detail=f"tls_{type(exc).__name__}"[:500],
+                retryable=True,
             )
         except (TimeoutError, OSError) as exc:
             return NotifyResult(
@@ -316,26 +357,6 @@ class SmtpEmailNotifier:
             )
 
         try:
-            smtp.ehlo(endpoint.original_host)
-
-            # --- Manual STARTTLS (ADR-021) ---
-            code, _ = smtp.docmd("STARTTLS")
-            if code != 220:
-                return NotifyResult(
-                    ok=False,
-                    detail=f"starttls_refused_code_{code}"[:500],
-                    retryable=True,
-                )
-
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = True
-            smtp.sock = ctx.wrap_socket(
-                smtp.sock, server_hostname=endpoint.original_host
-            )
-            smtp.file = None  # invalidate cached file-wrapper (ADR-021)
-            smtp.ehlo(endpoint.original_host)  # second EHLO after TLS upgrade
-
-            # --- Auth + deliver ---
             smtp.login(creds.smtp_user, creds.smtp_password.get_secret_value())
             smtp.send_message(msg)
 
@@ -374,3 +395,59 @@ class SmtpEmailNotifier:
             except (smtplib.SMTPException, OSError, ssl.SSLError):
                 logger.debug("smtp quit failed", exc_info=True)
                 smtp.close()
+
+    def _connect_starttls(self, endpoint: ResolvedSmtpEndpoint) -> smtplib.SMTP:
+        """Open a plain TCP connection then upgrade to TLS via manual STARTTLS.
+
+        ADR-021: avoids smtplib SNI bug when connecting by pinned IP.
+        Returns a ready-to-authenticate SMTP instance (post-EHLO, post-TLS).
+        Raises _StarttlsRefused if the server rejects the STARTTLS command.
+        Raises OSError/TimeoutError/ssl.SSLError on connect/TLS failure.
+        """
+        smtp = smtplib.SMTP(
+            host=endpoint.ip,
+            port=endpoint.port,
+            timeout=self._connect_timeout,
+        )
+        smtp.ehlo(endpoint.original_host)
+
+        code, _ = smtp.docmd("STARTTLS")
+        if code != 220:
+            smtp.close()
+            raise _StarttlsRefused(code)
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = True
+        smtp.sock = ctx.wrap_socket(
+            smtp.sock, server_hostname=endpoint.original_host
+        )
+        smtp.file = None  # invalidate cached file-wrapper (ADR-021)
+        smtp.ehlo(endpoint.original_host)
+        return smtp
+
+    def _connect_implicit_tls(self, endpoint: ResolvedSmtpEndpoint) -> smtplib.SMTP:
+        """Open a TLS-wrapped TCP connection for implicit TLS (SMTPS, port 465).
+
+        ADR-021 amendment: ``smtplib.SMTP_SSL(host=endpoint.ip)`` sets
+        ``self._host = endpoint.ip`` → wrong SNI.  Instead: create a raw TCP
+        socket to the pinned IP, wrap it with the correct SNI via
+        ``ctx.wrap_socket(server_hostname=endpoint.original_host)``, then
+        inject the wrapped socket directly into an ``smtplib.SMTP`` instance
+        that was constructed without auto-connect (``host=''``).
+
+        Returns a ready-to-authenticate SMTP instance (post-banner, post-EHLO).
+        Raises OSError/TimeoutError/ssl.SSLError on connect/TLS failure.
+        """
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = True
+        raw_sock = socket.create_connection(
+            (endpoint.ip, endpoint.port),
+            timeout=self._connect_timeout,
+        )
+        tls_sock = ctx.wrap_socket(raw_sock, server_hostname=endpoint.original_host)
+        smtp = smtplib.SMTP(timeout=self._connect_timeout)
+        smtp.sock = tls_sock
+        smtp.file = None
+        smtp.getreply()  # read the 220 banner
+        smtp.ehlo(endpoint.original_host)
+        return smtp

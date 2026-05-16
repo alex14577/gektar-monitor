@@ -874,3 +874,229 @@ def test_from_header_display_name_no_pii_leak_in_detail() -> None:
 
     assert result.ok is False
     assert "SensitiveName" not in result.detail
+
+
+# ---------------------------------------------------------------------------
+# T20 — Implicit TLS (port 465) happy path
+# ---------------------------------------------------------------------------
+
+_PORT_465 = 465
+
+
+def _make_notifier_465(
+    **overrides,
+) -> tuple[SmtpEmailNotifier, FakeSmtpCredentialsRepository, FakeSmtpHostPolicy]:
+    """Build a notifier wired for port-465 (implicit TLS)."""
+    creds_kwargs = {
+        "smtp_host": _HOST,
+        "smtp_port": _PORT_465,
+    }
+    creds_kwargs.update(overrides)
+    creds = _make_creds(**creds_kwargs)
+    repo = FakeSmtpCredentialsRepository(creds=creds)
+    hp = FakeSmtpHostPolicy(host=_HOST, port=_PORT_465)
+    notifier = SmtpEmailNotifier(
+        smtp_creds_repo=repo,
+        config_source=FakeConfigSource(),
+        clock=FakeClock(),
+        host_policy=hp,
+    )
+    return notifier, repo, hp
+
+
+def test_implicit_tls_happy_path():
+    """T20 — port=465: raw TCP socket created, wrapped with correct SNI, no STARTTLS command."""
+    lot = _make_lot()
+    notifier, _repo, hp = _make_notifier_465()
+
+    mock_smtp_instance = MagicMock()
+    tls_sock = MagicMock()
+    raw_sock = MagicMock()
+
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance) as mock_smtp_class, \
+         patch("ssl.create_default_context") as mock_ssl_ctx, \
+         patch("socket.create_connection", return_value=raw_sock) as mock_create_conn:
+
+        mock_ctx = MagicMock()
+        mock_ssl_ctx.return_value = mock_ctx
+        mock_ctx.wrap_socket.return_value = tls_sock
+
+        result = notifier.send(lot, _RECIPIENT)
+
+    assert result.ok is True
+    assert result.detail == "sent"
+
+    # Raw TCP socket created to pinned IP, not hostname
+    mock_create_conn.assert_called_once_with((_IP, _PORT_465), timeout=10.0)
+
+    # wrap_socket called with server_hostname=original_host (NOT ip) — SNI invariant
+    mock_ctx.wrap_socket.assert_called_once()
+    _, kw = mock_ctx.wrap_socket.call_args
+    assert kw.get("server_hostname") == _HOST, (
+        f"SNI must be DNS hostname {_HOST!r}, got {kw.get('server_hostname')!r}"
+    )
+    assert kw.get("server_hostname") != _IP, "SNI must not be the pinned IP"
+    assert mock_ctx.check_hostname is True
+
+    # SMTP constructed without host (no auto-connect) — timeout only
+    mock_smtp_class.assert_called_once()
+    _, kw2 = mock_smtp_class.call_args
+    assert "host" not in kw2 or not kw2.get("host"), (
+        "SMTP must not auto-connect via host= in implicit-TLS path"
+    )
+
+    # TLS socket injected via smtp.sock attribute (not via constructor)
+    assert mock_smtp_instance.sock is tls_sock, (
+        "TLS socket must be assigned to smtp.sock directly"
+    )
+
+    # Banner read via getreply()
+    mock_smtp_instance.getreply.assert_called_once()
+
+    # STARTTLS command must NOT be sent for implicit TLS
+    mock_smtp_instance.docmd.assert_not_called()
+
+    # EHLO sent with original_host
+    mock_smtp_instance.ehlo.assert_any_call(_HOST)
+
+    # login and send_message called
+    mock_smtp_instance.login.assert_called_once_with("bot@example.com", "s3cr3t")
+    mock_smtp_instance.send_message.assert_called_once()
+
+    # host_policy invoked with correct host/port
+    assert hp.resolve_called_with == [(_HOST, _PORT_465)]
+
+
+def test_implicit_tls_tls_error_on_wrap():
+    """T21 — port=465: ssl.SSLError during wrap_socket → retryable=True, detail starts with tls_."""
+    lot = _make_lot()
+    notifier, _, _ = _make_notifier_465()
+
+    with patch("smtplib.SMTP"), \
+         patch("ssl.create_default_context") as mock_ssl_ctx, \
+         patch("socket.create_connection"):
+
+        mock_ctx = MagicMock()
+        mock_ssl_ctx.return_value = mock_ctx
+        mock_ctx.wrap_socket.side_effect = ssl.SSLCertVerificationError(
+            "certificate verify failed: hostname mismatch"
+        )
+        result = notifier.send(lot, _RECIPIENT)
+
+    assert result.ok is False
+    assert result.retryable is True
+    assert result.detail.startswith("tls_"), f"detail={result.detail!r}"
+    assert _RECIPIENT not in result.detail
+
+
+def test_implicit_tls_connect_timeout():
+    """T22 — port=465: TimeoutError during socket.create_connection → retryable=True."""
+    lot = _make_lot()
+    notifier, _, _ = _make_notifier_465()
+
+    with patch("smtplib.SMTP"), \
+         patch("ssl.create_default_context"), \
+         patch("socket.create_connection", side_effect=TimeoutError("timed out")):
+        result = notifier.send(lot, _RECIPIENT)
+
+    assert result.ok is False
+    assert result.retryable is True
+    assert result.detail.startswith("connect_error_"), f"detail={result.detail!r}"
+    assert _RECIPIENT not in result.detail
+
+
+def test_implicit_tls_auth_error():
+    """T23 — port=465: SMTPAuthenticationError → retryable=False, detail=auth_failed."""
+    lot = _make_lot()
+    notifier, _, _ = _make_notifier_465()
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_instance.login.side_effect = smtplib.SMTPAuthenticationError(
+        535, b"Authentication credentials invalid"
+    )
+
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance), \
+         patch("ssl.create_default_context") as mock_ssl_ctx, \
+         patch("socket.create_connection"):
+
+        mock_ctx = MagicMock()
+        mock_ssl_ctx.return_value = mock_ctx
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        result = notifier.send(lot, _RECIPIENT)
+
+    assert result.ok is False
+    assert result.retryable is False
+    assert result.detail == "auth_failed"
+    assert _RECIPIENT not in result.detail
+    mock_smtp_instance.quit.assert_called()
+
+
+def test_implicit_tls_no_starttls_command_sent():
+    """T24 — Invariant: STARTTLS command is NEVER sent for port 465 implicit-TLS path."""
+    lot = _make_lot()
+    notifier, _, _ = _make_notifier_465()
+
+    mock_smtp_instance = MagicMock()
+
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance), \
+         patch("ssl.create_default_context") as mock_ssl_ctx, \
+         patch("socket.create_connection"):
+
+        mock_ctx = MagicMock()
+        mock_ssl_ctx.return_value = mock_ctx
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        notifier.send(lot, _RECIPIENT)
+
+    mock_smtp_instance.docmd.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# T25 — Parametrized: both TLS paths produce ok=True on happy path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "port,use_implicit",
+    [
+        (587, False),
+        (465, True),
+    ],
+)
+def test_both_tls_paths_send_ok(port, use_implicit):
+    """T25 — STARTTLS (587) and implicit TLS (465) both produce ok=True on success."""
+    lot = _make_lot()
+    creds = _make_creds(smtp_host=_HOST, smtp_port=port)
+    repo = FakeSmtpCredentialsRepository(creds=creds)
+    hp = FakeSmtpHostPolicy(host=_HOST, port=port)
+    notifier = SmtpEmailNotifier(
+        smtp_creds_repo=repo,
+        config_source=FakeConfigSource(),
+        clock=FakeClock(),
+        host_policy=hp,
+    )
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_instance.docmd.return_value = (220, b"Go ahead")
+    mock_smtp_instance.sock = MagicMock()
+
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance), \
+         patch("ssl.create_default_context") as mock_ssl_ctx, \
+         patch("socket.create_connection"):
+
+        mock_ctx = MagicMock()
+        mock_ssl_ctx.return_value = mock_ctx
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        result = notifier.send(lot, _RECIPIENT)
+
+    assert result.ok is True
+    assert result.detail == "sent"
+
+    if use_implicit:
+        # No STARTTLS command for implicit TLS
+        mock_smtp_instance.docmd.assert_not_called()
+    else:
+        # STARTTLS command sent for port 587
+        mock_smtp_instance.docmd.assert_called_once_with("STARTTLS")
