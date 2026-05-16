@@ -28,11 +28,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
-from fis_monitor.domain.models import DEFAULT_TRACKED_FIELDS
-from fis_monitor.domain.models import parsed_row_to_lot as _parsed_row_to_lot
+from fis_monitor.domain.models import (
+    DEFAULT_TRACKED_FIELDS,
+    SseLotNew,
+)
+from fis_monitor.domain.models import (
+    lot_to_public_dto as _lot_to_public_dto,
+)
+from fis_monitor.domain.models import (
+    parsed_row_to_lot as _parsed_row_to_lot,
+)
 
 if TYPE_CHECKING:
-    from fis_monitor.domain.interfaces import ConfigSource, LotRepository
+    from fis_monitor.domain.interfaces import ConfigSource, EventBus, LotRepository
 
 logger = logging.getLogger(__name__)
 
@@ -145,12 +153,14 @@ class BackfillService:
         lot_repo: LotRepository,
         config_source: ConfigSource,
         monitor_cycle: MonitorCycleHandle,
+        event_bus: EventBus,
         sleep_between_pages: float = 2.0,
     ) -> None:
         self._fetcher = fetcher
         self._lot_repo = lot_repo
         self._config_source = config_source
         self._monitor_cycle = monitor_cycle
+        self._event_bus = event_bus
         self._sleep_between_pages = sleep_between_pages
 
         # Single-flight lock: held while a backfill thread is running.
@@ -543,6 +553,18 @@ class BackfillService:
                     lots_upserted_per_page[current_page_num] = (
                         lots_upserted_per_page.get(current_page_num, 0) + 1
                     )
+                    if not stop.is_set():
+                        try:
+                            lot_dto = _lot_to_public_dto(lot)
+                            self._event_bus.publish(
+                                SseLotNew(lot=lot_dto, fragment_template="poster")
+                            )
+                        except Exception:
+                            logger.warning(
+                                "backfill: SseLotNew publish failed for lot id=%s — skipping",
+                                lot.id,
+                                exc_info=True,
+                            )
                 except Exception:
                     logger.warning(
                         "backfill: upsert failed for lot id=%s region=%s — skipping",

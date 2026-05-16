@@ -1,0 +1,243 @@
+"""Unit tests for BackfillService SSE publishing (gektar_monitor-w8dr).
+
+Invariants tested:
+  5. BackfillService publishes SseLotNew for each upserted lot.
+  6. Backfill does NOT call email Notifier at any point (no dispatcher/notifier dep).
+  7. EventBus publish exception → backfill does not raise, logs warning, continues.
+  8. Cancelled backfill (stop.is_set() True at publish time) → SseLotNew NOT published.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from collections.abc import Iterator, Sequence
+from datetime import UTC, datetime
+from typing import Any
+
+from fis_monitor.domain.models import (
+    LotUpsertResult,
+    ParsedListRow,
+    Settings,
+    SseLotNew,
+)
+from fis_monitor.services.backfill import BackfillService
+
+_NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+_REGION_A = 77
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_row(lot_id: int) -> ParsedListRow:
+    return ParsedListRow(
+        id=lot_id,
+        cadastral_no=f"77:01:{lot_id:06d}:1",
+        area_sqm=500,
+        region=str(_REGION_A),
+        municipality="Тест",
+        land_category="Земли населённых пунктов",
+        permitted_use="ИЖС",
+        ogv="ДГИ",
+        status="PUBLISHED",
+        date_create=_NOW,
+        date_update=_NOW,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fakes
+# ---------------------------------------------------------------------------
+
+
+class FakePaginatedListFetcher:
+    def __init__(self, rows: list[ParsedListRow]) -> None:
+        self._rows = rows
+
+    def iterate(
+        self,
+        region: int,
+        stop_event: threading.Event,
+        *,
+        sleep_between_pages: float = 0.0,
+        per_page: int | None = None,
+        max_pages: int | None = None,
+        page_callback: object = None,
+    ) -> Iterator[ParsedListRow]:
+        if page_callback is not None:
+            page_callback(1, len(self._rows))  # type: ignore[operator]
+        yield from self._rows
+
+
+class FakeLotRepository:
+    def __init__(self) -> None:
+        self.upsert_calls: list[int] = []
+
+    def upsert(self, lot: Any, *, tracked: Any) -> LotUpsertResult:
+        self.upsert_calls.append(lot.id)
+        return LotUpsertResult(was_new=True, changes=[])
+
+    def get(self, lot_id: int) -> None:
+        return None
+
+    def list_active(self, *, limit: int, offset: int) -> list:
+        return []
+
+    def get_last_known_id(self, region: int) -> None:
+        return None
+
+    def set_last_known_id(self, region: int, value: int) -> None:
+        pass
+
+    def mark_seen(self, lot_ids: Sequence[int], at: datetime) -> None:
+        pass
+
+    def mark_inactive(self, lot_id: int, reason: str, at: datetime) -> None:
+        pass
+
+    def needing_enrichment(self, limit: int) -> list[int]:
+        return []
+
+    def count_active(self) -> int:
+        return 0
+
+
+class FakeEventBus:
+    def __init__(self, *, raise_on_publish: bool = False) -> None:
+        self.published: list[object] = []
+        self._raise = raise_on_publish
+        self.publish_call_count: int = 0
+
+    def publish(self, event: object) -> None:
+        self.publish_call_count += 1
+        if self._raise:
+            raise RuntimeError("bus overflow")
+        self.published.append(event)
+
+    def subscribe(self) -> object:
+        raise NotImplementedError
+
+
+class FakeMonitorCycle:
+    def mark_region_in_backfill(self, region: int) -> None:
+        pass
+
+    def clear_region_in_backfill(self, region: int) -> None:
+        pass
+
+    def request_run_now(self) -> None:
+        pass
+
+
+class FakeConfigSource:
+    def current(self) -> Settings:
+        return Settings(regions=[_REGION_A])
+
+    def subscribe(self, cb: Any) -> Any:
+        raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# Factory + run helper
+# ---------------------------------------------------------------------------
+
+
+def _make_service(
+    rows: list[ParsedListRow],
+    event_bus: FakeEventBus | None = None,
+    lot_repo: FakeLotRepository | None = None,
+) -> tuple[BackfillService, FakeLotRepository, FakeEventBus]:
+    lot_repo = lot_repo or FakeLotRepository()
+    bus = event_bus or FakeEventBus()
+    svc = BackfillService(
+        fetcher=FakePaginatedListFetcher(rows),
+        lot_repo=lot_repo,
+        config_source=FakeConfigSource(),
+        monitor_cycle=FakeMonitorCycle(),
+        event_bus=bus,
+        sleep_between_pages=0.0,
+    )
+    return svc, lot_repo, bus
+
+
+def _run_sync(svc: BackfillService, regions: list[int] | None = None) -> None:
+    stop = threading.Event()
+    started = svc.start(stop, regions=regions)
+    assert started
+    deadline = time.monotonic() + 5.0
+    while svc.is_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not svc.is_running(), "backfill did not finish in time"
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+def test_backfill_publishes_sse_lot_new_for_each_lot():
+    """Invariant 5: SseLotNew published for each upserted lot."""
+    rows = [_make_row(1), _make_row(2), _make_row(3)]
+    svc, lot_repo, bus = _make_service(rows)
+
+    _run_sync(svc)
+
+    assert len(lot_repo.upsert_calls) == 3
+    assert len(bus.published) == 3
+    assert all(isinstance(e, SseLotNew) for e in bus.published)
+    lot_ids = {e.lot.id for e in bus.published}  # type: ignore[union-attr]
+    assert lot_ids == {1, 2, 3}
+
+
+def test_backfill_does_not_depend_on_email_notifier():
+    """Invariant 6: BackfillService has no notifier_dispatcher/email dependency."""
+    rows = [_make_row(1)]
+    svc, _, bus = _make_service(rows)
+
+    _run_sync(svc)
+
+    assert len(bus.published) == 1
+    assert isinstance(bus.published[0], SseLotNew)
+    assert not hasattr(svc, "_notifier_dispatcher")
+    assert not hasattr(svc, "_dispatcher")
+    assert not hasattr(svc, "_email_notifier")
+
+
+def test_backfill_sse_publish_failure_does_not_raise(caplog):
+    """Invariant 7: EventBus publish raises → backfill logs warning, continues."""
+    rows = [_make_row(1), _make_row(2)]
+    bus = FakeEventBus(raise_on_publish=True)
+    svc, lot_repo, bus = _make_service(rows, event_bus=bus)
+
+    with caplog.at_level(logging.WARNING, logger="fis_monitor.services.backfill"):
+        _run_sync(svc)
+
+    assert len(lot_repo.upsert_calls) == 2, "upserts must complete despite publish failure"
+    assert "SseLotNew publish failed" in caplog.text
+    assert bus.publish_call_count == 2
+    assert len(bus.published) == 0
+
+
+def test_backfill_cancelled_before_start_no_sse_published():
+    """Invariant 8: stop_event already set before backfill processes rows → no SseLotNew."""
+    stop_event = threading.Event()
+    stop_event.set()  # pre-cancelled
+
+    bus = FakeEventBus()
+    rows = [_make_row(1), _make_row(2)]
+    svc, _, bus = _make_service(rows, event_bus=bus)
+
+    started = svc.start(stop_event, regions=[_REGION_A])
+    assert started
+
+    deadline = time.monotonic() + 5.0
+    while svc.is_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    # Pre-cancelled backfill: row loop exits immediately after cancel check
+    # so SseLotNew is never published (no upserts completed either)
+    assert len(bus.published) == 0, "no SseLotNew should be published when pre-cancelled"

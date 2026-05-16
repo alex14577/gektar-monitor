@@ -157,6 +157,17 @@ class FakeMonitorCycleService:
         self.run_now_calls += 1
 
 
+class FakeEventBus:
+    def __init__(self) -> None:
+        self.published: list = []
+
+    def publish(self, event: object) -> None:
+        self.published.append(event)
+
+    def subscribe(self) -> object:
+        raise NotImplementedError
+
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -168,17 +179,20 @@ def _make_service(
     lot_repo: FakeLotRepository | None = None,
     monitor_cycle: FakeMonitorCycleService | None = None,
     fetcher: FakePaginatedListFetcher | None = None,
+    event_bus: FakeEventBus | None = None,
 ) -> tuple[BackfillService, FakeLotRepository, FakeMonitorCycleService, FakePaginatedListFetcher]:
     lot_repo = lot_repo or FakeLotRepository()
     mc = monitor_cycle or FakeMonitorCycleService()
     fetcher = fetcher or FakePaginatedListFetcher(rows_by_region=rows_by_region)
     config = FakeConfigSource(regions=regions or [_REGION_A])
+    bus = event_bus or FakeEventBus()
 
     svc = BackfillService(
         fetcher=fetcher,
         lot_repo=lot_repo,
         config_source=config,
         monitor_cycle=mc,
+        event_bus=bus,
         sleep_between_pages=0.0,
     )
     return svc, lot_repo, mc, fetcher
@@ -336,6 +350,7 @@ class TestPageCallbackUpdatesProgress:
             lot_repo=lot_repo,
             config_source=config,
             monitor_cycle=mc,
+            event_bus=FakeEventBus(),
             sleep_between_pages=0.0,
         )
 
@@ -991,6 +1006,7 @@ class TestRegionPageLog:
             lot_repo=FakeLotRepository(),
             config_source=FakeConfigSource(regions=[_REGION_A]),
             monitor_cycle=FakeMonitorCycleService(),
+            event_bus=FakeEventBus(),
             sleep_between_pages=0.0,
         )
         stop = threading.Event()

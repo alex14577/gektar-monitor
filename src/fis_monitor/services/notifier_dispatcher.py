@@ -32,6 +32,7 @@ import random
 import threading
 from collections.abc import Sequence
 from datetime import timedelta
+from typing import ClassVar
 
 from fis_monitor.domain.interfaces import (
     Clock,
@@ -68,6 +69,53 @@ MAX_TOTAL_ATTEMPTS: int = 10
 _CHANNEL_EMAIL = "email"
 _CHANNEL_BROWSER = "browser"
 _CHANNEL_HEARTBEAT = "heartbeat"
+
+
+class SubscribedAtFilteredNotifier:
+    """Decorator applying subscribed_at suppression for the wrapped email Notifier.
+
+    Suppresses send() if lot.date_create < region's subscribed_at.
+    Browser/heartbeat notifiers are registered without this wrapper — they
+    always receive all lots so the UI feed updates in real-time.
+    """
+
+    channel_id: ClassVar[str] = "email"
+    display_name: ClassVar[str] = "Email (subscribed_at filtered)"
+    description: ClassVar[str] = "Email notifier with per-region subscribed_at suppression"
+    config_schema: ClassVar[type] = type(None)  # delegated at runtime via inner notifier
+    recipient_label: ClassVar[str] = "Email address"
+    recipient_placeholder: ClassVar[str] = "user@example.com"
+
+    def __init__(self, inner: object, region_sub_repo: RegionSubscriptionRepository) -> None:
+        self._inner = inner
+        self._region_sub_repo = region_sub_repo
+        # Reflect config_schema from inner so UI forms work correctly
+        inner_schema = (
+            getattr(type(inner), "config_schema", None)
+            or getattr(inner, "config_schema", None)
+        )
+        if inner_schema is not None:
+            type(self).config_schema = inner_schema
+
+    def send(self, lot: LotPublicDTO, recipient: str) -> NotifyResult:
+        if lot.region_id is not None:
+            subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
+            if subscribed_at is not None and lot.date_create < subscribed_at:
+                logger.debug(
+                    "notification.subscribed_at_dropped",
+                    extra={
+                        "region_id": lot.region_id,
+                        "lot_id": lot.id,
+                        "lot_date_create": lot.date_create.isoformat(),
+                        "subscribed_at": subscribed_at.isoformat(),
+                        "decision": "dropped_subscribed_at",
+                    },
+                )
+                return NotifyResult(ok=True, detail="suppressed (subscribed_at)", retryable=False)
+        return self._inner.send(lot, recipient)  # type: ignore[attr-defined]
+
+    def test(self, recipient: str) -> NotifyResult:
+        return self._inner.test(recipient)  # type: ignore[attr-defined]
 
 
 def _classify_error(result: NotifyResult) -> ErrorCategory:
@@ -128,7 +176,6 @@ class NotifierDispatcher:
         event_bus: EventBus,
         stop_event: threading.Event,
         dnd_service: DndService,
-        region_sub_repo: RegionSubscriptionRepository | None = None,
         settings_repo: SettingsRepository | None = None,
         retry_attempts: int = 3,
         retry_backoff: Sequence[float] = (2.0, 4.0, 8.0),
@@ -143,7 +190,6 @@ class NotifierDispatcher:
         self._event_bus = event_bus
         self.stop_event = stop_event
         self._dnd_service = dnd_service
-        self._region_sub_repo = region_sub_repo
         self._settings_repo = settings_repo
         self.retry_attempts = retry_attempts
         self.retry_backoff = list(retry_backoff)
@@ -158,27 +204,10 @@ class NotifierDispatcher:
     def dispatch(self, lot: LotPublicDTO) -> None:
         """Fire-and-forget: enqueue ``lot`` for async delivery.
 
-        Applies subscribed_at cutoff filter (ADR-039) before enqueuing:
-        if the lot was created before the region's subscription timestamp,
-        it is intentionally suppressed (not a violation of at-least-once SLO).
-
         On queue overflow the lot is silently dropped and a warning is
         logged — monitor-cycle throughput takes priority over notifications.
+        subscribed_at filtering is applied per-channel by SubscribedAtFilteredNotifier.
         """
-        if self._region_sub_repo is not None and lot.region_id is not None:
-            subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
-            if subscribed_at is not None and lot.date_create < subscribed_at:
-                logger.debug(
-                    "notification.subscribed_at_dropped",
-                    extra={
-                        "region_id": lot.region_id,
-                        "lot_id": lot.id,
-                        "lot_date_create": lot.date_create.isoformat(),
-                        "subscribed_at": subscribed_at.isoformat(),
-                        "decision": "dropped_subscribed_at",
-                    },
-                )
-                return
         try:
             self._queue.put_nowait(lot)
         except queue.Full:

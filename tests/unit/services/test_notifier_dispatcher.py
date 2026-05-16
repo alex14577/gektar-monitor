@@ -45,7 +45,11 @@ from fis_monitor.domain.models import (
     SseSmtpFailed,
 )
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
-from fis_monitor.services.notifier_dispatcher import MAX_TOTAL_ATTEMPTS, NotifierDispatcher
+from fis_monitor.services.notifier_dispatcher import (
+    MAX_TOTAL_ATTEMPTS,
+    NotifierDispatcher,
+    SubscribedAtFilteredNotifier,
+)
 from tests.factories import make_lot, make_settings
 
 # ---------------------------------------------------------------------------
@@ -480,7 +484,6 @@ def _make_dispatcher(
     event_bus: FakeEventBus | None = None,
     stop_event: threading.Event | None = None,
     dnd_service: FakeDndService | None = None,
-    region_sub_repo: FakeRegionSubscriptionRepository | None = None,
     retry_attempts: int = 3,
     retry_backoff: Sequence[float] = (0.01, 0.02, 0.04),  # tiny for fast tests
     max_queue_size: int = 100,
@@ -512,7 +515,6 @@ def _make_dispatcher(
         event_bus=event_bus,
         stop_event=stop_event,
         dnd_service=dnd_service,
-        region_sub_repo=region_sub_repo,
         retry_attempts=retry_attempts,
         retry_backoff=retry_backoff,
         max_queue_size=max_queue_size,
@@ -1249,127 +1251,142 @@ def test_all_fake_config_source_methods_invoked():
 
 
 # ===========================================================================
-# Tests: dispatch() — subscribed_at cutoff filter (ADR-039)
+# Tests: SubscribedAtFilteredNotifier (ADR-039) — per-channel email filter
 # ===========================================================================
 
-# make_lot() default: date_create=_NOW; region_id=1 (ДФО macro-region)
 _MACRO_REGION_DFO = 1
 _SUBSCRIBED_AT_BEFORE = _NOW - timedelta(hours=1)   # date_create > subscribed_at → pass
 _SUBSCRIBED_AT_EQUAL = _NOW                          # date_create == subscribed_at → pass (>=)
-_SUBSCRIBED_AT_AFTER = _NOW + timedelta(hours=1)    # date_create < subscribed_at → drop
+_SUBSCRIBED_AT_AFTER = _NOW + timedelta(hours=1)    # date_create < subscribed_at → suppress
 
 
-def test_dispatch_subscribed_at_drops_lot_older_than_cutoff(caplog):
-    """date_create < subscribed_at → dispatch skipped, log emitted, queue empty."""
-    region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+def test_filtered_notifier_suppresses_old_lot(caplog):
+    """Invariant 631y-1a: date_create < subscribed_at → send() suppressed, inner NOT called."""
+    inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+    wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
-    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
-    lot = _make_lot_public()  # date_create = _NOW < _SUBSCRIBED_AT_AFTER
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # date_create=_NOW < _SUBSCRIBED_AT_AFTER
 
     with caplog.at_level(logging.DEBUG, logger="fis_monitor.services.notifier_dispatcher"):
-        dispatcher.dispatch(lot)
+        result = wrapper.send(lot, "test@example.com")
 
-    assert dispatcher._queue.empty(), "queue must be empty — lot was dropped"
+    assert result.ok is True
+    assert "suppressed" in (result.detail or "")
+    assert len(inner.send_calls) == 0
     assert "notification.subscribed_at_dropped" in caplog.text
     drop_records = [
         r for r in caplog.records if r.getMessage() == "notification.subscribed_at_dropped"
     ]
-    assert drop_records, "expected at least one subscribed_at_dropped log record"
+    assert drop_records
     assert drop_records[0].decision == "dropped_subscribed_at"  # type: ignore[attr-defined]
 
 
-def test_dispatch_subscribed_at_allows_lot_equal_to_cutoff():
-    """date_create == subscribed_at → dispatch allowed (>= condition)."""
-    region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_EQUAL)
+def test_filtered_notifier_passes_equal_cutoff():
+    """date_create == subscribed_at → send() passes through to inner (>= condition)."""
+    inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_EQUAL)
+    wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
-    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
-    lot = _make_lot_public()  # date_create = _NOW == _SUBSCRIBED_AT_EQUAL
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
 
-    dispatcher.dispatch(lot)
+    result = wrapper.send(lot, "test@example.com")
 
-    assert not dispatcher._queue.empty(), "lot must be enqueued when date_create == subscribed_at"
-
-
-def test_dispatch_subscribed_at_allows_lot_newer_than_cutoff():
-    """date_create > subscribed_at → dispatch normal."""
-    region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_BEFORE)
-
-    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
-    lot = _make_lot_public()  # date_create = _NOW > _SUBSCRIBED_AT_BEFORE
-
-    dispatcher.dispatch(lot)
-
-    assert not dispatcher._queue.empty(), "lot must be enqueued when date_create > subscribed_at"
+    assert result.ok is True
+    assert len(inner.send_calls) == 1
 
 
-def test_dispatch_subscribed_at_none_allows_dispatch():
-    """get_subscribed_at returns None (no record) → dispatch normal (graceful)."""
-    region_sub_repo = FakeRegionSubscriptionRepository()
-    # No seed — get_subscribed_at returns None
+def test_filtered_notifier_passes_newer_lot():
+    """date_create > subscribed_at → send() passes through."""
+    inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_BEFORE)
+    wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
-    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
-    lot = _make_lot_public()  # region_id=_MACRO_REGION_DFO, no subscribed_at row
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
 
-    dispatcher.dispatch(lot)
+    wrapper.send(lot, "test@example.com")
 
-    assert not dispatcher._queue.empty(), "lot must be enqueued when subscribed_at is None"
-
-
-def test_dispatch_region_id_none_allows_dispatch():
-    """lot.region_id=None (legacy lot) → filter skipped, dispatch normal (graceful)."""
-    region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
-
-    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
-    lot = _make_lot_public(region_id=None)  # legacy lot: no region_id
-
-    dispatcher.dispatch(lot)
-
-    assert not dispatcher._queue.empty(), "lot must be enqueued when region_id is None"
+    assert len(inner.send_calls) == 1
 
 
-def test_dispatch_no_region_sub_repo_allows_dispatch():
-    """region_sub_repo=None (not injected) → dispatch normal (backward compat)."""
-    dispatcher, *_ = _make_dispatcher(region_sub_repo=None)
-    lot = _make_lot_public()
+def test_filtered_notifier_passes_no_subscribed_at():
+    """get_subscribed_at returns None (no record) → send() passes through (graceful)."""
+    inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
-    dispatcher.dispatch(lot)
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
 
-    assert not dispatcher._queue.empty(), "lot must be enqueued when region_sub_repo is None"
+    wrapper.send(lot, "test@example.com")
+
+    assert len(inner.send_calls) == 1
 
 
-def test_dispatch_subscribed_at_filter_applied_per_lot():
-    """Multiple lots: filter applied per-lot based on their individual date_create."""
-    region_sub_repo = FakeRegionSubscriptionRepository()
-    region_sub_repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_EQUAL)
+def test_filtered_notifier_passes_region_id_none():
+    """lot.region_id=None (legacy lot) → filter skipped, send() passes through (graceful)."""
+    inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+    wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
-    dispatcher, *_ = _make_dispatcher(region_sub_repo=region_sub_repo)
+    lot = _make_lot_public(region_id=None)
 
-    # old lot: date_create before subscribed_at → dropped
-    old_lot = LotPublicDTO(
-        **make_lot(
-            id=1, date_create=_NOW - timedelta(hours=1), region_id=_MACRO_REGION_DFO
-        ).model_dump(),
-        age_seconds=0, tier="match", freshness="warm",
-    )
-    # new lot: date_create == subscribed_at → allowed
-    new_lot = LotPublicDTO(
-        **make_lot(id=2, date_create=_NOW, region_id=_MACRO_REGION_DFO).model_dump(),
-        age_seconds=0, tier="match", freshness="warm",
-    )
+    wrapper.send(lot, "test@example.com")
+
+    assert len(inner.send_calls) == 1
+
+
+def test_dispatcher_old_lot_email_suppressed_browser_called():
+    """Invariant 631y-1: old lot → email wrapper suppresses send; browser channel IS called."""
+    email_inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+    filtered_email = SubscribedAtFilteredNotifier(inner=email_inner, region_sub_repo=repo)
+
+    browser = FakeBrowserNotifier()
+
+    registry = ExplicitNotifierRegistry()
+    registry.register(filtered_email)
+    registry.register(browser)
+
+    dispatcher, *_ = _make_dispatcher(registry=registry)
+    old_lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # date_create < SUBSCRIBED_AT_AFTER
 
     dispatcher.dispatch(old_lot)
-    dispatcher.dispatch(new_lot)
+    lot_from_q = dispatcher._queue.get_nowait()
+    dispatcher._dispatch_all_channels(lot_from_q)
 
-    items = []
-    while not dispatcher._queue.empty():
-        items.append(dispatcher._queue.get_nowait())
+    assert len(email_inner.send_calls) == 0, "email must be suppressed for old lot"
+    assert len(browser.send_calls) == 1, "browser must receive old lot"
 
-    assert len(items) == 1
-    assert items[0].id == 2, "only new_lot (id=2) should pass the filter"
+
+def test_dispatcher_new_lot_both_channels_called():
+    """Invariant 631y-2: new lot → both email and browser channels called."""
+    email_inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_BEFORE)
+    filtered_email = SubscribedAtFilteredNotifier(inner=email_inner, region_sub_repo=repo)
+
+    browser = FakeBrowserNotifier()
+
+    registry = ExplicitNotifierRegistry()
+    registry.register(filtered_email)
+    registry.register(browser)
+
+    config_source = FakeConfigSource(_make_email_settings(["user@example.com"]))
+    dispatcher, *_ = _make_dispatcher(registry=registry, config_source=config_source)
+
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # date_create=_NOW > _SUBSCRIBED_AT_BEFORE
+
+    dispatcher.dispatch(lot)
+    lot_from_q = dispatcher._queue.get_nowait()
+    dispatcher._dispatch_all_channels(lot_from_q)
+
+    assert len(email_inner.send_calls) == 1, "email must be called for new lot"
+    assert len(browser.send_calls) == 1, "browser must be called for new lot"
 
 
 # ===========================================================================
@@ -1381,28 +1398,22 @@ def test_all_fake_region_sub_repo_methods_invoked():
     """Every method on FakeRegionSubscriptionRepository must be callable."""
     repo = FakeRegionSubscriptionRepository()
 
-    # set_if_absent — first insert returns True
     inserted = repo.set_if_absent(89, _NOW)
     assert inserted is True
 
-    # set_if_absent — idempotent, second call returns False
     inserted2 = repo.set_if_absent(89, _NOW)
     assert inserted2 is False
 
-    # get_subscribed_at — existing
     result = repo.get_subscribed_at(89)
     assert result == _NOW
 
-    # get_subscribed_at — missing
     result_none = repo.get_subscribed_at(999)
     assert result_none is None
 
-    # delete — removes entry
     repo.delete(89)
     assert repo.get_subscribed_at(89) is None
 
-    # delete — idempotent (no raise)
-    repo.delete(89)
+    repo.delete(89)  # idempotent
 
     assert "get_subscribed_at:89" in repo._calls
     assert "set_if_absent:89" in repo._calls

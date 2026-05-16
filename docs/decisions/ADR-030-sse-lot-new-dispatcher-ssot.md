@@ -1,7 +1,7 @@
 # ADR-030 — SseLotNew dedup: Dispatcher SSOT for SSE channel
 
 **Date:** 2026-05-15
-**Status:** Accepted
+**Status:** Accepted (updated 2026-05-16: BackfillService direct SSE publish added — gektar_monitor-w8dr)
 **Context:** bd gektar_monitor-b54 (SSE dedup fix)
 
 ---
@@ -53,9 +53,8 @@ layer — `BrowserSseNotifier` is never called for them.
 **Positive:**
 - `MonitorCycleService` no longer imports or constructs `SseLotNew` — the
   dependency is eliminated (cleaner layer separation, ADR-008).
-- Each new lot produces exactly **one** `SseLotNew` event on the bus per cycle.
-- `BrowserSseNotifier` is authoritative for the `browser` channel (consistent
-  with `SmtpEmailNotifier` being authoritative for `email`).
+- Each new lot during monitor cycle produces exactly **one** `SseLotNew` event on the bus.
+- `BrowserSseNotifier` is authoritative for the `browser` channel during monitor cycle.
 - Filter gate remains in `MonitorCycleService` before `dispatch()` — no
   change to filtering semantics.
 - Test coverage: `test_monitor_cycle.py` and `test_monitor_cycle_with_filter.py`
@@ -63,7 +62,21 @@ layer — `BrowserSseNotifier` is never called for them.
   when using `FakeNotifierDispatcher`, confirming the direct-publish path is gone.
 
 **Negative / trade-offs:**
-- None. The removed code path was purely redundant.
+- None for the original fix. See update note below.
+
+## Update: BackfillService direct SSE publish (2026-05-16, gektar_monitor-w8dr)
+
+`BackfillService` now publishes `SseLotNew` **directly** to `EventBus` (bypassing `NotifierDispatcher`)
+after each successful upsert during cold-start backfill. This is the intentional two-path design:
+
+- **Monitor cycle path**: `MonitorCycleService → NotifierDispatcher → BrowserSseNotifier → EventBus`
+- **Backfill path**: `BackfillService → EventBus.publish(SseLotNew)` directly
+
+The direct path for backfill avoids triggering email notifications (mass-notify prevention — ADR-028).
+Email suppression for old lots is enforced by `SubscribedAtFilteredNotifier` at the channel level (ADR-039 update).
+
+`EventBus` is the meta-SSOT for `SseLotNew` delivery. `Dispatcher` remains the sole publisher
+during normal monitor cycle operation; `BackfillService` is the additional publisher during cold-start.
 
 ## Scope note
 
