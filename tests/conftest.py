@@ -22,13 +22,11 @@ from pathlib import Path
 import pytest
 
 from fis_monitor.infra.sqlite.connection import ConnectionProvider
-from fis_monitor.infra.sqlite.init_db import init_db
+from fis_monitor.infra.sqlite.init_db import LATEST_SCHEMA_VERSION, init_db
 from fis_monitor.utils.log import _AUDIT_DISABLED_ATTR
 
 # Canonical schema location — repo-rooted, robust against test-tree moves.
-SCHEMA_SQL_PATH = (
-    Path(__file__).resolve().parent.parent / "docs" / "db" / "schema.sql"
-)
+SCHEMA_SQL_PATH = Path(__file__).resolve().parent.parent / "docs" / "db" / "schema.sql"
 
 # ---------------------------------------------------------------------------
 # Logger isolation — keeps logging tests hermetic
@@ -82,9 +80,7 @@ def tmp_db_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def tmp_db(
-    tmp_db_path: Path, schema_sql: str
-) -> Iterator[ConnectionProvider]:
+def tmp_db(tmp_db_path: Path, schema_sql: str) -> Iterator[ConnectionProvider]:
     """Per-test SQLite DB with the full schema applied.
 
     Yields a `ConnectionProvider` — tests grab connections via
@@ -94,7 +90,7 @@ def tmp_db(
     """
     provider = ConnectionProvider(db_path=tmp_db_path)
     try:
-        init_db(provider, schema_sql=schema_sql, latest_version=4)
+        init_db(provider, schema_sql=schema_sql, latest_version=LATEST_SCHEMA_VERSION)
         yield provider
     finally:
         provider.close_all()

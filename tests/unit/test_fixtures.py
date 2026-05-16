@@ -2,6 +2,7 @@
 
 from fis_monitor.domain.models import Lot, NotificationRecord, Settings
 from fis_monitor.infra.sqlite.connection import ConnectionProvider
+from fis_monitor.infra.sqlite.init_db import LATEST_SCHEMA_VERSION
 from tests.factories import make_lot, make_notification, make_settings
 
 # ---------------------------------------------------------------------------
@@ -18,7 +19,7 @@ def test_tmp_db_yields_connection_provider(tmp_db: ConnectionProvider) -> None:
 def test_tmp_db_applies_schema_user_version(tmp_db: ConnectionProvider) -> None:
     conn = tmp_db.get()
     user_version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert user_version == 4  # bumped 3→4 (nvx2): region_subscriptions + lots.region_id
+    assert user_version == LATEST_SCHEMA_VERSION  # bumped 4→5 (ADR-040): lots.date_registry
 
 
 def test_tmp_db_uses_wal_journal_mode(tmp_db: ConnectionProvider) -> None:

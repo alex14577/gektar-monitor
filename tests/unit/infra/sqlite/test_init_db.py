@@ -15,7 +15,7 @@ import pytest
 
 from fis_monitor.domain.errors import DomainError, MigrationRequired
 from fis_monitor.infra.sqlite.connection import ConnectionProvider
-from fis_monitor.infra.sqlite.init_db import init_db
+from fis_monitor.infra.sqlite.init_db import LATEST_SCHEMA_VERSION, init_db
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,15 +51,15 @@ def _table_names(conn: sqlite3.Connection) -> set[str]:
 
 
 def test_init_db_fresh_db_applies_schema(tmp_path: Path) -> None:
-    """Empty DB file → init_db() applies schema_sql, user_version == 3,
+    """Empty DB file → init_db() applies schema_sql, user_version == LATEST_SCHEMA_VERSION,
     expected tables exist."""
     schema_sql = _load_schema()
     provider = _make_provider(tmp_path)
 
-    init_db(provider, schema_sql=schema_sql, latest_version=3)
+    init_db(provider, schema_sql=schema_sql, latest_version=LATEST_SCHEMA_VERSION)
 
     conn = provider.get()
-    assert _pragma(conn, "user_version") == 3
+    assert _pragma(conn, "user_version") == LATEST_SCHEMA_VERSION
     tables = _table_names(conn)
     assert "notifications" in tables, "notifications table must be created"
     assert "smtp_credentials" in tables, "smtp_credentials table must be created"
@@ -73,19 +73,19 @@ def test_init_db_fresh_db_applies_schema(tmp_path: Path) -> None:
 
 
 def test_init_db_already_current_is_noop(tmp_path: Path) -> None:
-    """DB already at user_version=3 → init_db() is a no-op (no schema applied,
+    """DB already at user_version=LATEST_SCHEMA_VERSION → init_db() is a no-op (no schema applied,
     no error raised)."""
     schema_sql = _load_schema()
     provider = _make_provider(tmp_path)
 
     # Bootstrap: apply schema once
-    init_db(provider, schema_sql=schema_sql, latest_version=3)
+    init_db(provider, schema_sql=schema_sql, latest_version=LATEST_SCHEMA_VERSION)
 
     # Second call must be silent (no error, no state change)
-    init_db(provider, schema_sql=schema_sql, latest_version=3)
+    init_db(provider, schema_sql=schema_sql, latest_version=LATEST_SCHEMA_VERSION)
 
     conn = provider.get()
-    assert _pragma(conn, "user_version") == 3
+    assert _pragma(conn, "user_version") == LATEST_SCHEMA_VERSION
     provider.close_all()
 
 
