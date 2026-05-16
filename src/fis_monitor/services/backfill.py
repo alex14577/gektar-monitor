@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
@@ -188,10 +189,25 @@ class BackfillService:
         """
         with self._flight_lock:
             if self._running:
+                logger.debug(
+                    "backfill.start.skip_running",
+                    extra={
+                        "regions_list": regions,
+                        "current_running": True,
+                    },
+                )
                 return False
             self._running = True
             # Fresh stop-event per run so a previous cancel() does not carry over.
             self._stop_event = threading.Event()
+
+        logger.info(
+            "backfill.start.entry",
+            extra={
+                "regions_list": regions,
+                "single_flight_acquired": True,
+            },
+        )
 
         def _worker() -> None:
             try:
@@ -223,35 +239,67 @@ class BackfillService:
         Returns ``True`` and fires backfill if triggered; ``False`` otherwise.
         """
         with self._flight_lock:
+            threshold_computed = len_parsed_hint + _DELTA_THRESHOLD
+            currently_running = self._running
+            delta = (site_total - db_count) if site_total is not None else None
+
+            logger.debug(
+                "backfill.maybe_start.entry",
+                extra={
+                    "region_id": region_id,
+                    "site_total": site_total,
+                    "db_count": db_count,
+                    "len_hint": len_parsed_hint,
+                    "threshold_computed": threshold_computed,
+                    "currently_running": currently_running,
+                },
+            )
+
             if site_total is None:
-                logger.debug(
-                    "maybe_start: region=%s site_total=None → skip", region_id
+                logger.info(
+                    "backfill.maybe_start.decision",
+                    extra={
+                        "region_id": region_id,
+                        "decision": "skip_none",
+                        "delta": None,
+                        "threshold": threshold_computed,
+                    },
                 )
                 return False
 
-            if self._running:
-                logger.debug(
-                    "maybe_start: region=%s already running → skip", region_id
+            if currently_running:
+                logger.info(
+                    "backfill.maybe_start.decision",
+                    extra={
+                        "region_id": region_id,
+                        "decision": "skip_running",
+                        "delta": delta,
+                        "threshold": threshold_computed,
+                    },
                 )
                 return False
-
-            delta = site_total - db_count
 
             if delta < 0:
-                logger.debug(
-                    "maybe_start: region=%s delta=%d decision=skip_negative",
-                    region_id,
-                    delta,
+                logger.info(
+                    "backfill.maybe_start.decision",
+                    extra={
+                        "region_id": region_id,
+                        "decision": "skip_negative",
+                        "delta": delta,
+                        "threshold": threshold_computed,
+                    },
                 )
                 return False
 
-            if delta <= len_parsed_hint + _DELTA_THRESHOLD:
-                logger.debug(
-                    "maybe_start: region=%s delta=%d hint=%d threshold=%d → below threshold",
-                    region_id,
-                    delta,
-                    len_parsed_hint,
-                    _DELTA_THRESHOLD,
+            if delta <= threshold_computed:
+                logger.info(
+                    "backfill.maybe_start.decision",
+                    extra={
+                        "region_id": region_id,
+                        "decision": "skip_threshold",
+                        "delta": delta,
+                        "threshold": threshold_computed,
+                    },
                 )
                 return False
 
@@ -259,11 +307,20 @@ class BackfillService:
             self._running = True
             self._stop_event = threading.Event()
             logger.info(
+                "backfill.maybe_start.decision",
+                extra={
+                    "region_id": region_id,
+                    "decision": "trigger",
+                    "delta": delta,
+                    "threshold": threshold_computed,
+                },
+            )
+            logger.info(
                 "backfill.delta_triggered",
                 extra={
                     "region_id": region_id,
                     "delta": delta,
-                    "threshold": len_parsed_hint + _DELTA_THRESHOLD,
+                    "threshold": threshold_computed,
                 },
             )
 
@@ -305,6 +362,16 @@ class BackfillService:
 
     def cancel(self) -> None:
         """Cancel any running backfill.  Idempotent — safe to call when idle."""
+        with self._flight_lock:
+            was_running = self._running
+            regions_in_flight: list[int] | None = None
+        logger.info(
+            "backfill.cancel.called",
+            extra={
+                "was_running": was_running,
+                "regions_in_flight": regions_in_flight,
+            },
+        )
         self._stop_event.set()
 
     def is_running(self) -> bool:
@@ -358,11 +425,17 @@ class BackfillService:
                 updated_at=now,
             )
 
-        logger.info("backfill: starting across %d region(s)", len(regions))
+        logger.info(
+            "backfill.run.start",
+            extra={"regions_list": regions, "regions_count": len(regions)},
+        )
 
         for region in regions:
             if stop.is_set():
-                logger.info("backfill: stop requested before region=%s", region)
+                logger.info(
+                    "backfill.run.cancelled_before_region",
+                    extra={"region_id": region},
+                )
                 break
 
             self._monitor_cycle.mark_region_in_backfill(region)
@@ -388,8 +461,16 @@ class BackfillService:
                 self._progress.updated_at = datetime.now(UTC)
             try:
                 self._monitor_cycle.request_run_now()
-            except Exception:
+                logger.debug(
+                    "backfill.request_run_now.invoked",
+                    extra={"success": True, "error": None},
+                )
+            except Exception as exc:
                 logger.warning("backfill: request_run_now() failed", exc_info=True)
+                logger.debug(
+                    "backfill.request_run_now.invoked",
+                    extra={"success": False, "error": str(exc)},
+                )
 
         # Signal the stop-watcher thread to exit on normal completion.
         # Without this, the watcher spins forever waiting for `combined` to be
@@ -397,64 +478,100 @@ class BackfillService:
         # Setting the internal stop-event here causes the watcher to detect it
         # and exit promptly.  Idempotent: safe if cancel() was already called.
         self._stop_event.set()
-        logger.info("backfill: finished")
+        logger.info("backfill.run.finished", extra={"cancelled": cancelled})
 
     def _process_region(self, region: int, stop: threading.Event) -> None:
         """Iterate all pages for ``region`` and upsert each lot."""
-        logger.info("backfill: processing region=%s", region)
+        region_start = time.monotonic()
+        logger.info("backfill.region.start", extra={"region_id": region})
 
         with self._progress_lock:
             self._progress.current_region = region
             self._progress.current_page = None
 
+        lots_upserted_per_page: dict[int, int] = {}
+        current_page_num = 0
+
         def _on_page(page_num: int, items_count: int) -> None:
+            nonlocal current_page_num
+            current_page_num = page_num
+            lots_upserted_per_page.setdefault(page_num, 0)
             with self._progress_lock:
                 self._progress.current_page = page_num
                 self._progress.total_pages_seen += 1
                 self._progress.updated_at = datetime.now(UTC)
+            logger.debug(
+                "backfill.region.page",
+                extra={
+                    "region_id": region,
+                    "page_num": page_num,
+                    "rows_fetched": items_count,
+                    "lots_upserted": lots_upserted_per_page.get(page_num, 0),
+                },
+            )
 
-        # Count rows processed for diagnostic logging.
         rows_processed = 0
+        cancelled = False
 
-        for row in self._fetcher.iterate(  # type: ignore[union-attr]
-            region,
-            stop,
-            sleep_between_pages=self._sleep_between_pages,
-            per_page=50,  # ADR-036: full walk with explicit page size
-            page_callback=_on_page,
-        ):
-            if stop.is_set():
-                break
+        try:
+            for row in self._fetcher.iterate(  # type: ignore[union-attr]
+                region,
+                stop,
+                sleep_between_pages=self._sleep_between_pages,
+                per_page=50,  # ADR-036: full walk with explicit page size
+                page_callback=_on_page,
+            ):
+                if stop.is_set():
+                    cancelled = True
+                    break
 
-            rows_processed += 1
-            now = datetime.now(UTC)
-            try:
-                lot = _parsed_row_to_lot(row, now, region_id=region)
-            except Exception:
-                logger.warning(
-                    "backfill: failed to convert row id=%s region=%s — skipping",
-                    getattr(row, "id", "?"),
-                    region,
-                    exc_info=True,
-                )
-                continue
+                rows_processed += 1
+                now = datetime.now(UTC)
+                try:
+                    lot = _parsed_row_to_lot(row, now, region_id=region)
+                except Exception:
+                    logger.warning(
+                        "backfill: failed to convert row id=%s region=%s — skipping",
+                        getattr(row, "id", "?"),
+                        region,
+                        exc_info=True,
+                    )
+                    continue
 
-            try:
-                self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
-            except Exception:
-                logger.warning(
-                    "backfill: upsert failed for lot id=%s region=%s — skipping",
-                    lot.id,
-                    region,
-                    exc_info=True,
-                )
-                continue
+                try:
+                    self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
+                    lots_upserted_per_page[current_page_num] = (
+                        lots_upserted_per_page.get(current_page_num, 0) + 1
+                    )
+                except Exception:
+                    logger.warning(
+                        "backfill: upsert failed for lot id=%s region=%s — skipping",
+                        lot.id,
+                        region,
+                        exc_info=True,
+                    )
+                    continue
 
-            with self._progress_lock:
-                self._progress.lots_seen += 1
+                with self._progress_lock:
+                    self._progress.lots_seen += 1
 
+        except Exception:
+            logger.error(
+                "backfill.region.exception",
+                exc_info=True,
+                extra={"region_id": region, "page_num": current_page_num},
+            )
+            raise
+
+        total_pages = len(lots_upserted_per_page)
+        duration_ms = int((time.monotonic() - region_start) * 1000)
         logger.info(
-            "backfill: region=%s done, %d rows processed",
-            region,
-            rows_processed,
+            "backfill.region.finish",
+            extra={
+                "region_id": region,
+                "total_rows": rows_processed,
+                "total_pages": total_pages,
+                "duration_ms": duration_ms,
+                "cancelled": cancelled,
+            },
         )

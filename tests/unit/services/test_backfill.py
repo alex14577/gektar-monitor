@@ -821,3 +821,201 @@ class TestDeltaTriggeredLog:
             r for r in caplog.records if r.message == "backfill.delta_triggered"
         ]
         assert not triggered, "backfill.delta_triggered must not be logged when not triggered"
+
+
+# ---------------------------------------------------------------------------
+# Test: structured observability logs (gektar_monitor-su21)
+# ---------------------------------------------------------------------------
+
+_LOGGER_NAME = "fis_monitor.services.backfill"
+
+
+class TestMaybeStartEntryLog:
+    """Invariant 1: backfill.maybe_start.entry logged on every maybe_start call."""
+
+    def test_entry_logged_with_payload(self, caplog: pytest.LogCaptureFixture) -> None:
+        svc, *_ = _make_service()
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.maybe_start(
+                _REGION_A, site_total=50, db_count=40, stop_event=stop, len_parsed_hint=2
+            )
+
+        entries = [r for r in caplog.records if r.message == "backfill.maybe_start.entry"]
+        assert entries, "backfill.maybe_start.entry must be logged"
+        rec = entries[0]
+        assert rec.region_id == _REGION_A  # type: ignore[attr-defined]
+        assert rec.site_total == 50  # type: ignore[attr-defined]
+        assert rec.db_count == 40  # type: ignore[attr-defined]
+        assert rec.len_hint == 2  # type: ignore[attr-defined]
+        # hint(2) + _DELTA_THRESHOLD(3)
+        assert rec.threshold_computed == 5  # type: ignore[attr-defined]
+        assert rec.currently_running is False  # type: ignore[attr-defined]
+
+
+class TestMaybeStartDecisionLog:
+    """Invariant 2: backfill.maybe_start.decision logged with correct decision field."""
+
+    def _decisions(self, caplog: pytest.LogCaptureFixture) -> list:
+        return [r for r in caplog.records if r.message == "backfill.maybe_start.decision"]
+
+    def test_decision_skip_none(self, caplog: pytest.LogCaptureFixture) -> None:
+        svc, *_ = _make_service()
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.maybe_start(_REGION_A, site_total=None, db_count=0, stop_event=stop)
+        recs = self._decisions(caplog)
+        assert recs and recs[0].decision == "skip_none"  # type: ignore[attr-defined]
+
+    def test_decision_skip_negative(self, caplog: pytest.LogCaptureFixture) -> None:
+        svc, *_ = _make_service()
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.maybe_start(_REGION_A, site_total=50, db_count=100, stop_event=stop)
+        recs = self._decisions(caplog)
+        assert recs and recs[0].decision == "skip_negative"  # type: ignore[attr-defined]
+
+    def test_decision_skip_threshold(self, caplog: pytest.LogCaptureFixture) -> None:
+        # delta=2, hint=0, threshold=3 → below threshold
+        svc, *_ = _make_service()
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.maybe_start(
+                _REGION_A, site_total=102, db_count=100, stop_event=stop, len_parsed_hint=0
+            )
+        recs = self._decisions(caplog)
+        assert recs and recs[0].decision == "skip_threshold"  # type: ignore[attr-defined]
+
+    def test_decision_trigger(self, caplog: pytest.LogCaptureFixture) -> None:
+        # delta=10, hint=0, threshold=3 → trigger
+        svc, *_ = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+            regions=[_REGION_A],
+        )
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.maybe_start(_REGION_A, site_total=110, db_count=100, stop_event=stop)
+        _wait_until_done(svc)
+        recs = self._decisions(caplog)
+        assert recs and recs[0].decision == "trigger"  # type: ignore[attr-defined]
+        assert recs[0].delta == 10  # type: ignore[attr-defined]
+
+    def test_decision_skip_running(self, caplog: pytest.LogCaptureFixture) -> None:
+        barrier = threading.Barrier(2)
+        done_event = threading.Event()
+
+        class SlowFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_callback=None):
+                barrier.wait()
+                done_event.wait(timeout=5.0)
+                return iter([])
+
+        svc, *_ = _make_service(fetcher=SlowFetcher())  # type: ignore[call-overload]
+        stop = threading.Event()
+        svc.start(stop)
+        barrier.wait()
+
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.maybe_start(_REGION_A, site_total=100, db_count=0, stop_event=stop)
+
+        done_event.set()
+        _wait_until_done(svc)
+        recs = [r for r in caplog.records if r.message == "backfill.maybe_start.decision"]
+        assert recs and recs[0].decision == "skip_running"  # type: ignore[attr-defined]
+
+
+class TestRegionStartFinishLog:
+    """Invariant 3: region.start + region.finish bracket each region; duration_ms >= 0."""
+
+    def test_region_start_and_finish_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        svc, *_ = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1), _make_row(2)]},
+            regions=[_REGION_A],
+        )
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.start(stop)
+            _wait_until_done(svc)
+
+        starts = [r for r in caplog.records if r.message == "backfill.region.start"]
+        finishes = [r for r in caplog.records if r.message == "backfill.region.finish"]
+        assert len(starts) == 1
+        assert starts[0].region_id == _REGION_A  # type: ignore[attr-defined]
+        assert len(finishes) == 1
+        rec = finishes[0]
+        assert rec.region_id == _REGION_A  # type: ignore[attr-defined]
+        assert rec.total_rows == 2  # type: ignore[attr-defined]
+        assert rec.duration_ms >= 0  # type: ignore[attr-defined]
+        assert rec.cancelled is False  # type: ignore[attr-defined]
+
+    def test_multiple_regions_each_get_start_finish(self, caplog: pytest.LogCaptureFixture) -> None:
+        svc, *_ = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)], _REGION_B: [_make_row(10)]},
+            regions=[_REGION_A, _REGION_B],
+        )
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.start(stop)
+            _wait_until_done(svc)
+
+        start_regions = {
+            r.region_id for r in caplog.records  # type: ignore[attr-defined]
+            if r.message == "backfill.region.start"
+        }
+        finish_regions = {
+            r.region_id for r in caplog.records  # type: ignore[attr-defined]
+            if r.message == "backfill.region.finish"
+        }
+        assert start_regions == {_REGION_A, _REGION_B}
+        assert finish_regions == {_REGION_A, _REGION_B}
+
+
+class TestRegionPageLog:
+    """Invariant 4: backfill.region.page logged per-page."""
+
+    def test_page_logged_per_page(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Fake fetcher that triggers page_callback 3 times → 3 page events."""
+        page_rows = [[_make_row(1)], [_make_row(2)], [_make_row(3)]]
+
+        class MultiPageFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_callback=None):
+                for page_num, rows in enumerate(page_rows, start=1):
+                    if page_callback is not None:
+                        page_callback(page_num, len(rows))
+                    yield from rows
+
+        svc = BackfillService(
+            fetcher=MultiPageFetcher(),  # type: ignore[arg-type]
+            lot_repo=FakeLotRepository(),
+            config_source=FakeConfigSource(regions=[_REGION_A]),
+            monitor_cycle=FakeMonitorCycleService(),
+            sleep_between_pages=0.0,
+        )
+        stop = threading.Event()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.start(stop)
+            _wait_until_done(svc)
+
+        page_logs = [r for r in caplog.records if r.message == "backfill.region.page"]
+        assert len(page_logs) == 3
+        page_nums = [r.page_num for r in page_logs]  # type: ignore[attr-defined]
+        assert page_nums == [1, 2, 3]
+        for rec in page_logs:
+            assert rec.region_id == _REGION_A  # type: ignore[attr-defined]
+            assert rec.rows_fetched == 1  # type: ignore[attr-defined]
+
+
+class TestCancelLog:
+    """Invariant 5: backfill.cancel.called logged on cancel()."""
+
+    def test_cancel_logs_called(self, caplog: pytest.LogCaptureFixture) -> None:
+        svc, *_ = _make_service()
+        with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+            svc.cancel()
+
+        cancel_logs = [r for r in caplog.records if r.message == "backfill.cancel.called"]
+        assert cancel_logs, "backfill.cancel.called must be logged"
+        rec = cancel_logs[0]
+        assert rec.was_running is False  # type: ignore[attr-defined]
