@@ -64,6 +64,10 @@
 
 ## Domain — модели и diff
 
+- **date_create (ФИС)** — `Lot.date_create: datetime`. Дата добавления записи лота в базу данных ФИС («DATE_CREATE» из колонки 10 таблицы `/cabinet/free-lot`). **Не является ЕГРН-датой.** Используется как cutoff при подписке (ADR-039) и как индикатор свежести в ленте. Отображается в карточке с подписью «Дата создания в ФИС». См. [[parser/cabinet-free-lot]] col 10, [[decisions/ADR-040-egrn-registration-date|ADR-040]].
+
+- **date_registry (ЕГРН)** — `Lot.date_registry: datetime | None`. Дата постановки участка на учёт в ЕГРН («Дата постановки на учет» с detail-страницы `/cabinet/free-lot-view?id=N`). Заполняется `EnrichmentService` при обогащении; `NULL` до первого обогащения. Формат хранения: datetime UTC midnight. Отображается в карточке рядом с `date_create` с подписью «Дата постановки на учёт в ЕГРН», скрывается если `NULL`. Не входит в `TrackedField` — изменение ЕГРН-даты не является бизнес-событием для `lots_history`. ADR: [[decisions/ADR-040-egrn-registration-date|ADR-040]]. См. [[parser/cabinet-free-lot-view]] → «Дата постановки на учет».
+
 - **compute_changes** — чистая функция `compute_changes(old: Lot | None, new: Lot, tracked: Sequence[TrackedField]) -> list[FieldChange]` в `domain/diff.py`. Вызывается репозиторием внутри `BEGIN IMMEDIATE` tx (ADR-016, R3-C2) — закрывает TOCTOU между `SELECT old` и `UPDATE`. Без I/O, полностью детерминирована.
 
 - **FieldChange / LotUpsertResult** — diff-протокол репозитория. `FieldChange.field` ограничен `TrackedField` Literal — SQL-identifier-инъекции исключены на уровне типа. Инвариант `LotUpsertResult`: `was_new=True ⇒ changes=[]` (history не пишется для новых лотов). См. [[data-model/lot]], [[decisions/ADR-016-repository-invariants-begin-immediate|ADR-016]].
@@ -372,6 +376,16 @@
 - **release archive** — самодостаточный архив для передачи клиенту: `fis-monitor-linux-x86_64-<version>.tar.gz` (Linux) или `.zip` (Windows). Содержит Python-бинарник (`bin/`, PyInstaller --onedir), bundled Playwright Chromium (`browsers/`), лаунчеры и README. Клиент распаковывает и запускает `run.sh` / `run.bat` — Python и `playwright install` на клиенте не нужны. Размер ~340 МБ. Собирается скриптом `scripts/build_release.sh` / `.ps1`. См. [[decisions/ADR-026-distribution-packaging-pyinstaller|ADR-026]], [[operations/release-build]].
 
 - **launcher** — скрипт `run.sh` (Linux) или `run.bat` (Windows), входящий в release archive. Единственная ответственность: установить `PLAYWRIGHT_BROWSERS_PATH` в bundled `browsers/` директорию и передать управление бинарнику с флагами `--data-dir=./var --host=127.0.0.1 --port=8000`. Не содержит бизнес-логики. Клиент никогда не вызывает бинарник напрямую.
+
+## Тестирование
+
+- **canonical-fake** — Единственная эталонная fake-реализация Protocol, живущая в `tests/fakes/<protocol_name>.py`. Сигнатура точно совпадает с Protocol (проверяется `mypy --strict`). Callsite-вариации — через subclass или параметр конструктора, не через отдельные файлы. Предотвращает drift между тест-контекстами. SSOT: [[architecture/09-test-strategy]] §Fake signature canon.
+
+- **pyramid-baseline** — Ориентировочное распределение тест-файлов по слоям: L1 ~10%, L2 ~45%, L3 ~30%, L4 ~10%, L5 ~5% (by file count). Non-binding: ориентир для ревью, не gate в CI. Дополнительный инвариант: LOC ratio test:code ≤2:1 (кроме парсеров и фикстур). SSOT: [[architecture/09-test-strategy]] §Pyramid baseline.
+
+- **wiring-test** — Тест, проверяющий что DI-граф (composition root / Container) собирается без ошибок конфигурации и типов. Инстанциирует реальные адаптеры с in-memory/tempfile backends. Принадлежит Layer 5 (smoke), не Layer 2 (unit). Мокирование контейнера в wiring-тесте — anti-pattern: уничтожает проверяемую ценность. SSOT: [[architecture/09-test-strategy]] §Wiring tests belong to Layer 5 (smoke).
+
+- **logging-satellite parametrize rule** — Тактика для logging-тестов: размер satellite-файла `test_*_logging.py` ≤120 строк (по `wc -l`); дублирующиеся (≥70% тела) fixtures между двумя+ файлами обязательно выносятся в shared conftest; однотипные assert «message contains X/Y/Z» одного события схлопываются в один `@pytest.mark.parametrize` тест. Разные события / разные уровни — параметризация не обязательна. SSOT: [[architecture/09-test-strategy]] §Logging tests.
 
 ## См. также
 
