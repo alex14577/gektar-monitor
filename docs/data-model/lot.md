@@ -129,4 +129,33 @@ class LotUpsertResult(BaseModel):
 
 `compute_changes(old: Lot | None, new: Lot, tracked: Sequence[TrackedField]) -> list[FieldChange]` живёт в `domain/diff.py`. Чистая функция.
 
-См. также: [[data-model/settings]] (LotUserState), [[data-model/notifications]], [[data-model/sse]].
+## LotFilters — критерии фильтрации для LotQueryService
+
+`@dataclass(frozen=True)` в `services/lot_query.py`. Все поля опциональны / по умолчанию пусты; комбинируются конъюнктивно в `_build_query`.
+
+```python
+@dataclass(frozen=True)
+class LotFilters:
+    regions: tuple[int, ...]          # numeric macro-region codes (legacy API path, /lots endpoint)
+    region_names: tuple[str, ...]     # display-name strings из SUBJECT_TITLE_BY_ID
+                                      # (web filter path, конвертируется из cookie view_filters)
+                                      # SQL: WHERE region IN (?, ?, ...) со строками
+    area_sqm_min: Decimal | None = None
+    area_sqm_max: Decimal | None = None
+    status: str | None = None         # валидируется против {"Свободен", "Зарезервирован"}
+    fts_query: str | None = None      # FTS5 — deferred (NotImplementedError)
+```
+
+**Пути использования:**
+- `/lots` API endpoint — передаёт `regions` (numeric), `region_names` пуст.
+- Web filter path (`POST /filters/view`, `GET /`) — передаёт `region_names` из cookie `view_filters` через `_view_filters_to_lot_filters`, `regions` пуст.
+
+**Текущее ограничение:** одновременное заполнение `regions` и `region_names` даёт AND двух IN-clauses → всегда 0 рядов. Нет текущих call-sites где это случается. Planned unification — chgu follow-up.
+
+**Преобразование из View-scope:** `_view_filters_to_lot_filters(view_filters: ViewFilters) -> LotFilters` в `web/routes/main.py` читает `view_filters.subjects` (list[str] display-names) → `LotFilters(region_names=tuple(subjects))`. Mapping site-id → display name через `SUBJECT_TITLE_BY_ID` в `domain/regions.py`.
+
+См. [[glossary#LotFilters]], [[decisions/ADR-035-three-scope-filter-model|ADR-035]] (View scope).
+
+## См. также
+
+[[data-model/settings]] (LotUserState), [[data-model/notifications]], [[data-model/sse]].

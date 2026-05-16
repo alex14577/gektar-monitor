@@ -10,16 +10,8 @@
 
   <div class="sidebar__group">
     <p class="sidebar__h">Субъект РФ</p>
-    <button class="select" type="button"
-            data-toggle-menu="filter-subjects-menu"
-            aria-haspopup="listbox" aria-expanded="false"
-            hx-get="/filters/subjects" hx-target="#filter-subjects-menu" hx-swap="innerHTML"
-            hx-trigger="click once">
-      <span>
-        {% if filters.subjects %}{{ filters.subjects | length }} выбран{{ 'о' if filters.subjects | length != 1 else '' }}{% else %}Все · {{ scope.subjects_count }}{% endif %}
-      </span>
-      <span class="select__caret">▾</span>
-    </button>
+    {% set oob = false %}
+    {% include "partials/_filter_trigger.html.jinja" %}
     <div id="filter-subjects-menu" data-menu role="dialog" aria-label="Фильтр по субъектам" tabindex="-1" hidden></div>
   </div>
 

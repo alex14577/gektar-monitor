@@ -202,25 +202,31 @@ def _build_catchup_context(
 def _view_filters_to_lot_filters(vf: ViewFilters) -> LotFilters:
     """Adapt the sidebar ``ViewFilters`` to the storage-level ``LotFilters``.
 
-    ``ViewFilters.subjects`` are RF subject codes serialised as strings (the
-    sidebar form sends them as ``<input value="77">``).  ``LotFilters.regions``
-    is ``tuple[int, ...]`` and matches against the TEXT ``lots.region`` column
-    via ``str(r)`` inside ``LotQueryService``.  Non-numeric / corrupted entries
-    are silently dropped — defensive against a stale cookie surviving a schema
-    bump.
+    ``ViewFilters.subjects`` are RF subject site-ids serialised as strings (the
+    sidebar form sends them as ``<input value="34">``).  Each site-id is looked
+    up in ``SUBJECT_TITLE_BY_ID`` to obtain the display name that matches the
+    TEXT value stored in ``lots.region`` (e.g. 34 → "Мурманская область").
+    These names are passed as ``LotFilters.region_names`` so the SQL layer
+    generates ``WHERE region IN ('Мурманская область', ...)``.
+
+    Non-numeric or unknown site-ids are silently dropped — defensive against a
+    stale cookie surviving a catalog bump.
 
     ``only_new`` / ``only_stars`` are user-state predicates not available at
     the SQL layer and are applied as an in-memory post-filter in
     ``_assemble_feed_zones``.
     """
-    regions: list[int] = []
+    region_names: list[str] = []
     for s in vf.subjects:
         try:
-            regions.append(int(s))
+            site_id = int(s)
         except (TypeError, ValueError):
             continue
+        name = SUBJECT_TITLE_BY_ID.get(site_id)
+        if name is not None:
+            region_names.append(name)
     return LotFilters(
-        regions=tuple(regions),
+        region_names=tuple(region_names),
         area_sqm_min=Decimal(vf.area_min) if vf.area_min is not None else None,
         area_sqm_max=Decimal(vf.area_max) if vf.area_max is not None else None,
     )
@@ -274,6 +280,47 @@ def _build_scope_context(settings: Settings) -> SimpleNamespace:
         macro_regions=list(settings.regions),
         subjects_count=len(SUBJECT_TITLE_BY_ID),
     )
+
+
+def build_feed_context(
+    *,
+    filters: ViewFilters,
+    lot_query: LotQueryService,
+    settings: Settings,
+    active_lot_count: int,
+) -> dict[str, object]:
+    """Build the template context dict for the feed zones partial.
+
+    Shared by GET / (full page render) and POST /filters/view (partial swap).
+    Callers provide the already-resolved dependencies so this function stays
+    a pure computation with no FastAPI Depends coupling.
+
+    Returns a dict ready to merge into a TemplateResponse context; keys:
+    ``zones``, ``archive_count``, ``filters_active``, ``health``,
+    ``filters`` (sidebar filter state), ``scope`` (subjects count).
+    The ``health`` entry uses ``active_lot_count`` so the caller need not
+    compute it again.
+    """
+    lot_filters = _view_filters_to_lot_filters(filters)
+    page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE)
+    subscribed_regions = frozenset(settings.regions)
+    zones, archive_count = _assemble_feed_zones(
+        page.items,
+        view_filters=filters,
+        subscribed_regions=subscribed_regions,
+    )
+    return {
+        "zones": zones,
+        "archive_count": archive_count,
+        "filters_active": _filters_are_active(filters),
+        "health": SimpleNamespace(
+            last_cycle_human="—",
+            total_lots=active_lot_count,
+            last_new_human="—",
+        ),
+        "filters": _build_filters_context(filters),
+        "scope": _build_scope_context(settings),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -334,17 +381,13 @@ async def feed_page(
     active_count = lot_repo.count_active()
 
     # ── Feed zones (server-rendered initial paint) ──────────────────────
-    # Query active lots applying sidebar filters; group by age into hot /
-    # today / archive.  At most _FEED_PAGE_SIZE lots are surfaced inline; if
-    # active_count exceeds this, the archive count under-reports — separate
-    # bd would add a dedicated COUNT(*) by age range.
-    lot_filters = _view_filters_to_lot_filters(parsed_filters)
-    page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE)
-    subscribed_regions = frozenset(settings.regions)
-    zones, archive_count = _assemble_feed_zones(
-        page.items,
-        view_filters=parsed_filters,
-        subscribed_regions=subscribed_regions,
+    # At most _FEED_PAGE_SIZE lots are surfaced inline; lots beyond this fall
+    # into archive_count only (separate bd for dedicated COUNT by age range).
+    feed_ctx = build_feed_context(
+        filters=parsed_filters,
+        lot_query=lot_query,
+        settings=settings,
+        active_lot_count=active_count,
     )
     catchup_ctx = _build_catchup_context(
         is_dismissed=catchup_svc.is_dismissed(now),
@@ -366,19 +409,11 @@ async def feed_page(
             error_short="",
             id=0,
         ),
-        # MVP-stub: health derivation — separate bd
-        "health": SimpleNamespace(
-            last_cycle_human="—",
-            total_lots=active_count,
-            last_new_human="—",
-        ),
-        "zones": zones,
+        **feed_ctx,
         "catchup": catchup_ctx,
         "scope": _build_scope_context(settings),
         "filters": _build_filters_context(parsed_filters),
         "dnd": _build_dnd_context(dnd_svc, now),
-        "archive_count": archive_count,
-        "filters_active": _filters_are_active(parsed_filters),
         # MVP-stub: browser tab title — separate bd (lot counter from SSE)
         "title_format": "(0) Монитор гектара",
     }

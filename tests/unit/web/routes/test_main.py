@@ -26,7 +26,6 @@ from fastapi.testclient import TestClient
 from fis_monitor.domain.interfaces import ConfigSubscription
 from fis_monitor.domain.models import LotUserState, SessionStatus, Settings
 from fis_monitor.services.login import LoginStatus
-from fis_monitor.services.lot_query import LotFilters, Page
 from fis_monitor.services.view_filters import ViewFilters, serialize
 from fis_monitor.web.deps import (
     get_catchup_dismiss,
@@ -43,6 +42,10 @@ from fis_monitor.web.deps import (
 from fis_monitor.web.routes.main import router
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 from tests.factories import make_settings
+from tests.unit.web.routes.conftest import FakeLotQueryService, FakeLotRepo
+
+# Local aliases so existing test code keeps working without mass rename.
+FakeLotQuery = FakeLotQueryService
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -143,31 +146,6 @@ class FakeUserStateRepo:
         raise NotImplementedError
 
 
-class FakeLotRepo:
-    """Fake LotRepository — only ``count_active()`` is exercised by the feed.
-
-    Other Protocol methods raise NotImplementedError so a regression that
-    starts touching them fails loud (mirrors the FakeUserStateRepo pattern).
-    """
-
-    def __init__(self, *, active_count: int = 0) -> None:
-        self._active_count = active_count
-        self.count_active_calls: int = 0
-
-    def count_active(self) -> int:
-        self.count_active_calls += 1
-        return self._active_count
-
-    def get(self, lot_id: int) -> Any:
-        raise NotImplementedError
-
-    def upsert(self, lot: Any, *, tracked: Any) -> Any:
-        raise NotImplementedError
-
-    def mark_inactive(self, lot_id: int, reason: str, at: Any) -> None:
-        raise NotImplementedError
-
-
 class FakeClock:
     """Fake Clock — fixed timestamp; ``now()`` returns the same value each call."""
 
@@ -181,27 +159,6 @@ class FakeClock:
 
     def monotonic(self) -> float:
         return 0.0
-
-
-class FakeLotQuery:
-    """Fake LotQueryService — only ``search()`` is exercised by the feed route.
-
-    Returns the items configured at construction time (already a tuple of
-    ``LotUserDTO``), wrapped in a ``Page`` with ``next_cursor=None``.
-    """
-
-    def __init__(self, items: tuple[Any, ...] = ()) -> None:
-        self._items = items
-        self.search_calls: list[LotFilters] = []
-
-    def search(
-        self, filters: LotFilters, *, page_size: int = 50, cursor: str | None = None
-    ) -> Page[Any]:
-        self.search_calls.append(filters)
-        return Page(items=self._items, next_cursor=None, has_more=False)
-
-    def get_by_id(self, lot_id: int) -> Any:
-        raise NotImplementedError
 
 
 class FakeSessionProbe:
@@ -535,8 +492,16 @@ def test_feed_only_stars_filter_hides_unstarred() -> None:
 
 
 def test_feed_subjects_filter_passed_to_lot_query() -> None:
-    """ViewFilters.subjects (numeric strings) flow through to LotFilters.regions."""
-    cookie = serialize(ViewFilters(subjects=["77", "16", "garbage"]))
+    """ViewFilters.subjects flow through to LotFilters.region_names via display names.
+
+    Site-ids are looked up in SUBJECT_TITLE_BY_ID and translated to the
+    TEXT display names stored in lots.region (e.g. 27 → "Республика Карелия").
+    Unknown IDs (not in catalog) and non-numeric strings are silently dropped.
+    """
+    from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
+
+    # Use real catalog IDs (27, 34) — both exist in SUBJECT_TITLE_BY_ID
+    cookie = serialize(ViewFilters(subjects=["27", "34", "garbage"]))
     fake_lot_query = FakeLotQuery(items=())
     app, _, _ = _make_app(lot_query=fake_lot_query)
     with TestClient(app, raise_server_exceptions=True) as client:
@@ -544,8 +509,9 @@ def test_feed_subjects_filter_passed_to_lot_query() -> None:
     assert resp.status_code == 200
     assert len(fake_lot_query.search_calls) == 1
     used = fake_lot_query.search_calls[0]
-    # Numeric strings parsed; "garbage" silently dropped
-    assert used.regions == (77, 16)
+    # Translated to display names; "garbage" silently dropped
+    assert set(used.region_names) == {SUBJECT_TITLE_BY_ID[27], SUBJECT_TITLE_BY_ID[34]}
+    assert used.regions == ()  # int-based field no longer used for subject filtering
 
 
 def test_scope_subjects_count_reflects_full_catalog() -> None:

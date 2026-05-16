@@ -5,7 +5,7 @@ View-filters are ephemeral session state — they live in a signed JSON cookie
 
 Endpoints:
   GET  /filters/subjects — partial HTML with subject checkboxes (modal/popover).
-  POST /filters/view     — apply filters; 204 + Set-Cookie.
+  POST /filters/view     — apply filters; 200 HTML (feed partial) + Set-Cookie.
   POST /filters/clear    — reset filters; 204 + expiring Set-Cookie.
 
 Cookie design:
@@ -24,6 +24,7 @@ DI: ViewFiltersService is injected via get_view_filters_service() from deps.py.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -31,12 +32,22 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
+from fis_monitor.domain.interfaces import LotRepository
+from fis_monitor.domain.models import Settings
 from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
+from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.view_filters import (
     ViewFilters,
     ViewFiltersService,
 )
-from fis_monitor.web.deps import get_templates, get_view_filters_service
+from fis_monitor.web.deps import (
+    get_config_source,
+    get_lot_query,
+    get_lot_repo,
+    get_templates,
+    get_view_filters_service,
+)
+from fis_monitor.web.routes.main import build_feed_context
 
 __all__ = ["router"]
 
@@ -144,17 +155,21 @@ def get_subjects(
     )
 
 
-@router.post("/view", status_code=204, response_model=None)
+@router.post("/view", status_code=200, response_model=None)
 def post_view_filters(
     request: Request,
     svc: ViewFiltersService = Depends(get_view_filters_service),
+    config_source: object = Depends(get_config_source),
+    lot_repo: LotRepository = Depends(get_lot_repo),
+    lot_query: LotQueryService = Depends(get_lot_query),
+    templates: Jinja2Templates = Depends(get_templates),
     subjects: Annotated[list[str], Form()] = [],  # noqa: B006 — FastAPI never mutates this default; reassigning to None would break repeated-key parsing
     area_min: Annotated[str | None, Form()] = None,
     area_max: Annotated[str | None, Form()] = None,
     only_new: Annotated[str | None, Form()] = None,
     only_stars: Annotated[str | None, Form()] = None,
 ) -> Response:
-    """Apply view filters submitted as application/x-www-form-urlencoded by htmx.
+    """Apply view filters and return the rendered feed partial for htmx outerHTML swap.
 
     Unknown form fields are silently ignored — form-data has no equivalent of
     Pydantic extra='forbid'. This is acceptable because only parsed values are
@@ -163,7 +178,10 @@ def post_view_filters(
     Cross-field validation (area_min <= area_max) is enforced by the
     ViewFilters model_validator; invalid input yields 422 (gektar_monitor-gho).
 
-    Returns 204 No Content + Set-Cookie header.
+    Returns 200 text/html with the ``#feed`` partial + Set-Cookie header so
+    htmx ``hx-target="#feed" hx-swap="outerHTML"`` updates the feed without a
+    full-page reload.  Pagination resets to page 1 (POST always renders from
+    the top of the result set).
     """
     if len(subjects) > 50:
         raise HTTPException(status_code=422, detail="subjects: at most 50 items allowed")
@@ -191,8 +209,30 @@ def post_view_filters(
         # Pydantic prefixes user-defined ValueError messages with "Value error, ".
         detail = first_msg.removeprefix("Value error, ")
         raise HTTPException(status_code=422, detail=detail) from exc
+
     cookie_value = svc.serialize(filters)
-    response = Response(status_code=204)
+    settings: Settings = config_source.current()  # type: ignore[attr-defined]
+    ctx = build_feed_context(
+        filters=filters,
+        lot_query=lot_query,
+        settings=settings,
+        active_lot_count=lot_repo.count_active(),
+    )
+    # Lot partials check session.expired to disable links when session is gone.
+    # The filter POST endpoint has no session probe dep; the user is on the main
+    # page so the session is active. A default non-expired stub is sufficient.
+    ctx["session"] = SimpleNamespace(expired=False, expires_soon=False, expires_at_hhmm="")
+    # Emit out-of-band button so htmx refreshes the subject-filter trigger
+    # (id="filter-trigger") that lives outside #feed and is not touched by the
+    # primary outerHTML swap.
+    ctx["render_oob"] = True
+
+    response = templates.TemplateResponse(
+        request,
+        "partials/_feed_lots.html.jinja",
+        ctx,
+        status_code=200,
+    )
     _set_filter_cookie(response, cookie_value)
     _log.debug("view_filters applied: %r", cookie_value)
     return response

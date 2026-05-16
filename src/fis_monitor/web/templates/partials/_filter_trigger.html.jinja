@@ -1,0 +1,23 @@
+{# _filter_trigger.html.jinja — subject-filter trigger button fragment.
+   Rendered by:
+     - GET /  (initial full render, oob=False)  — inside _sidebar_filters.html.jinja
+     - POST /filters/view (htmx swap, oob=True) — appended to _feed_lots.html.jinja
+       as an out-of-band swap so htmx updates the button outside #feed.
+
+   Variables:
+     filters         — ViewFilters instance (subjects, etc.)
+     scope           — SimpleNamespace with subjects_count
+     oob             — bool; when True adds hx-swap-oob="true" attribute
+#}
+<button id="filter-trigger"
+        class="select" type="button"
+        data-toggle-menu="filter-subjects-menu"
+        aria-haspopup="listbox" aria-expanded="false"
+        hx-get="/filters/subjects" hx-target="#filter-subjects-menu" hx-swap="innerHTML"
+        hx-trigger="click once"
+        {% if oob %}hx-swap-oob="true"{% endif %}>
+  <span>
+    {% if filters.subjects %}{{ filters.subjects | length }} выбран{{ 'о' if filters.subjects | length != 1 else '' }}{% else %}Все · {{ scope.subjects_count }}{% endif %}
+  </span>
+  <span class="select__caret">▾</span>
+</button>

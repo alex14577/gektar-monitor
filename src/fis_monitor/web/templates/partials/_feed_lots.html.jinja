@@ -1,0 +1,89 @@
+{# Feed lots partial — rendered by GET / (via feed.html.jinja) and POST /filters/view.
+   htmx target: hx-target="#feed" hx-swap="outerHTML"
+   Variables: zones, archive_count, filters_active, health, filters, scope
+   Optional: render_oob (bool, default false) — when true, appends an out-of-band
+             <button id="filter-trigger" hx-swap-oob="true"> so htmx refreshes
+             the subject-filter trigger button outside #feed on POST responses.
+#}
+<div id="feed"
+     hx-ext="sse"
+     sse-connect="/events"
+     sse-swap="lot.new,lot.status"
+     hx-target="this"
+     hx-swap="afterbegin"
+     aria-live="polite"
+     aria-relevant="additions text">
+
+  {# HOT (≤ 1 hour) #}
+  {% if zones.hot %}
+    <section class="zone zone--hot" aria-label="Горячее (новее 1 часа)">
+      <header class="zone__head">
+        <h2 class="zone__title">🔥 Горячее <span class="zone__title-count">· {{ zones.hot|length }} лот{{ 'а' if zones.hot|length in [2,3,4] else ('' if zones.hot|length == 1 else 'ов') }} · ≤ 1 часа</span></h2>
+      </header>
+      {% for lot in zones.hot %}
+        {% include "partials/_lot_poster.html.jinja" %}
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {# TODAY (1h–24h) #}
+  {% if zones.today %}
+    <section class="zone" aria-label="Сегодня">
+      <header class="zone__head">
+        <h2 class="zone__title">Сегодня <span class="zone__title-count">· {{ zones.today|length }} лот{{ 'а' if zones.today|length in [2,3,4] else ('' if zones.today|length == 1 else 'ов') }} · 1 ч – 24 ч</span></h2>
+      </header>
+      {% for lot in zones.today %}
+        {% include "partials/_lot_list.html.jinja" %}
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {# Loading state: в БД ещё нет лотов и нет активных фильтров — сервис ещё качает первую партию. #}
+  {# Скрывается через CSS как только в #feed появляется первый ребёнок-лот (через :has). #}
+  {% if not zones.hot and not zones.today and not filters_active and health.total_lots == 0 %}
+  <div id="feed-loading" class="zone" style="text-align:center; padding:48px 24px;">
+    <span class="spinner-dots" aria-label="Загружаем первую партию лотов" style="margin: 0 auto 12px;">
+      <span class="spinner-dots__dot"></span>
+      <span class="spinner-dots__dot"></span>
+      <span class="spinner-dots__dot"></span>
+    </span>
+    <p style="margin:0; color: var(--ink-2);">Загружаем первую партию лотов…</p>
+    <p style="margin:6px 0 0; color: var(--muted); font-size:0.875rem;">Сервис обращается к сайту, это может занять до минуты.</p>
+  </div>
+  {% endif %}
+
+  {# ARCHIVE (older + reveal-on-demand) — скрыто пока нечего показывать (archive_count stub=0). #}
+  {% if archive_count and archive_count > 0 %}
+  <section class="zone zone--archive" aria-label="Архив">
+    <button class="btn btn--ghost btn--full" type="button"
+            hx-get="/lots?page=2"
+            hx-target="closest .zone" hx-swap="outerHTML"
+            style="justify-content: space-between; padding: 12px 16px;">
+      <span style="display:inline-flex; gap:10px; align-items:center;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        Показать ещё <b style="margin-left: 4px;">{{ archive_count }}</b> старых лотов из базы
+      </span>
+      <span style="color: var(--muted); font-size: 0.8125rem;">пагинация по 50</span>
+    </button>
+  </section>
+  {% endif %}
+
+  {# Empty state for active filters #}
+  {% if not zones.hot and not zones.today and filters_active %}
+    <div class="zone" style="text-align: center; padding: 48px 24px;">
+      <p style="margin: 0; color: var(--ink-2);">Ничего не подходит под текущие фильтры.</p>
+      <p style="margin: 6px 0 14px; color: var(--muted); font-size: 0.875rem;">Снимите часть, чтобы увидеть остальное.</p>
+      <button class="btn" hx-post="/filters/clear" hx-target="body">Очистить фильтры</button>
+    </div>
+  {% endif %}
+
+</div>{# /#feed #}
+
+{# Out-of-band swap: update subject-filter trigger button (outside #feed) on POST.
+   htmx processes elements with hx-swap-oob="true" as secondary swaps regardless
+   of the primary hx-target. Only emitted when render_oob is truthy (POST path).
+   GET / renders the button inline via _sidebar_filters.html.jinja instead. #}
+{% if render_oob | default(false) %}
+{% set oob = true %}
+{% include "partials/_filter_trigger.html.jinja" %}
+{% endif %}

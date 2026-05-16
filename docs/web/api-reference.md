@@ -327,7 +327,31 @@ Wizard первого запуска. FSM: `not_started → regions_set → smtp
 
 HTML главного экрана (feed). Доступен только при `OnboardingState=COMPLETED` (gate middleware гарантирует это до роута). Шаблон `feed.html.jinja`.
 
-**Помечен** `include_in_schema=False`. Контекст: `SessionStatus` (через `SessionProbe`), `Settings.interval_minutes`, MVP-заглушки для lot-feed, health, scope, filters (заполняются в будущих bd-тасках).
+**Помечен** `include_in_schema=False`. Контекст: `SessionStatus` (через `SessionProbe`), `Settings.interval_minutes`, активные лоты через `LotQueryService`. Cookie `view_filters` читается через `ViewFiltersService.deserialize` и конвертируется в `LotFilters.region_names` через `_view_filters_to_lot_filters`. Рендеринг `#feed` происходит через `build_feed_context` (shared helper с `POST /filters/view`). Шаблон подключается к SSE-каналам `/sse/lots` и `/sse/status` самостоятельно через htmx-sse.
+
+---
+
+### POST /filters/view
+
+Обновить ленту лотов при изменении фильтров (htmx endpoint).
+
+**Помечен** `include_in_schema=False`.
+
+**Request:** `application/x-www-form-urlencoded`, form-data с выбранными субъектами.
+
+**Response:**
+
+| Код | Content-Type | Тело | Дополнительно |
+|-----|-------------|------|---------------|
+| 200 | `text/html` | rendered `<div id="feed">` + OOB-блок `<div id="filter-trigger" hx-swap-oob="true">` | `Set-Cookie: view_filters=<serialized>; Path=/; HttpOnly; SameSite=Lax` |
+
+**htmx contract:**
+- `hx-target="#feed"`, `hx-swap="outerHTML"` — заменяет `#feed` основным телом ответа.
+- OOB-блок `id="filter-trigger"` обновляет кнопку-триггер в сайдбаре (вне `#feed`), используя htmx out-of-band swap (см. [[glossary#htmx OOB swap]]).
+
+**Cookie persistence:** сохранённые фильтры читаются `GET /` при следующей загрузке страницы через `ViewFiltersService.deserialize` → `_view_filters_to_lot_filters` → `LotFilters.region_names`.
+
+**Empty-state:** «Ничего не подходит» рендерится ВНУТРИ `<div id="feed">` (не снаружи) — иначе outerHTML-swap его не задевает.
 
 ---
 
