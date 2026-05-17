@@ -169,7 +169,7 @@ def _build_catchup_context(
 
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def feed_page(
+def feed_page(
     request: Request,
     config_source: object = Depends(get_config_source),
     session_probe: SessionProbe = Depends(get_session_probe),

@@ -17,6 +17,8 @@ Design choices:
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -69,9 +71,32 @@ class OnboardingGateMiddleware:
     (i.e. ``current()`` and ``url_for_current_step()``).
     """
 
+    _CACHE_TTL = 1.0  # seconds
+
     def __init__(self, app: ASGIApp, *, svc: OnboardingQuery) -> None:
         self._app = app
         self._svc = svc
+        self._cache: tuple[object, str, float] | None = None  # (state, url, expires_at)
+
+    async def _get_state_and_url(self) -> tuple[object, str]:
+        """Return (state, url_for_current_step) — both offloaded via asyncio.to_thread.
+
+        Race note: cache miss is intentionally lock-free — concurrent misses
+        issue parallel to_thread reads and last-writer-wins on ``_cache``.
+        Values are idempotent (same FSM state), so the race is harmless;
+        the extra DB hits are bounded by the TTL window. Trade simplicity
+        over a lock that would serialize all cold-path requests.
+        """
+        now = time.monotonic()
+        if self._cache is not None and now < self._cache[2]:
+            return self._cache[0], self._cache[1]
+
+        def _read() -> tuple[object, str]:
+            return self._svc.current(), self._svc.url_for_current_step()
+
+        state, url = await asyncio.to_thread(_read)
+        self._cache = (state, url, now + self._CACHE_TTL)
+        return state, url
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -98,11 +123,10 @@ class OnboardingGateMiddleware:
             await self._app(scope, receive, send)
             return
 
-        # Read onboarding state exactly once per non-whitelisted request.
-        state = self._svc.current()
+        # Read onboarding state + redirect URL (TTL-cached; I/O offloaded to thread-pool).
+        state, redirect_url = await self._get_state_and_url()
         if str(state) != _COMPLETED_VALUE:
-            target = self._svc.url_for_current_step()
-            await self._send_redirect(send, target)
+            await self._send_redirect(send, redirect_url)
             return
 
         await self._app(scope, receive, send)
