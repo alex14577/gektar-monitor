@@ -87,7 +87,7 @@ from fis_monitor.infra.thread_supervisor import ThreadSupervisor
 from fis_monitor.utils.log import setup_logging
 from fis_monitor.utils.log_filters import StackPIIFilter
 from fis_monitor.utils.log_level import default_log_level
-from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
+from fis_monitor.web.middleware import CspMiddleware, CsrfHostOriginMiddleware, loopback_csrf_config
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
 from fis_monitor.web.routes import (
     auth,
@@ -446,7 +446,9 @@ def create_app(
         app.include_router(r)
 
     # --- Middleware (last add_middleware = outermost ASGI layer) ------------
-    # OnboardingGate is inner (closer to route handlers); CSRF is outer.
+    # Stack (inner → outer): OnboardingGate → CSRF → CSP.
+    # CSP is outermost so the header is added to every response regardless of
+    # which inner layer terminates the request (including 421 / 302 redirects).
     # _LazyOnboardingProxy defers Container lookup until request time, after
     # lifespan startup has populated app.state.container.
     app.add_middleware(OnboardingGateMiddleware, svc=_LazyOnboardingProxy(app))
@@ -459,6 +461,7 @@ def create_app(
         host_allowlist=host_allowlist,
         origin_whitelist=origin_whitelist,
     )
+    app.add_middleware(CspMiddleware)
 
     return app
 

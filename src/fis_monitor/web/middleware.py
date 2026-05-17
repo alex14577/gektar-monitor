@@ -95,6 +95,59 @@ class CsrfHostOriginMiddleware:
         )
 
 
+class CspMiddleware:
+    """Add Content-Security-Policy header to every HTTP response.
+
+    Policy is defined at construction time and injected verbatim into the
+    ``Content-Security-Policy`` response header.  Follows the same pure-ASGI
+    class pattern as ``CsrfHostOriginMiddleware`` to avoid Starlette streaming
+    issues (see Starlette #1012).
+
+    Usage::
+
+        app.add_middleware(CspMiddleware)
+        # or with a custom policy:
+        app.add_middleware(CspMiddleware, policy=MY_POLICY)
+    """
+
+    # TODO(bd b5c follow-up): Remove 'unsafe-inline' from script-src once all
+    # inline <script> blocks in templates are extracted to /static/*.js files.
+    DEFAULT_POLICY: str = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        policy: str = DEFAULT_POLICY,
+    ) -> None:
+        self._app = app
+        self._policy_bytes: bytes = policy.encode("latin-1")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        async def send_with_csp(message: object) -> None:
+            if isinstance(message, dict) and message.get("type") == "http.response.start":
+                headers: list[tuple[bytes, bytes]] = list(message.get("headers", []))
+                headers.append((b"content-security-policy", self._policy_bytes))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self._app(scope, receive, send_with_csp)
+
+
 def loopback_csrf_config(*, port: int) -> tuple[frozenset[str], frozenset[str]]:
     """Return (host_allowlist, origin_whitelist) for loopback-only deployment.
 
