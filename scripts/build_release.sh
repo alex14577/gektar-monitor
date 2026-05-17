@@ -139,8 +139,51 @@ fi
 # ---------------------------------------------------------------------------
 # Step 3: Download bundled Playwright Chromium
 # ---------------------------------------------------------------------------
+# Playwright pins a hardcoded list of supported host platforms per release.
+# On a newer Ubuntu than the pinned playwright version knows about, install
+# fails with "Playwright does not support chromium on ubuntuXX.YY-x64".
+# Ubuntu LTS releases are ABI-compatible enough for the prebuilt Chromium —
+# fall back to the newest known LTS via PLAYWRIGHT_HOST_PLATFORM_OVERRIDE
+# (supported since playwright 1.42). Manual override via env var is respected.
+# Read distro identity in a subshell so /etc/os-release variables don't
+# leak into this script's namespace (the file is designed for sourcing per
+# freedesktop spec, but sourcing pollutes our locals).
+PW_OVERRIDE="${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-}"
+if [[ -z "$PW_OVERRIDE" && -r /etc/os-release ]]; then
+    os_id=$(. /etc/os-release && printf '%s' "${ID:-}")
+    os_ver=$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")
+    case "$os_id" in
+        ubuntu)
+            # Bump both the supported list AND the fallback target when
+            # upgrading playwright (e.g. 1.59+ adds ubuntu26.04).
+            case "$os_ver" in
+                20.04|22.04|24.04) ;;  # natively supported by playwright 1.58
+                *)
+                    # Override must include arch suffix — registry table is keyed
+                    # by "ubuntuXX.YY-x64", not "ubuntuXX.YY". Without suffix the
+                    # download URL lookup returns empty and install aborts.
+                    arch=$(uname -m)
+                    case "$arch" in
+                        x86_64) pw_arch="x64" ;;
+                        aarch64|arm64) pw_arch="arm64" ;;
+                        # ARM32 (armv7l/armhf) is intentionally unsupported —
+                        # playwright ships no chromium build for it.
+                        *) die "Unsupported arch for playwright override: $arch" ;;
+                    esac
+                    PW_OVERRIDE="ubuntu24.04-${pw_arch}"
+                    log "Unknown Ubuntu ${os_ver:-?} — overriding playwright host to ${PW_OVERRIDE}"
+                    ;;
+            esac
+            ;;
+        "") ;;  # /etc/os-release without ID — skip silently
+        *) log "Non-ubuntu Linux (${os_id}), skipping playwright host override" ;;
+    esac
+fi
+
 log "Downloading Playwright Chromium (this may take a while)..."
-PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR" "$VENV_DIR/bin/playwright" install chromium
+PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$PW_OVERRIDE" \
+PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR" \
+    "$VENV_DIR/bin/playwright" install chromium
 
 # ---------------------------------------------------------------------------
 # Step 4: Run PyInstaller
