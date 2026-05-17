@@ -262,7 +262,9 @@
 
 - **CsrfHostOriginMiddleware** (`web/middleware.py`) — pure-ASGI middleware (НЕ Starlette `BaseHTTPMiddleware` — избегает streaming-проблем): на **state-changing methods** (POST/PUT/PATCH/DELETE) проверяет `Host` против allow-list И `Origin` против whitelist (точное совпадение, lower-case normalised на конструкторе). Mismatch → **421 Misdirected Request** (унифицировано Host- и Origin-fail per [[decisions/ADR-011-dns-rebinding-host-allowlist|ADR-011]] правка). Safe methods (GET/HEAD/OPTIONS) пропускаются. `scope["type"] != "http"` (lifespan/websocket) — early-return. Реализовано в oxy.1.
 
-- **loopback_csrf_config** (`web/middleware.py`) — SSOT-фабрика `(port: int) -> (host_allowlist: frozenset[str], origin_whitelist: frozenset[str])`. Возвращает frozensets для `127.0.0.1:<port>` + `localhost:<port>`. Потребляется всеми точками сборки middleware — устраняет дублирование host-литералов. Реализовано в oxy.1.
+- **loopback_csrf_config** (`web/middleware.py`) — backward-compat обёртка над `csrf_config_for_bind(host="127.0.0.1", port=port)`. Возвращает frozensets для `127.0.0.1:<port>` + `localhost:<port>` + `[::1]:<port>`. Реализовано в oxy.1; deprecated в bd `gektar_monitor-2131` — предпочтительно `csrf_config_for_bind`.
+
+- **csrf_config_for_bind** (`web/middleware.py`) — SSOT-фабрика `(host: str, port: int) -> (host_allowlist: frozenset[str], origin_whitelist: frozenset[str])`. Для loopback-бинда эквивалентна `loopback_csrf_config`. Для `0.0.0.0` добавляет detected non-loopback IPv4 через `socket.gethostbyname_ex` (best-effort). Для конкретного non-loopback IP — только этот адрес. DI-seam `_local_ipv4s` для тестов без реального socket. ADR-011 + [[decisions/ADR-043-non-loopback-bind-for-wsl|ADR-043]].
 
 ## Сервисы (Wave 8)
 

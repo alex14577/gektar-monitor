@@ -87,7 +87,11 @@ from fis_monitor.infra.thread_supervisor import ThreadSupervisor
 from fis_monitor.utils.log import setup_logging
 from fis_monitor.utils.log_filters import StackPIIFilter
 from fis_monitor.utils.log_level import default_log_level
-from fis_monitor.web.middleware import CspMiddleware, CsrfHostOriginMiddleware, loopback_csrf_config
+from fis_monitor.web.middleware import (
+    CspMiddleware,
+    CsrfHostOriginMiddleware,
+    csrf_config_for_bind,
+)
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
 from fis_monitor.web.routes import (
     auth,
@@ -380,6 +384,7 @@ def create_app(
     *,
     container_factory: ContainerFactory,
     locker_factory: LockerFactory = _default_locker_factory,
+    host: str = "127.0.0.1",
     port: int = 8000,
 ) -> FastAPI:
     """Create and return a FastAPI instance with lifespan, routes, and middleware.
@@ -401,8 +406,11 @@ def create_app(
                            ``composition.build_container``; tests pass a fake.
         locker_factory:    DI seam for tests — defaults to
                            ``FileLocker(data_dir / "app.lock")``.
+        host:              Bind address.  Used together with ``port`` to derive
+                           CSRF allow-lists via ``csrf_config_for_bind``.
+                           Defaults to ``"127.0.0.1"`` (loopback-only).
         port:              TCP port the server will listen on.  Used to derive
-                           loopback CSRF allow-lists.  Defaults to 8000.
+                           CSRF allow-lists.  Defaults to 8000.
 
     Returns:
         Configured ``FastAPI`` instance.  Start it with uvicorn or ASGI runner.
@@ -452,7 +460,7 @@ def create_app(
     # _LazyOnboardingProxy defers Container lookup until request time, after
     # lifespan startup has populated app.state.container.
     app.add_middleware(OnboardingGateMiddleware, svc=_LazyOnboardingProxy(app))
-    host_allowlist, origin_whitelist = loopback_csrf_config(port=port)
+    host_allowlist, origin_whitelist = csrf_config_for_bind(host=host, port=port)
     # Store origin_whitelist on app.state so get_csrf_origin_whitelist() in
     # deps.py can serve it to the SSE events route without coupling to container.
     app.state.csrf_origin_whitelist = origin_whitelist
@@ -487,8 +495,23 @@ def main() -> None:
         default=Path("./var"),
         help="Application data directory (DB, lock file).  Created if absent.",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Bind address.")
-    parser.add_argument("--port", type=int, default=8000, help="TCP port.")
+    import os
+    import sys as _sys
+
+    _default_host = os.getenv("FIS_MONITOR_HOST", "127.0.0.1")
+    _default_port = int(os.getenv("FIS_MONITOR_PORT", "8000"))
+
+    parser.add_argument(
+        "--host",
+        default=_default_host,
+        help="Bind address (env: FIS_MONITOR_HOST, default: 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=_default_port,
+        help="TCP port (env: FIS_MONITOR_PORT, default: 8000).",
+    )
     args = parser.parse_args()
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
@@ -497,9 +520,6 @@ def main() -> None:
     # (e.g. build_container failures).  Uses stderr so it does not mix with
     # stdout in systemd journal.  Lifespan startup will replace it via the
     # idempotent setup_logging call.
-    import os
-    import sys as _sys
-
     _json = os.getenv("LOG_JSON", "1") == "1"
     setup_logging(
         clock=SystemClock(),
@@ -508,6 +528,17 @@ def main() -> None:
         json_format=_json,
         filters=[StackPIIFilter()],
     )
+
+    _log = logging.getLogger(__name__)
+
+    _loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    if args.host not in _loopback_hosts:
+        _log.warning(
+            "Binding to non-loopback host %s — exposes service on network. "
+            "Use only in trusted dev environments. "
+            "To revert: set FIS_MONITOR_HOST=127.0.0.1 or omit --host.",
+            args.host,
+        )
 
     # importlib.import_module avoids a static import statement that would
     # violate the import-linter contract: app and composition are peers in the
@@ -520,6 +551,7 @@ def main() -> None:
     application = create_app(
         args.data_dir,
         container_factory=build_container,
+        host=args.host,
         port=args.port,
     )
     uvicorn.run(application, host=args.host, port=args.port)

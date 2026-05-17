@@ -153,19 +153,86 @@ def loopback_csrf_config(*, port: int) -> tuple[frozenset[str], frozenset[str]]:
     ``CsrfHostOriginMiddleware``. Useful for the lifespan hook
     (build_container's caller) to avoid hand-rolling these sets in every
     entrypoint.
+
+    .. deprecated::
+        Prefer ``csrf_config_for_bind(host="127.0.0.1", port=port)`` which
+        supports non-loopback binds (e.g. ``0.0.0.0`` for WSL→Windows access).
+        Kept for backwards compatibility; delegates to the new helper.
     """
-    host_allowlist = frozenset(
+    return csrf_config_for_bind(host="127.0.0.1", port=port)
+
+
+def _get_local_ipv4s() -> list[str]:
+    """Return non-loopback local IPv4 addresses via best-effort socket lookup.
+
+    Returns an empty list on any failure — callers must tolerate absence.
+    """
+    import socket
+
+    try:
+        _, _, addr_list = socket.gethostbyname_ex(socket.gethostname())
+        return [
+            addr
+            for addr in addr_list
+            if addr and not addr.startswith("127.") and addr != "::1"
+        ]
+    except OSError:
+        return []
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def csrf_config_for_bind(
+    *,
+    host: str,
+    port: int,
+    _local_ipv4s: list[str] | None = None,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return (host_allowlist, origin_whitelist) for the given bind address.
+
+    For loopback binds (``127.0.0.1``, ``localhost``, ``::1``) the result is
+    identical to the original ``loopback_csrf_config``.
+
+    For ``0.0.0.0`` the loopback set is extended with the machine's detected
+    non-loopback IPv4 addresses plus ``0.0.0.0:<port>`` itself.
+
+    For any other specific non-loopback IP exactly that address is added.
+
+    The ``_local_ipv4s`` parameter is a DI seam for unit tests — pass a list
+    of fake IPs to avoid real ``socket`` calls.  ``None`` means "detect live".
+
+    Policy: ADR-011 + ADR-043 (non-loopback bind for WSL dev access).
+    """
+    loopback_hosts = frozenset(
         {
             f"127.0.0.1:{port}",
             f"localhost:{port}",
             f"[::1]:{port}",
         }
     )
-    origin_whitelist = frozenset(
+    loopback_origins = frozenset(
         {
             f"http://127.0.0.1:{port}",
             f"http://localhost:{port}",
             f"http://[::1]:{port}",
         }
     )
-    return host_allowlist, origin_whitelist
+
+    if host in _LOOPBACK_HOSTS:
+        return loopback_hosts, loopback_origins
+
+    # Non-loopback bind: start from loopback set and extend with the explicit
+    # bind address. Note: 0.0.0.0 here lands in the allowlist for completeness
+    # only — browsers never send `Host: 0.0.0.0:<port>`, so this entry is inert
+    # in practice; real Host headers will match the detected NIC IPs added below.
+    extra_hosts: set[str] = {f"{host}:{port}"}
+    extra_origins: set[str] = {f"http://{host}:{port}"}
+
+    if host == "0.0.0.0":
+        detected = _local_ipv4s if _local_ipv4s is not None else _get_local_ipv4s()
+        for ip in detected:
+            extra_hosts.add(f"{ip}:{port}")
+            extra_origins.add(f"http://{ip}:{port}")
+
+    return loopback_hosts | frozenset(extra_hosts), loopback_origins | frozenset(extra_origins)

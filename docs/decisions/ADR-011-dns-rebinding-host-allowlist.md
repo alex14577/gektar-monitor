@@ -17,6 +17,8 @@
 
 **Consequences.** Защита от DNS-rebinding на уровне приложения. EventSource (SSE) всегда шлёт same-origin Origin — не ломается. CSRF + Host allow-list = двойной контур. Все mismatch-ответы — 421; нет неоднозначности «когда 403, когда 421».
 
+**Расширение для non-loopback бинда (ADR-043).** Для dev-сценария WSL→Windows без localhost-forwarding allowlist расширяется через `csrf_config_for_bind(host, port)` — добавляются адреса сетевых интерфейсов машины. Дефолт и все security-инварианты сохраняются. See [[decisions/ADR-043-non-loopback-bind-for-wsl|ADR-043]].
+
 См. также: [[decisions-log]], [[architecture/01-container-diagram]], [[web/authentication]].
 
 ## Addendum — Reflected absolute URLs in GET responses (2026-05-17, bd 9u7)

@@ -54,6 +54,7 @@
 - [[decisions/ADR-040-egrn-registration-date|ADR-040]] — EGRN registration date: новое поле `lots.date_registry TIMESTAMP NULL` + `Lot.date_registry` / `ParsedDetail.date_registry`; парсинг ключа «Дата постановки на учет» с detail-страницы; обе даты в карточке (date_create = ФИС, date_registry = ЕГРН); migration v4→v5; `date_registry` не в `TrackedField` (bd `gektar_monitor-svqi`)
 - [[decisions/ADR-041-test-tactics-amendment|ADR-041]] — Test tactics amendment: wiring→Layer 5, log parametrize-collapse (≤120 LOC), no sqlite3 in unit/services, pyramid baseline (non-binding by file count), canonical fake в tests/fakes/
 - [[decisions/ADR-042-toggle-archive-submitted-semantic-overload|ADR-042]] — toggle_archive semantic overload: `submitted` column reused for "archived" UX concept; Option A (document + no schema change) accepted at P4; Option B (split column) deferred until dual-flag product need
+- [[decisions/ADR-043-non-loopback-bind-for-wsl|ADR-043]] — Non-loopback bind for WSL→Windows access: `FIS_MONITOR_HOST`/`FIS_MONITOR_PORT` env vars; `csrf_config_for_bind(host, port)` extends allowlists for `0.0.0.0`/specific-IP binds; startup WARNING when non-loopback; `loopback_csrf_config` kept as compat wrapper
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

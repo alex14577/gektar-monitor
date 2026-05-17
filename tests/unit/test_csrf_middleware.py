@@ -10,6 +10,9 @@ Coverage:
  7. Host matching is case-insensitive.
  8. Origin matching is case-insensitive.
  9. loopback_csrf_config(port=8000) returns correct frozensets.
+10. csrf_config_for_bind(host="127.0.0.1") returns ONLY loopback set.
+11. csrf_config_for_bind(host="0.0.0.0") extends with 0.0.0.0 + detected IPs.
+12. csrf_config_for_bind(host="192.168.1.10") adds exactly that IP.
 """
 
 from __future__ import annotations
@@ -18,7 +21,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from fis_monitor.web.middleware import CsrfHostOriginMiddleware, loopback_csrf_config
+from fis_monitor.web.middleware import (
+    CsrfHostOriginMiddleware,
+    csrf_config_for_bind,
+    loopback_csrf_config,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -207,3 +214,84 @@ def test_loopback_csrf_config_different_port() -> None:
 
     assert "127.0.0.1:9090" in host_al
     assert "http://localhost:9090" in origin_wl
+
+
+# ---------------------------------------------------------------------------
+# 10. csrf_config_for_bind — loopback host returns ONLY loopback set
+# ---------------------------------------------------------------------------
+
+
+def test_csrf_config_for_bind_loopback_only() -> None:
+    """Loopback bind must not leak any extra entries beyond the canonical three."""
+    host_al, origin_wl = csrf_config_for_bind(host="127.0.0.1", port=8000)
+
+    assert host_al == frozenset({"127.0.0.1:8000", "localhost:8000", "[::1]:8000"})
+    assert origin_wl == frozenset(
+        {
+            "http://127.0.0.1:8000",
+            "http://localhost:8000",
+            "http://[::1]:8000",
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# 11. csrf_config_for_bind — 0.0.0.0 extends with detected IPs (seam injected)
+# ---------------------------------------------------------------------------
+
+
+def test_csrf_config_for_bind_wildcard_includes_loopback_plus_detected() -> None:
+    """0.0.0.0 bind adds loopback set + 0.0.0.0:<port> + each detected NIC IP."""
+    fake_ips = ["192.168.1.50", "10.0.0.5"]
+    host_al, origin_wl = csrf_config_for_bind(
+        host="0.0.0.0", port=8000, _local_ipv4s=fake_ips
+    )
+
+    # Loopback entries must be present.
+    assert "127.0.0.1:8000" in host_al
+    assert "localhost:8000" in host_al
+    assert "[::1]:8000" in host_al
+
+    # 0.0.0.0 itself must be present.
+    assert "0.0.0.0:8000" in host_al
+    assert "http://0.0.0.0:8000" in origin_wl
+
+    # Detected NIC IPs must be present.
+    assert "192.168.1.50:8000" in host_al
+    assert "http://192.168.1.50:8000" in origin_wl
+    assert "10.0.0.5:8000" in host_al
+    assert "http://10.0.0.5:8000" in origin_wl
+
+
+def test_csrf_config_for_bind_wildcard_no_detected_ips() -> None:
+    """When NIC detection yields nothing, only loopback + 0.0.0.0 are present."""
+    host_al, origin_wl = csrf_config_for_bind(
+        host="0.0.0.0", port=9000, _local_ipv4s=[]
+    )
+
+    assert "0.0.0.0:9000" in host_al
+    assert "http://0.0.0.0:9000" in origin_wl
+    assert "127.0.0.1:9000" in host_al
+    # No stray IPs.
+    assert len(host_al) == 4  # loopback×3 + 0.0.0.0
+    assert len(origin_wl) == 4
+
+
+# ---------------------------------------------------------------------------
+# 12. csrf_config_for_bind — specific non-loopback IP
+# ---------------------------------------------------------------------------
+
+
+def test_csrf_config_for_bind_specific_nonloopback_ip() -> None:
+    """A specific non-loopback bind address is added alongside loopback entries."""
+    host_al, origin_wl = csrf_config_for_bind(host="192.168.1.10", port=8000)
+
+    assert "192.168.1.10:8000" in host_al
+    assert "http://192.168.1.10:8000" in origin_wl
+
+    # Loopback entries must still be present.
+    assert "127.0.0.1:8000" in host_al
+    assert "localhost:8000" in host_al
+
+    # No wildcard or other stray entries.
+    assert "0.0.0.0:8000" not in host_al
