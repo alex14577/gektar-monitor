@@ -186,6 +186,44 @@ PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR" \
     "$VENV_DIR/bin/playwright" install chromium
 
 # ---------------------------------------------------------------------------
+# Step 3b: Bundle runtime .so for Chromium (zero-deps tarball — bd zclo)
+# ---------------------------------------------------------------------------
+# Chromium needs libnss3, libnspr4, libasound that minimal Ubuntu installs
+# lack. Fetch the .deb files via apt-get download (no sudo, no install),
+# extract them, copy .so into $BROWSERS_DIR/_runtime_lib/. run.sh adds this
+# directory to LD_LIBRARY_PATH at launch time.
+RUNTIME_LIB="$BROWSERS_DIR/_runtime_lib"
+if [[ -d "$RUNTIME_LIB" && -n "$(ls -A "$RUNTIME_LIB" 2>/dev/null)" ]]; then
+    log "Runtime lib bundle already present (delete $RUNTIME_LIB to refresh)"
+else
+    log "Bundling Chromium runtime libs (libnss3, libnspr4, libasound)..."
+    DEBS_DIR="$BUILD_DIR/_debs"
+    rm -rf "$DEBS_DIR" && mkdir -p "$DEBS_DIR" "$RUNTIME_LIB"
+    (
+        cd "$DEBS_DIR"
+        # apt-get download writes .deb files to cwd. No root needed.
+        # Try the modern Ubuntu 24.04+ package name first; on failure, retry
+        # with the legacy name. Stderr is preserved so real errors (network,
+        # missing apt index) surface — only the "package not found" line is
+        # noise we filter out.
+        if ! apt-get download libnss3 libnspr4 libasound2t64 2> >(grep -v "Unable to locate package" >&2); then
+            log "  libasound2t64 unavailable, retrying with libasound2..."
+            apt-get download libnss3 libnspr4 libasound2 \
+                || die "apt-get download failed — need apt-based Linux build host"
+        fi
+        for deb in ./*.deb; do
+            dpkg-deb -x "$deb" .
+        done
+    )
+    # Copy .so and preserve versioned symlinks (libasound.so.2 → .so.2.0.0).
+    # x86_64-only — the .deb extraction path is ABI-specific; revisit when
+    # arm64 builds are needed (parity with arch-detection above).
+    cp -a "$DEBS_DIR"/usr/lib/x86_64-linux-gnu/*.so* "$RUNTIME_LIB/"
+    log "  bundled $(ls "$RUNTIME_LIB" | wc -l) entries into $RUNTIME_LIB"
+    rm -rf "$DEBS_DIR"
+fi
+
+# ---------------------------------------------------------------------------
 # Step 4: Run PyInstaller
 # ---------------------------------------------------------------------------
 log "Running PyInstaller..."

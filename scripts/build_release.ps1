@@ -147,6 +147,20 @@ Copy-Item $BinaryDir -Destination (Join-Path $StageRoot "bin") -Recurse
 # browsers/ ← downloaded Chromium
 Copy-Item $BrowsersDir -Destination (Join-Path $StageRoot "browsers") -Recurse
 
+# MSVC runtime DLLs (bd zclo — zero-install on Win10/11). App-local deployment
+# is supported by Microsoft for the MSVC runtime; placing the DLLs next to
+# fis-monitor.exe makes the archive work on machines that lack VC++ Redist
+# (e.g. Win10 LTSC). DLL search order: app dir wins over System32.
+$BinStage = Join-Path $StageRoot "bin"
+foreach ($dll in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
+    $src = Join-Path $env:WINDIR "System32\$dll"
+    if (Test-Path $src) {
+        Copy-Item $src -Destination $BinStage -Force
+    } else {
+        Write-Step "WARN: $dll not found on build host — Windows clients without VC++ Redist will fail"
+    }
+}
+
 # Launcher (Windows only — run.sh принадлежит Linux-сборке) and README
 Copy-Item (Join-Path $TemplatesDir "run.bat")   (Join-Path $StageRoot "run.bat")
 Copy-Item (Join-Path $TemplatesDir "README.txt") (Join-Path $StageRoot "README.txt")
