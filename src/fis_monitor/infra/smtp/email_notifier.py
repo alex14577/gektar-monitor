@@ -58,6 +58,7 @@ from fis_monitor.domain.models import (
     ResolvedSmtpEndpoint,
     SmtpCredentials,
 )
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.infra.smtp.host_policy import SmtpHostPolicy
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,7 @@ class SmtpEmailNotifier:
         config_source: ConfigSource,
         clock: Clock,
         host_policy: SmtpHostPolicy,
+        url_builder: TorgiUrlBuilder,
         connect_timeout: float = 10.0,
     ) -> None:
         self._smtp_creds_repo = smtp_creds_repo
@@ -153,6 +155,7 @@ class SmtpEmailNotifier:
         self._config_source = config_source
         self._clock = clock
         self._host_policy = host_policy
+        self._url_builder = url_builder
         self._connect_timeout = connect_timeout
 
     # ------------------------------------------------------------------
@@ -254,10 +257,12 @@ class SmtpEmailNotifier:
         msg["To"] = recipient
         msg["Subject"] = f"FIS Monitor — лот #{lot.id} обновлён"
         msg["Message-ID"] = self._make_message_id(lot.id, recipient)
+        url = self._url_builder.lot_detail_url(lot_id=lot.id)
         msg.set_content(
             f"Лот #{lot.id} изменил статус.\n\n"
             f"Регион: {lot.region}\n"
             f"Статус: {lot.status}\n"
+            f"Ссылка: {url}\n"
         )
         return msg
 

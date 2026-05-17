@@ -27,7 +27,10 @@ from fis_monitor.domain.models import (
     ResolvedSmtpEndpoint,
     SmtpCredentials,
 )
+from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.infra.smtp.email_notifier import SmtpEmailNotifier
+
+_URL_BUILDER = TorgiUrlBuilder(base_url="https://example.test")
 
 # ---------------------------------------------------------------------------
 # Section 1: Constants
@@ -298,7 +301,7 @@ def _make_notifier(
     hp = host_policy or FakeSmtpHostPolicy()
     notifier = SmtpEmailNotifier(
         smtp_creds_repo=repo, config_source=FakeConfigSource(), clock=FakeClock(),
-        host_policy=hp, connect_timeout=connect_timeout,
+        host_policy=hp, url_builder=_URL_BUILDER, connect_timeout=connect_timeout,
     )
     return notifier, repo, hp
 
@@ -317,7 +320,7 @@ def _send_and_capture_message(creds: SmtpCredentials) -> EmailMessage:
     hp = FakeSmtpHostPolicy()
     notifier = SmtpEmailNotifier(
         smtp_creds_repo=repo, config_source=FakeConfigSource(),
-        clock=FakeClock(), host_policy=hp,
+        clock=FakeClock(), host_policy=hp, url_builder=_URL_BUILDER,
     )
     m = _mock_starttls_smtp()
     captured: list[EmailMessage] = []
@@ -346,7 +349,7 @@ def test_happy_path_starttls_real_server(ssl_contexts):
         notifier = SmtpEmailNotifier(
             smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
             config_source=FakeConfigSource(), clock=FakeClock(), host_policy=hp,
-            connect_timeout=5.0,
+            url_builder=_URL_BUILDER, connect_timeout=5.0,
         )
         with patch("ssl.create_default_context", return_value=client_ctx):
             result = notifier.send(_make_lot(id=1), _RECIPIENT)
@@ -402,7 +405,7 @@ def test_auth_failure_real_server(ssl_contexts):
         notifier = SmtpEmailNotifier(
             smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
             config_source=FakeConfigSource(), clock=FakeClock(), host_policy=hp,
-            connect_timeout=5.0,
+            url_builder=_URL_BUILDER, connect_timeout=5.0,
         )
         with patch("ssl.create_default_context", return_value=client_ctx):
             result = notifier.send(_make_lot(), _RECIPIENT)
@@ -478,7 +481,7 @@ def test_connect_by_ip_sni_is_hostname(ssl_contexts):
         notifier = SmtpEmailNotifier(
             smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
             config_source=FakeConfigSource(), clock=FakeClock(), host_policy=hp,
-            connect_timeout=5.0,
+            url_builder=_URL_BUILDER, connect_timeout=5.0,
         )
         with patch("ssl.create_default_context", return_value=client_ctx):
             result = notifier.send(_make_lot(id=10), _RECIPIENT)
@@ -701,7 +704,7 @@ def test_all_fake_methods_called_in_happy_path():
     hp = FakeSmtpHostPolicy(host="smtp.production.example.com")
     notifier = SmtpEmailNotifier(
         smtp_creds_repo=repo, config_source=FakeConfigSource(), clock=FakeClock(),
-        host_policy=hp, connect_timeout=5.0,
+        host_policy=hp, url_builder=_URL_BUILDER, connect_timeout=5.0,
     )
     m = _mock_starttls_smtp()
     with patch("smtplib.SMTP", return_value=m), \
@@ -719,8 +722,34 @@ def test_constructor_accepts_canon_signature():
     notifier = SmtpEmailNotifier(
         smtp_creds_repo=FakeSmtpCredentialsRepository(),
         config_source=FakeConfigSource(), clock=FakeClock(), host_policy=FakeSmtpHostPolicy(),
+        url_builder=_URL_BUILDER,
     )
     assert notifier.channel_id == "email"
+
+
+def test_lot_message_body_contains_url():
+    """T26 — _build_lot_message includes correct lot URL; plain-text only (no multipart)."""
+    lot = _make_lot(id=42)
+    notifier, _, _ = _make_notifier()
+    m = _mock_starttls_smtp()
+    captured: list[EmailMessage] = []
+    m.send_message.side_effect = captured.append
+    with patch("smtplib.SMTP", return_value=m), \
+         patch("ssl.create_default_context") as mssl:
+        mssl.return_value.wrap_socket.return_value = MagicMock()
+        notifier.send(lot, _RECIPIENT)
+    assert captured
+    msg = captured[0]
+    body = msg.get_body()
+    assert body is not None
+    content = body.get_content()
+    expected_url = "https://example.test/cabinet/free-lot-view?id=42"
+    assert f"Ссылка: {expected_url}" in content, (
+        f"URL line not found in body: {content!r}"
+    )
+    assert "42" in content
+    # Plain-text only — must not be multipart
+    assert not msg.is_multipart(), "Message must remain plain-text, not multipart"
 
 
 def test_quit_failure_calls_close():
@@ -762,7 +791,7 @@ def test_from_header_display_name_no_pii_leak_in_detail() -> None:
     hp = FakeSmtpHostPolicy()
     notifier = SmtpEmailNotifier(
         smtp_creds_repo=repo, config_source=FakeConfigSource(),
-        clock=FakeClock(), host_policy=hp,
+        clock=FakeClock(), host_policy=hp, url_builder=_URL_BUILDER,
     )
     m = _mock_starttls_smtp()
     m.send_message.side_effect = smtplib.SMTPAuthenticationError(535, b"bad")
@@ -781,7 +810,7 @@ def test_implicit_tls_happy_path():
     hp = FakeSmtpHostPolicy(host=_HOST, port=465)
     notifier = SmtpEmailNotifier(
         smtp_creds_repo=repo, config_source=FakeConfigSource(),
-        clock=FakeClock(), host_policy=hp,
+        clock=FakeClock(), host_policy=hp, url_builder=_URL_BUILDER,
     )
     lot = _make_lot()
     tls_sock = MagicMock()
@@ -819,6 +848,7 @@ def test_implicit_tls_tls_error_on_wrap():
         smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
         config_source=FakeConfigSource(), clock=FakeClock(),
         host_policy=FakeSmtpHostPolicy(host=_HOST, port=465),
+        url_builder=_URL_BUILDER,
     )
     with patch("smtplib.SMTP"), patch("ssl.create_default_context") as mssl, \
          patch("socket.create_connection"):
@@ -837,6 +867,7 @@ def test_implicit_tls_connect_timeout():
         smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
         config_source=FakeConfigSource(), clock=FakeClock(),
         host_policy=FakeSmtpHostPolicy(host=_HOST, port=465),
+        url_builder=_URL_BUILDER,
     )
     with patch("smtplib.SMTP"), patch("ssl.create_default_context"), \
          patch("socket.create_connection", side_effect=TimeoutError("timed out")):
@@ -854,6 +885,7 @@ def test_implicit_tls_auth_error():
         smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
         config_source=FakeConfigSource(), clock=FakeClock(),
         host_policy=FakeSmtpHostPolicy(host=_HOST, port=465),
+        url_builder=_URL_BUILDER,
     )
     m = MagicMock()
     m.login.side_effect = smtplib.SMTPAuthenticationError(535, b"Bad")
@@ -876,6 +908,7 @@ def test_implicit_tls_no_starttls_command_sent():
         smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
         config_source=FakeConfigSource(), clock=FakeClock(),
         host_policy=FakeSmtpHostPolicy(host=_HOST, port=465),
+        url_builder=_URL_BUILDER,
     )
     m = MagicMock()
     with patch("smtplib.SMTP", return_value=m), \
@@ -894,6 +927,7 @@ def test_both_tls_paths_send_ok(port, use_implicit):
     notifier = SmtpEmailNotifier(
         smtp_creds_repo=FakeSmtpCredentialsRepository(creds=creds),
         config_source=FakeConfigSource(), clock=FakeClock(), host_policy=hp,
+        url_builder=_URL_BUILDER,
     )
     m = MagicMock()
     m.docmd.return_value = (220, b"Go ahead")

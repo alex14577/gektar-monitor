@@ -93,6 +93,7 @@ from fis_monitor.services.smtp_test import SmtpTestService
 
 _log = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Schema SQL — loaded once at module level (no repeated I/O on build_container
 # calls in tests).
@@ -102,6 +103,7 @@ def _resolve_schema_path() -> Path:
     # (= bin/_internal/), schema lands at _internal/docs/db/schema.sql per
     # build/fis-monitor.spec.  Dev layout: schema lives at <project-root>/docs/db/.
     import sys
+
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS) / "docs" / "db" / "schema.sql"
     return Path(__file__).resolve().parent.parent.parent / "docs" / "db" / "schema.sql"
@@ -122,41 +124,32 @@ def _load_schema_sql() -> str:
 #   - Raises NotImplementedError("<class> impl deferred to <task>") on all methods
 # ---------------------------------------------------------------------------
 
+
 class _NotImplementedAutostartManager:
     """Stub for AutostartManager until a4t.9 lands (platform-specific impl)."""
 
     def enable(self) -> None:
-        raise NotImplementedError(
-            "_NotImplementedAutostartManager.enable() deferred to a4t.9"
-        )
+        raise NotImplementedError("_NotImplementedAutostartManager.enable() deferred to a4t.9")
 
     def disable(self) -> None:
-        raise NotImplementedError(
-            "_NotImplementedAutostartManager.disable() deferred to a4t.9"
-        )
+        raise NotImplementedError("_NotImplementedAutostartManager.disable() deferred to a4t.9")
 
     def is_enabled(self) -> bool:
-        raise NotImplementedError(
-            "_NotImplementedAutostartManager.is_enabled() deferred to a4t.9"
-        )
+        raise NotImplementedError("_NotImplementedAutostartManager.is_enabled() deferred to a4t.9")
 
 
 class _NotImplementedSessionProbe:
     """Stub for SessionProbe until a4t.8 lands (HttpSessionProbe)."""
 
     def check(self) -> object:
-        raise NotImplementedError(
-            "_NotImplementedSessionProbe.check() deferred to a4t.8"
-        )
+        raise NotImplementedError("_NotImplementedSessionProbe.check() deferred to a4t.8")
 
 
 class _NotImplementedSessionMonitor:
     """Stub for SessionMonitor until a4t.7 lands."""
 
     def run_forever(self, stop_event: threading.Event) -> None:
-        raise NotImplementedError(
-            "_NotImplementedSessionMonitor.run_forever() deferred to a4t.7"
-        )
+        raise NotImplementedError("_NotImplementedSessionMonitor.run_forever() deferred to a4t.7")
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +169,6 @@ _TORGI_ALLOWED_HOSTS: tuple[str, ...] = (
     # Target site — гектар (надальнийвосток.рф) ─────────────────────────────
     "xn--80aaggvgieoeoa2bo7l.xn--p1ai",  # Punycode for надальнийвосток.рф
     "надальнийвосток.рф",  # unicode alias
-
     # Госуслуги OAuth / ЕСИА login chain ────────────────────────────────────
     # Suffix-match covers esia., id., lk., pos., static., my., … subdomains.
     # The OAuth code is hosted by Минцифры; the exact subdomain set changes
@@ -190,6 +182,7 @@ _TORGI_ALLOWED_HOSTS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def build_container(settings: Settings | None, data_dir: Path) -> Container:
     """Topologically assemble Container per ADR-004.
@@ -223,7 +216,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     init_db(
         conn_provider,
         schema_sql=schema_sql,
-        latest_version=4,
+        latest_version=5,
         migration_runner=default_migration_runner(),
     )
 
@@ -234,9 +227,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     state_repo = SqliteStateRepository(conn_provider=conn_provider, clock=clock)
     notif_repo = SqliteNotificationsRepository(conn_provider=conn_provider, clock=clock)
     cycles_repo = SqliteCyclesRepository(conn_provider=conn_provider, clock=clock)
-    smtp_creds_repo = SqliteSmtpCredentialsRepository(
-        conn_provider=conn_provider, clock=clock
-    )
+    smtp_creds_repo = SqliteSmtpCredentialsRepository(conn_provider=conn_provider, clock=clock)
     region_sub_repo = SqliteRegionSubscriptionRepository(conn_provider=conn_provider)
 
     # config_source is created after init_db so region_sub_repo can safely write
@@ -318,12 +309,15 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         config_source=config_source,
         clock=clock,
         host_policy=smtp_host_policy,
+        url_builder=url_builder,
     )
     registry = ExplicitNotifierRegistry()
-    registry.register(SubscribedAtFilteredNotifier(
-        inner=email_notifier,
-        region_sub_repo=region_sub_repo,
-    ))
+    registry.register(
+        SubscribedAtFilteredNotifier(
+            inner=email_notifier,
+            region_sub_repo=region_sub_repo,
+        )
+    )
     registry.register(BrowserSseNotifier(event_bus=event_bus))
 
     # ── Layer 4: use cases ──────────────────────────────────────────────────
@@ -433,6 +427,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         _log.debug("on_login_success.callback.fired", extra={"trigger": "headed_login_success"})
         onboarding_state = onboarding.current()
         from fis_monitor.domain.models import OnboardingState  # local to avoid circular
+
         if onboarding_state != OnboardingState.COMPLETED:
             _log.debug(
                 "on_login_success: onboarding not completed (state=%s) — skip backfill",
@@ -445,9 +440,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
             return
         sup = _supervisor_cell[0]
         if sup is None:
-            _log.warning(
-                "on_login_success: supervisor not yet bound — backfill NOT started"
-            )
+            _log.warning("on_login_success: supervisor not yet bound — backfill NOT started")
             return
         _log.info("on_login_success: guards passed → auto-backfill scheduled")
         sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
