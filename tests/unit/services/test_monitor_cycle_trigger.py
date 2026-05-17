@@ -20,15 +20,23 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fis_monitor.domain.interfaces import Lot
 from fis_monitor.domain.models import (
     CycleResult,
-    LotPublicDTO,
-    LotUpsertResult,
     Settings,
 )
 from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
+from tests.fakes.lot_repository import FakeLotRepository
+from tests.unit.services.conftest import (
+    MinimalClock,
+    MinimalConfigSource,
+    MinimalCyclesRepository,
+    MinimalEnrichmentService,
+    MinimalEventBus,
+    MinimalHttpClient,
+    MinimalListParser,
+    MinimalNotifierDispatcher,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -38,102 +46,6 @@ _NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 # Very long poll interval so tests that rely on early wakeup are unambiguous.
 _LONG_POLL_SEC = 30.0
-
-
-# ---------------------------------------------------------------------------
-# Fakes — all methods are callable (anti-mock invariant)
-# ---------------------------------------------------------------------------
-
-
-class FakeHttpClient:
-    def get(self, url: str, *, params: Any = None, headers: Any = None,
-            timeout: float | None = None) -> Any:
-        from fis_monitor.domain.models import HttpResponse
-        return HttpResponse(status=200, text="<html/>", headers={}, final_url=url)
-
-
-class FakeListParser:
-    def parse(self, html: str) -> list[Any]:
-        return []
-
-
-class FakeEnrichmentService:
-    def enrich_lots(self, lots: list[Lot], *, max_workers: int) -> list[Lot]:
-        return list(lots)
-
-
-class FakeLotRepository:
-    def upsert(self, lot: Lot, *, tracked: Any) -> LotUpsertResult:
-        return LotUpsertResult(was_new=False, changes=[])
-
-    def get(self, lot_id: int) -> Lot | None:
-        return None
-
-    def list_active(self, *, limit: int, offset: int) -> list[Lot]:
-        return []
-
-    def get_last_known_id(self, region: int) -> int | None:
-        return None
-
-    def set_last_known_id(self, region: int, value: int) -> None:
-        pass
-
-    def mark_seen(self, lot_ids: Any, at: datetime) -> None:
-        pass
-
-    def mark_inactive(self, lot_id: int, reason: str, at: datetime) -> None:
-        pass
-
-    def needing_enrichment(self, limit: int) -> list[int]:
-        return []
-
-
-class FakeCyclesRepository:
-    def __init__(self) -> None:
-        self._next_id = 1
-
-    def open(self, region: int, at: datetime) -> int:
-        cid = self._next_id
-        self._next_id += 1
-        return cid
-
-    def close(self, cycle_id: int, result: CycleResult) -> None:
-        pass
-
-    def list_recent(self, limit: int) -> list[CycleResult]:
-        return []
-
-
-class FakeNotifierDispatcher:
-    def dispatch(self, lot: LotPublicDTO) -> None:
-        pass
-
-
-class FakeEventBus:
-    def publish(self, event: Any) -> None:
-        pass
-
-    def subscribe(self) -> Any:
-        raise NotImplementedError
-
-
-class FakeConfigSource:
-    def __init__(self, settings: Settings | None = None) -> None:
-        self._settings = settings or Settings()
-
-    def current(self) -> Settings:
-        return self._settings
-
-    def subscribe(self, cb: Any) -> Any:
-        raise NotImplementedError
-
-
-class FakeClock:
-    def now(self) -> datetime:
-        return _NOW
-
-    def monotonic(self) -> float:
-        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -179,15 +91,15 @@ def _make_service(poll_interval_minutes: int = 0) -> SpyCycleService:
     """
     settings = Settings(regions=[77], interval_minutes=poll_interval_minutes)
     svc = SpyCycleService(
-        http=FakeHttpClient(),
-        list_parser=FakeListParser(),
-        enrichment=FakeEnrichmentService(),
+        http=MinimalHttpClient(),
+        list_parser=MinimalListParser(),
+        enrichment=MinimalEnrichmentService(),
         lot_repo=FakeLotRepository(),
-        cycles_repo=FakeCyclesRepository(),
-        notifier_dispatcher=FakeNotifierDispatcher(),
-        event_bus=FakeEventBus(),
-        config_source=FakeConfigSource(settings),
-        clock=FakeClock(),
+        cycles_repo=MinimalCyclesRepository(),
+        notifier_dispatcher=MinimalNotifierDispatcher(),
+        event_bus=MinimalEventBus(),
+        config_source=MinimalConfigSource(settings),
+        clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
         filter_matcher=AllFiltersMatcher([]),
     )

@@ -16,17 +16,12 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
-from fis_monitor.domain.interfaces import Lot
 from fis_monitor.domain.models import (
-    CycleResult,
-    HttpResponse,
-    LotPublicDTO,
     ParsedListPage,
     ParsedListRow,
     Settings,
@@ -34,6 +29,14 @@ from fis_monitor.domain.models import (
 from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from tests.fakes.lot_repository import FakeLotRepository
+from tests.unit.services.conftest import (
+    MinimalClock,
+    MinimalCyclesRepository,
+    MinimalEnrichmentService,
+    MinimalEventBus,
+    MinimalHttpClient,
+    MinimalNotifierDispatcher,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -65,13 +68,6 @@ def _make_parsed_row(lot_id: int) -> ParsedListRow:
     )
 
 
-class FakeHttpClient:
-    def get(
-        self, url: str, *, params: Any = None, headers: Any = None, timeout: float | None = None
-    ) -> HttpResponse:
-        return HttpResponse(status=200, text="<html/>", headers={}, final_url=url)
-
-
 class FakeListParser:
     """Configurable ListParser fake — returns a ParsedListPage per call."""
 
@@ -96,50 +92,9 @@ class FakeListParser:
         return ParsedListPage(rows=self._rows, total_count=tc)
 
 
-class FakeEnrichmentService:
-    def enrich_lots(self, lots: Sequence[Lot], *, max_workers: int) -> list[Lot]:
-        return list(lots)
+class _LocalConfigSource:
+    """ConfigSource with per-regions Settings — specific to delta tests."""
 
-
-
-class FakeCyclesRepository:
-    def __init__(self) -> None:
-        self._next_id = 1
-
-    def open(self, region: int, at: datetime) -> int:
-        idx = self._next_id
-        self._next_id += 1
-        return idx
-
-    def close(self, cycle_id: int, result: CycleResult) -> None:
-        pass
-
-    def list_recent(self, limit: int) -> list[CycleResult]:
-        return []
-
-
-class FakeNotifierDispatcher:
-    def dispatch(self, lot: LotPublicDTO) -> None:
-        pass
-
-
-class FakeEventBus:
-    def publish(self, event: Any) -> None:
-        pass
-
-    def subscribe(self) -> Any:
-        raise NotImplementedError
-
-
-class FakeClock:
-    def now(self) -> datetime:
-        return _NOW
-
-    def monotonic(self) -> float:
-        return 0.0
-
-
-class FakeConfigSource:
     def __init__(self, regions: list[int] | None = None) -> None:
         self._settings = Settings(regions=regions or [_REGION])
 
@@ -222,19 +177,19 @@ def _make_service(
     stop_event = threading.Event()
 
     svc = MonitorCycleService(
-        http=FakeHttpClient(),
+        http=MinimalHttpClient(),
         list_parser=FakeListParser(
             rows=rows,
             total_count=total_count,
             total_count_sequence=total_count_sequence,
         ),
-        enrichment=FakeEnrichmentService(),
+        enrichment=MinimalEnrichmentService(),
         lot_repo=lot_repo,
-        cycles_repo=FakeCyclesRepository(),
-        notifier_dispatcher=FakeNotifierDispatcher(),
-        event_bus=FakeEventBus(),
-        config_source=FakeConfigSource(regions=regions),
-        clock=FakeClock(),
+        cycles_repo=MinimalCyclesRepository(),
+        notifier_dispatcher=MinimalNotifierDispatcher(),
+        event_bus=MinimalEventBus(),
+        config_source=_LocalConfigSource(regions=regions),
+        clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
         filter_matcher=AllFiltersMatcher([]),
         backfill=backfill,

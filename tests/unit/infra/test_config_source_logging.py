@@ -11,68 +11,23 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fis_monitor.domain.models import Settings
-from fis_monitor.infra.config_source import WatchdogConfigSource
+
+from .conftest import FakeRegionSubRepo, make_config_source, write_settings
 
 _LOGGER = "fis_monitor.infra.config_source"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-class _FakeClock:
-    def now(self) -> datetime:
-        return datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
-
-    def monotonic(self) -> float:
-        return 0.0
-
-
-class _FakeRegionSubRepo:
-    def get_subscribed_at(self, region_id: int) -> None:
-        return None
-
-    def set_if_absent(self, region_id: int, at: datetime) -> None:
-        pass
-
-    def delete(self, region_id: int) -> None:
-        pass
-
-
-def _make_source(
-    path: Path,
-    *,
-    clock: _FakeClock | None = None,
-    region_subs_repo: _FakeRegionSubRepo | None = None,
-) -> WatchdogConfigSource:
-    if clock is None:
-        clock = _FakeClock()
-    parser = lambda raw: Settings.model_validate(json.loads(raw))  # noqa: E731
-    with patch("fis_monitor.infra.config_source.Observer") as MockObs:
-        mock_obs = MagicMock()
-        MockObs.return_value = mock_obs
-        src = WatchdogConfigSource(
-            path=path,
-            clock=clock,
-            parser=parser,
-            region_subs_repo=region_subs_repo,
-        )
-        src._observer = mock_obs
-    return src
-
-
-def _write_settings(path: Path) -> bytes:
-    raw = json.dumps(Settings().model_dump(mode="json")).encode()
-    path.write_bytes(raw)
-    return raw
+def _cancel_pending_timer(src) -> None:  # type: ignore[type-arg]
+    with src._lock:
+        timer = src._pending_timer
+        src._pending_timer = None
+    if timer is not None:
+        timer.cancel()
 
 
 # ---------------------------------------------------------------------------
@@ -85,18 +40,13 @@ def test_on_event_emits_file_event_debug(
 ) -> None:
     """config.file_event emitted at DEBUG when a relevant FS event fires."""
     cfg_path = tmp_path / "config.json"
-    _write_settings(cfg_path)
-    src = _make_source(cfg_path)
+    write_settings(cfg_path)
+    src = make_config_source(cfg_path)
     src.stop()
 
     with caplog.at_level(logging.DEBUG, logger=_LOGGER):
         src._on_event()
-    # cancel the debounce timer immediately so it doesn't fire
-    with src._lock:
-        timer = src._pending_timer
-        src._pending_timer = None
-    if timer is not None:
-        timer.cancel()
+    _cancel_pending_timer(src)
 
     records = [r for r in caplog.records if r.getMessage() == "config.file_event"]
     assert records, "expected config.file_event debug record"
@@ -108,17 +58,13 @@ def test_on_event_emits_debounce_scheduled_debug(
 ) -> None:
     """config.debounce.scheduled emitted at DEBUG after debounce timer is set."""
     cfg_path = tmp_path / "config.json"
-    _write_settings(cfg_path)
-    src = _make_source(cfg_path)
+    write_settings(cfg_path)
+    src = make_config_source(cfg_path)
     src.stop()
 
     with caplog.at_level(logging.DEBUG, logger=_LOGGER):
         src._on_event()
-    with src._lock:
-        timer = src._pending_timer
-        src._pending_timer = None
-    if timer is not None:
-        timer.cancel()
+    _cancel_pending_timer(src)
 
     records = [r for r in caplog.records if r.getMessage() == "config.debounce.scheduled"]
     assert records, "expected config.debounce.scheduled debug record"
@@ -130,11 +76,10 @@ def test_do_reload_emits_reload_start_finish_debug(
 ) -> None:
     """config.reload.start + config.reload.finish emitted when content changes."""
     cfg_path = tmp_path / "config.json"
-    _write_settings(cfg_path)
-    src = _make_source(cfg_path)
+    write_settings(cfg_path)
+    src = make_config_source(cfg_path)
     src.stop()
 
-    # Trigger reload directly (bypass debounce timer).
     with caplog.at_level(logging.DEBUG, logger=_LOGGER):
         src._do_reload()
 
@@ -143,7 +88,6 @@ def test_do_reload_emits_reload_start_finish_debug(
 
     assert start_records, "expected config.reload.start"
     assert finish_records, "expected config.reload.finish"
-    # finish should carry hash_old, hash_new, regions_diff_count
     rec = finish_records[0]
     assert "hash_old" in rec.__dict__
     assert "hash_new" in rec.__dict__
@@ -155,12 +99,11 @@ def test_bootstrap_subscriptions_emits_debug(
 ) -> None:
     """config.bootstrap_subscriptions emitted at DEBUG on init (with region_subs_repo)."""
     cfg_path = tmp_path / "config.json"
-    # Write settings with one region so bootstrap seeds it.
     raw = json.dumps(Settings(regions=[42]).model_dump(mode="json")).encode()
     cfg_path.write_bytes(raw)
 
     with caplog.at_level(logging.DEBUG, logger=_LOGGER):
-        src = _make_source(cfg_path, region_subs_repo=_FakeRegionSubRepo())
+        src = make_config_source(cfg_path, region_subs_repo=FakeRegionSubRepo())
     src.stop()
 
     records = [r for r in caplog.records if r.getMessage() == "config.bootstrap_subscriptions"]

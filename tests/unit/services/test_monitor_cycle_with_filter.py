@@ -23,12 +23,9 @@ from typing import Any
 
 from fis_monitor.domain.interfaces import Lot
 from fis_monitor.domain.models import (
-    CycleResult,
     FiltersConfig,
-    HttpResponse,
     LotPublicDTO,
     LotUpsertResult,
-    ParsedListPage,
     ParsedListRow,
     Settings,
     SseLotNew,
@@ -36,6 +33,13 @@ from fis_monitor.domain.models import (
 )
 from fis_monitor.services.filter_matcher import AllFiltersMatcher, RfSubjectFilterMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
+from tests.unit.services.conftest import (
+    MinimalClock,
+    MinimalConfigSource,
+    MinimalCyclesRepository,
+    MinimalHttpClient,
+    MinimalListParser,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -43,24 +47,6 @@ from fis_monitor.services.monitor_cycle import MonitorCycleService
 
 _NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 _REGION = 27  # Хабаровский край
-
-
-# ---------------------------------------------------------------------------
-# Fakes — minimal re-implementations (not importing from test_monitor_cycle
-# to keep this file self-contained and the test readable in isolation)
-# ---------------------------------------------------------------------------
-
-class FakeHttpClient:
-    def get(self, url: str, **kwargs: Any) -> HttpResponse:
-        return HttpResponse(status=200, text="<html/>", headers={}, final_url=url)
-
-
-class FakeListParser:
-    def __init__(self, rows: list[ParsedListRow]) -> None:
-        self._rows = rows
-
-    def parse(self, html: str) -> ParsedListPage:
-        return ParsedListPage(rows=self._rows, total_count=len(self._rows))
 
 
 class FakeEnrichmentService:
@@ -89,22 +75,6 @@ class FakeLotRepository:
     def needing_enrichment(self, limit: int) -> list[int]: return []
 
 
-class FakeCyclesRepository:
-    def __init__(self) -> None:
-        self._next_id = 1
-        self.close_calls: list[CycleResult] = []
-
-    def open(self, region: int, at: datetime) -> int:
-        cid = self._next_id
-        self._next_id += 1
-        return cid
-
-    def close(self, cycle_id: int, result: CycleResult) -> None:
-        self.close_calls.append(result)
-
-    def list_recent(self, limit: int) -> list[CycleResult]: return []
-
-
 class FakeNotifierDispatcher:
     def __init__(self) -> None:
         self.dispatch_calls: list[LotPublicDTO] = []
@@ -122,22 +92,6 @@ class FakeEventBus:
 
     def subscribe(self) -> Any:
         raise NotImplementedError
-
-
-class FakeConfigSource:
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
-
-    def current(self) -> Settings:
-        return self._settings
-
-    def subscribe(self, cb: Any) -> Any:
-        raise NotImplementedError
-
-
-class FakeClock:
-    def now(self) -> datetime: return _NOW
-    def monotonic(self) -> float: return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -202,15 +156,15 @@ def _build_service(
     filter_matcher = AllFiltersMatcher([RfSubjectFilterMatcher()])
 
     svc = MonitorCycleService(
-        http=FakeHttpClient(),
-        list_parser=FakeListParser(rows),
+        http=MinimalHttpClient(),
+        list_parser=MinimalListParser(rows=rows),
         enrichment=FakeEnrichmentService(lots),
         lot_repo=FakeLotRepository(was_new_for=was_new_for),
-        cycles_repo=FakeCyclesRepository(),
+        cycles_repo=MinimalCyclesRepository(),
         notifier_dispatcher=dispatcher,
         event_bus=event_bus,
-        config_source=FakeConfigSource(settings),
-        clock=FakeClock(),
+        config_source=MinimalConfigSource(settings=settings),
+        clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
         filter_matcher=filter_matcher,
     )

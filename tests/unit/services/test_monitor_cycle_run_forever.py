@@ -10,23 +10,27 @@ project's fake-impl invariant (CLAUDE.md §6).
 from __future__ import annotations
 
 import threading
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 from fis_monitor.domain.errors import ParseBugError, ParserVersionMismatch, UpstreamError
-from fis_monitor.domain.interfaces import Lot
 from fis_monitor.domain.models import (
     CycleResult,
-    HttpResponse,
-    LotPublicDTO,
-    LotUpsertResult,
-    ParsedListRow,
     Settings,
-    TrackedField,
 )
 from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
+from tests.fakes.lot_repository import FakeLotRepository
+from tests.unit.services.conftest import (
+    MinimalClock,
+    MinimalConfigSource,
+    MinimalCyclesRepository,
+    MinimalEnrichmentService,
+    MinimalEventBus,
+    MinimalHttpClient,
+    MinimalListParser,
+    MinimalNotifierDispatcher,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -35,130 +39,6 @@ from fis_monitor.services.monitor_cycle import MonitorCycleService
 _NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 _REGION_A = 77
 _REGION_B = 50
-
-
-# ---------------------------------------------------------------------------
-# Fakes — all methods are fully callable
-# ---------------------------------------------------------------------------
-
-
-class FakeHttpClient:
-    def __init__(self, response_text: str = "<html/>") -> None:
-        self.calls: list[str] = []
-        self._response_text = response_text
-
-    def get(
-        self,
-        url: str,
-        *,
-        params: Any = None,
-        headers: Any = None,
-        timeout: float | None = None,
-    ) -> HttpResponse:
-        self.calls.append(url)
-        return HttpResponse(status=200, text=self._response_text, headers={}, final_url=url)
-
-
-class FakeListParser:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def parse(self, html: str) -> list[ParsedListRow]:
-        self.calls.append(html)
-        return []
-
-
-class FakeEnrichmentService:
-    def enrich_lots(self, lots: Sequence[Lot], *, max_workers: int) -> list[Lot]:
-        return list(lots)
-
-
-class FakeLotRepository:
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
-        return LotUpsertResult(was_new=False, changes=[])
-
-    def get(self, lot_id: int) -> Lot | None:
-        return None
-
-    def list_active(self, *, limit: int, offset: int) -> list[Lot]:
-        return []
-
-    def get_last_known_id(self, region: int) -> int | None:
-        return None
-
-    def set_last_known_id(self, region: int, value: int) -> None:
-        pass
-
-    def mark_seen(self, lot_ids: Sequence[int], at: datetime) -> None:
-        pass
-
-    def mark_inactive(self, lot_id: int, reason: str, at: datetime) -> None:
-        pass
-
-    def needing_enrichment(self, limit: int) -> list[int]:
-        return []
-
-
-class FakeCyclesRepository:
-    def __init__(self) -> None:
-        self._next_id = 1
-        self.open_calls: list[tuple[int, datetime]] = []
-        self.close_calls: list[tuple[int, CycleResult]] = []
-
-    def open(self, region: int, at: datetime) -> int:
-        self.open_calls.append((region, at))
-        cycle_id = self._next_id
-        self._next_id += 1
-        return cycle_id
-
-    def close(self, cycle_id: int, result: CycleResult) -> None:
-        self.close_calls.append((cycle_id, result))
-
-    def list_recent(self, limit: int) -> list[CycleResult]:
-        return []
-
-
-class FakeNotifierDispatcher:
-    def __init__(self) -> None:
-        self.dispatch_calls: list[LotPublicDTO] = []
-
-    def dispatch(self, lot: LotPublicDTO) -> None:
-        self.dispatch_calls.append(lot)
-
-
-class FakeEventBus:
-    def __init__(self) -> None:
-        self.published: list[Any] = []
-
-    def publish(self, event: Any) -> None:
-        self.published.append(event)
-
-    def subscribe(self) -> Any:
-        raise NotImplementedError("not used in run_forever tests")
-
-
-class FakeConfigSource:
-    """ConfigSource returning a fixed Settings snapshot."""
-
-    def __init__(self, settings: Settings | None = None) -> None:
-        self._settings = settings or Settings()
-
-    def current(self) -> Settings:
-        return self._settings
-
-    def subscribe(self, cb: Any) -> Any:
-        raise NotImplementedError("not used in run_forever tests")
-
-
-class FakeClock:
-    def __init__(self, fixed: datetime = _NOW) -> None:
-        self._fixed = fixed
-
-    def now(self) -> datetime:
-        return self._fixed
-
-    def monotonic(self) -> float:
-        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -209,18 +89,16 @@ def _make_service(
     run_cycle_raises: Exception | None = None,
 ) -> SpyMonitorCycleService:
     """Build a SpyMonitorCycleService with sensible fakes."""
-    config_source = FakeConfigSource(settings=settings or Settings())
-
     svc = SpyMonitorCycleService(
-        http=FakeHttpClient(),
-        list_parser=FakeListParser(),
-        enrichment=FakeEnrichmentService(),
+        http=MinimalHttpClient(),
+        list_parser=MinimalListParser(),
+        enrichment=MinimalEnrichmentService(),
         lot_repo=FakeLotRepository(),
-        cycles_repo=FakeCyclesRepository(),
-        notifier_dispatcher=FakeNotifierDispatcher(),
-        event_bus=FakeEventBus(),
-        config_source=config_source,
-        clock=FakeClock(),
+        cycles_repo=MinimalCyclesRepository(),
+        notifier_dispatcher=MinimalNotifierDispatcher(),
+        event_bus=MinimalEventBus(),
+        config_source=MinimalConfigSource(settings=settings or Settings()),
+        clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
         filter_matcher=AllFiltersMatcher([]),  # pass-through for run_forever tests
     )
