@@ -104,13 +104,16 @@ class SubscribedAtFilteredNotifier:
     def __init__(self, inner: object, region_sub_repo: RegionSubscriptionRepository) -> None:
         self._inner = inner
         self._region_sub_repo = region_sub_repo
-        # Reflect config_schema from inner so UI forms work correctly
+        # Reflect config_schema from inner so UI forms work correctly.
+        # Use instance attribute (NOT type(self).config_schema = ...) — class
+        # mutation would be shared across all instances of this decorator
+        # class (closes cm3p shared-state bug).
         inner_schema = (
             getattr(type(inner), "config_schema", None)
             or getattr(inner, "config_schema", None)
         )
         if inner_schema is not None:
-            type(self).config_schema = inner_schema
+            self.config_schema = inner_schema  # type: ignore[misc]
 
     def should_suppress(self, lot: LotPublicDTO) -> bool:
         """Pre-reserve suppression check (ADR-039).
@@ -145,6 +148,84 @@ class SubscribedAtFilteredNotifier:
     def send(self, lot: LotPublicDTO, recipient: str) -> NotifyResult:
         if self.should_suppress(lot):
             return NotifyResult(ok=True, detail="suppressed (subscribed_at)", retryable=False)
+        return self._inner.send(lot, recipient)  # type: ignore[attr-defined]
+
+    def test(self, recipient: str) -> NotifyResult:
+        return self._inner.test(recipient)  # type: ignore[attr-defined]
+
+
+class RfSubjectFilteredEmailNotifier:
+    """Decorator applying RF-subject (region) suppression for the email channel.
+
+    Per ADR-035 (Notify scope), ``filters.rf_subjects`` defines which regions
+    the user wants to receive notifications for. Per ADR-039, the browser
+    channel must receive ALL lots regardless of region (live-feed UX). The
+    fix for bd-task scrd moves the rf_subjects gate OUT of
+    ``MonitorCycleService`` and INTO this email-only decorator so the
+    browser channel is no longer collaterally filtered.
+
+    Stacking: in composition root this notifier wraps
+    ``SubscribedAtFilteredNotifier`` — the resulting chain is
+    ``Rf -> Subscribed -> Smtp``. ``should_suppress`` short-circuits on the
+    first match (rf_subjects ⇒ skip subscribed-at check entirely) and
+    delegates to ``inner.should_suppress`` so the dispatcher's pre-reserve
+    hook sees the composite verdict via the outermost wrapper.
+    """
+
+    channel_id: ClassVar[str] = "email"
+    display_name: ClassVar[str] = "Email (rf_subjects + subscribed_at filtered)"
+    description: ClassVar[str] = (
+        "Email notifier with per-region rf_subjects scope and subscribed_at suppression"
+    )
+    config_schema: ClassVar[type] = type(None)
+    recipient_label: ClassVar[str] = "Email address"
+    recipient_placeholder: ClassVar[str] = "user@example.com"
+
+    def __init__(
+        self,
+        inner: object,
+        config_source: ConfigSource,
+        matcher: object,
+    ) -> None:
+        """Args:
+        inner: wrapped notifier (typically ``SubscribedAtFilteredNotifier``).
+        config_source: live config; ``filters.rf_subjects`` is read per-lot.
+        matcher: ``FilterMatcher`` implementation evaluating rf_subjects scope.
+            Injected via DI to keep this decorator decoupled from a concrete
+            matcher class (Liskov + testability).
+        """
+        self._inner = inner
+        self._config_source = config_source
+        self._matcher = matcher
+        inner_schema = (
+            getattr(type(inner), "config_schema", None)
+            or getattr(inner, "config_schema", None)
+        )
+        if inner_schema is not None:
+            # Instance attr (NOT type(self).config_schema) — see cm3p note in
+            # SubscribedAtFilteredNotifier.__init__ above.
+            self.config_schema = inner_schema  # type: ignore[misc]
+
+    def should_suppress(self, lot: LotPublicDTO) -> bool:
+        filters = self._config_source.current().filters
+        if not self._matcher.matches(lot, filters):  # type: ignore[attr-defined]
+            logger.debug(
+                "notification.rf_subjects_dropped",
+                extra={
+                    "lot_id": lot.id,
+                    "region": lot.region,
+                    "decision": "dropped_rf_subjects",
+                },
+            )
+            return True
+        inner_check = getattr(self._inner, "should_suppress", None)
+        if callable(inner_check):
+            return bool(inner_check(lot))
+        return False
+
+    def send(self, lot: LotPublicDTO, recipient: str) -> NotifyResult:
+        if self.should_suppress(lot):
+            return NotifyResult(ok=True, detail="suppressed (rf_subjects)", retryable=False)
         return self._inner.send(lot, recipient)  # type: ignore[attr-defined]
 
     def test(self, recipient: str) -> NotifyResult:

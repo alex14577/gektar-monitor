@@ -29,7 +29,7 @@ Addendum ADR-031 вводил UX-инвариант «≥1 subject required» д
 | Scope | SSOT | Consumer |
 |---|---|---|
 | **Fetch** | `Settings.regions` (macro-region ids; 1=ДФО, 2=Арктика) | `infra/http/url_builder.TorgiUrlBuilder.lot_list_url(region=...)` — только макропараметр `region=`, без субъектного сужения в URL |
-| **Notify** | `Settings.filters.rf_subjects` (site-id ints из полного каталога `SUBJECT_TITLE_BY_ID`) | `services/filter_matcher.RfSubjectFilterMatcher` в `monitor_cycle._run_cycle_inner` — gate перед `NotifierDispatcher.dispatch` |
+| **Notify (email-only)** | `Settings.filters.rf_subjects` (site-id ints из полного каталога `SUBJECT_TITLE_BY_ID`) | `services/notifier_dispatcher.RfSubjectFilteredEmailNotifier` — оборачивает email-notifier; `should_suppress(lot)` вызывается dispatcher-ом ДО `reserve()`. Browser-канал НЕ фильтруется (см. I5) |
 | **View** | cookie `view_filters.subjects` + каталог `SUBJECT_TITLE_BY_ID` | `web/routes/filters.get_subjects` + `services/lot_query.LotQueryService` |
 
 Поле `Settings.subject_site_ids` (ADR-031 §Q3) признаётся **мёртвым** и удаляется (bd `gektar_monitor-6f6`).
@@ -45,6 +45,16 @@ Addendum ADR-031 вводил UX-инвариант «≥1 subject required» д
 **I3. View НЕЗАВИСИМ от Notify**: пользователь может фильтровать ленту по субъектам, на которые он не подписан, и наоборот. Скоупы разделены: notify-фильтр в `config.json` (`Settings.filters.rf_subjects`), view-фильтр в cookie (`view_filters`).
 
 **I4. Пустой `filters.rf_subjects` ⇒ notify-all**: поведение унаследовано от `filter_matcher.py:67–68` (`if not filters.rf_subjects: return True`) и подтверждено пользователем 2026-05-15. Это явный инвариант, а не дефект.
+
+**I5. Browser channel НЕ фильтруется по `rf_subjects`** (amendment 2026-05-18, bd-scrd).
+Notify-scope разделяет каналы: email применяет `rf_subjects` через decorator
+`RfSubjectFilteredEmailNotifier`; browser-канал получает ВСЕ лоты, чтобы открытая
+вкладка получала live-обновления независимо от текущего notify-фильтра. View-scope
+(cookie `view_filters`) применяется client-side для отображения. Это закрывает баг,
+при котором лот из непод­пи­сан­но­го региона не появлялся live в UI без refresh, хотя
+рендерился на GET /. До правки gate стоял в `monitor_cycle._run_cycle_inner` перед
+`NotifierDispatcher.dispatch` — он фильтровал оба канала. После правки gate перенесён
+в email-decorator, dispatcher вызывается безусловно.
 
 ---
 

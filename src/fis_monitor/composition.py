@@ -74,7 +74,7 @@ from fis_monitor.services.diagnostics.exclude_policy import DiagnosticsExcludePo
 from fis_monitor.services.diagnostics.service import DiagnosticsService
 from fis_monitor.services.dnd import DndService
 from fis_monitor.services.enrichment import EnrichmentService
-from fis_monitor.services.filter_matcher import AllFiltersMatcher, RfSubjectFilterMatcher
+from fis_monitor.services.filter_matcher import RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
 from fis_monitor.services.login import LoginService
 from fis_monitor.services.lot_query import LotQueryService
@@ -82,6 +82,7 @@ from fis_monitor.services.lot_user_state import LotUserStateService
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from fis_monitor.services.notifier_dispatcher import (
     NotifierDispatcher,
+    RfSubjectFilteredEmailNotifier,
     SubscribedAtFilteredNotifier,
 )
 from fis_monitor.services.onboarding import OnboardingService
@@ -308,11 +309,18 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         host_policy=smtp_host_policy,
         url_builder=url_builder,
     )
+    # ADR-035 amendment (scrd): rf_subjects (notify-scope) applies ONLY to
+    # the email channel. Browser channel must receive all lots for live UI.
+    # Chain (outermost → innermost): Rf → SubscribedAt → Smtp.
     registry = ExplicitNotifierRegistry()
     registry.register(
-        SubscribedAtFilteredNotifier(
-            inner=email_notifier,
-            region_sub_repo=region_sub_repo,
+        RfSubjectFilteredEmailNotifier(
+            inner=SubscribedAtFilteredNotifier(
+                inner=email_notifier,
+                region_sub_repo=region_sub_repo,
+            ),
+            config_source=config_source,
+            matcher=RfSubjectFilterMatcher(),
         )
     )
     registry.register(BrowserSseNotifier(event_bus=event_bus))
@@ -343,8 +351,6 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         url_builder=url_builder,
     )
 
-    filter_matcher = AllFiltersMatcher([RfSubjectFilterMatcher()])
-
     monitor_cycle = MonitorCycleService(
         http=http_client,
         list_parser=list_parser,
@@ -356,7 +362,6 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         config_source=config_source,
         clock=clock,
         cycle_progress_signal=cycle_progress_signal,
-        filter_matcher=filter_matcher,
         url_builder=url_builder,
     )
 

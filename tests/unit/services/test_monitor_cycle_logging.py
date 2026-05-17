@@ -12,7 +12,6 @@ from typing import Any  # used in expected_fields type hints
 import pytest
 
 from fis_monitor.domain.models import ParsedListRow
-from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from tests.fakes.lot_repository import FakeLotRepository
 from tests.unit.services.conftest import (
@@ -56,7 +55,6 @@ def _make_svc(rows: list[ParsedListRow] | None = None) -> MonitorCycleService:
         config_source=MinimalConfigSource(),
         clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
-        filter_matcher=AllFiltersMatcher([]),
     )
 
 

@@ -51,7 +51,6 @@ from fis_monitor.domain.interfaces import (
     ConfigSource,
     CyclesRepository,
     EventBus,
-    FilterMatcher,
     HttpClient,
     ListParser,
     LotRepository,
@@ -162,7 +161,6 @@ class MonitorCycleService:
         config_source: ConfigSource,
         clock: Clock,
         cycle_progress_signal: threading.Event,
-        filter_matcher: FilterMatcher,
         url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
         enrichment_workers: int = 4,
         backfill: BackfillHandle | None = None,
@@ -177,7 +175,6 @@ class MonitorCycleService:
         self._config_source = config_source
         self._clock = clock
         self.cycle_progress_signal = cycle_progress_signal
-        self._filter_matcher = filter_matcher
         self._url_builder = url_builder
         self._enrichment_workers = enrichment_workers
         self._backfill: BackfillHandle | None = backfill
@@ -582,14 +579,6 @@ class MonitorCycleService:
         # ---------- Step 5: upsert + notify --------------------------------
         # Step-5 re-reads config_source.current() so the filter snapshot can be
         # hot-reloaded mid-pass without waiting for the next scheduler iteration.
-        # Note: run_forever reads its own snapshot at the top of each iteration
-        # for `regions` and `interval_minutes`.  The two snapshots may differ if
-        # a config reload occurs during a cycle — this is by-design: filters take
-        # effect ASAP (within the current pass); scheduling parameters take effect
-        # on the next iteration.  ConfigSource.current() is required to return an
-        # in-memory cached snapshot (no I/O), so the extra fetch is O(1).
-        current_filters = self._config_source.current().filters
-
         new_lots_count = 0
         for lot in enriched_lots:
             upsert_result = self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
@@ -606,27 +595,29 @@ class MonitorCycleService:
             if upsert_result.was_new:
                 new_lots_count += 1
                 public_dto = _lot_to_public_dto(lot)
-                if self._filter_matcher.matches(public_dto, current_filters):
-                    self._notifier_dispatcher.dispatch(public_dto)
+                # ADR-035 amendment (scrd): rf_subjects gate moved out of
+                # monitor_cycle into the email-only decorator
+                # (``RfSubjectFilteredEmailNotifier``). Dispatcher is called
+                # unconditionally so the browser channel receives ALL lots
+                # for live UI updates; the email channel is filtered per
+                # user notify-scope via the wrapper.
+                self._notifier_dispatcher.dispatch(public_dto)
             elif upsert_result.changes:
                 # Publish status update for changed lots (optional, best-effort).
-                # Apply the same filter: status-change noise for filtered-out
-                # regions is equally unwanted as new-lot noise.
+                # Browser-only event_bus path — published unconditionally so
+                # the SSE-driven UI stays in sync with DB state regardless
+                # of the user's notify-scope (rf_subjects).
                 for change in upsert_result.changes:
                     if change.field == "status":
                         from fis_monitor.domain.models import SseLotStatus
 
-                        lot_dto_for_filter = _lot_to_public_dto(lot)
-                        if self._filter_matcher.matches(
-                            lot_dto_for_filter, current_filters
-                        ):
-                            self._event_bus.publish(
-                                SseLotStatus(
-                                    lot_id=lot.id,
-                                    new_status=str(change.new_value),
-                                    event_type="changed",
-                                )
+                        self._event_bus.publish(
+                            SseLotStatus(
+                                lot_id=lot.id,
+                                new_status=str(change.new_value),
+                                event_type="changed",
                             )
+                        )
                         break  # one SseLotStatus per lot per cycle is enough
 
         # ---------- Step 6: close cycle ------------------------------------

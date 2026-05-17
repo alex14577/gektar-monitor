@@ -18,7 +18,6 @@ from fis_monitor.domain.models import (
     CycleResult,
     Settings,
 )
-from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from tests.fakes.lot_repository import FakeLotRepository
 from tests.unit.services.conftest import (
@@ -100,7 +99,6 @@ def _make_service(
         config_source=MinimalConfigSource(settings=settings or Settings()),
         clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
-        filter_matcher=AllFiltersMatcher([]),  # pass-through for run_forever tests
     )
     if run_cycle_raises is not None:
         svc.configure_raises(run_cycle_raises)

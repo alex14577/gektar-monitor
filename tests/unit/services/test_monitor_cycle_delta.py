@@ -26,7 +26,6 @@ from fis_monitor.domain.models import (
     ParsedListRow,
     Settings,
 )
-from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from tests.fakes.lot_repository import FakeLotRepository
 from tests.unit.services.conftest import (
@@ -191,7 +190,6 @@ def _make_service(
         config_source=_LocalConfigSource(regions=regions),
         clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
-        filter_matcher=AllFiltersMatcher([]),
         backfill=backfill,
     )
     # Store so tests can pass the same event to run_forever / check it later.

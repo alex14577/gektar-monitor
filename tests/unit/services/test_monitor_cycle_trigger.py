@@ -24,7 +24,6 @@ from fis_monitor.domain.models import (
     CycleResult,
     Settings,
 )
-from fis_monitor.services.filter_matcher import AllFiltersMatcher
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from tests.fakes.lot_repository import FakeLotRepository
 from tests.unit.services.conftest import (
@@ -101,7 +100,6 @@ def _make_service(poll_interval_minutes: int = 0) -> SpyCycleService:
         config_source=MinimalConfigSource(settings),
         clock=MinimalClock(),
         cycle_progress_signal=threading.Event(),
-        filter_matcher=AllFiltersMatcher([]),
     )
     # Override poll interval to a large value so early-wakeup tests are unambiguous.
     svc._DEFAULT_POLL_INTERVAL_SEC = _LONG_POLL_SEC  # type: ignore[misc]

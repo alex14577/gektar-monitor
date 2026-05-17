@@ -113,13 +113,20 @@ class TestNotifierRegistryBeforeDispatcher:
         assert isinstance(registry, ExplicitNotifierRegistry)
 
     def test_registry_has_email_channel(self, container: Container) -> None:
-        from fis_monitor.services.notifier_dispatcher import SubscribedAtFilteredNotifier
+        from fis_monitor.services.notifier_dispatcher import (
+            RfSubjectFilteredEmailNotifier,
+            SubscribedAtFilteredNotifier,
+        )
 
         dispatcher = container.services.notifier_dispatcher
         registry = dispatcher._registry
         email = registry.get("email")
-        assert isinstance(email, SubscribedAtFilteredNotifier)
-        assert isinstance(email._inner, SmtpEmailNotifier)
+        # Composition chain (ADR-035 amendment + scrd): outermost → innermost
+        # is Rf → SubscribedAt → Smtp so the email channel inherits both
+        # notify-scope (rf_subjects) and subscription-cutoff (subscribed_at).
+        assert isinstance(email, RfSubjectFilteredEmailNotifier)
+        assert isinstance(email._inner, SubscribedAtFilteredNotifier)
+        assert isinstance(email._inner._inner, SmtpEmailNotifier)
 
     def test_registry_has_browser_channel(self, container: Container) -> None:
         dispatcher = container.services.notifier_dispatcher

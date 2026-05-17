@@ -35,9 +35,11 @@ from fis_monitor.domain.interfaces import (
 )
 from fis_monitor.domain.models import (
     EmailConfig,
+    FiltersConfig,
     LotPublicDTO,
     LotUpsertResult,
     NotificationRecord,
+    NotificationsConfig,
     NotifierConfig,
     NotifyResult,
     Settings,
@@ -45,9 +47,11 @@ from fis_monitor.domain.models import (
     SseSmtpFailed,
 )
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
+from fis_monitor.services.filter_matcher import RfSubjectFilterMatcher
 from fis_monitor.services.notifier_dispatcher import (
     MAX_TOTAL_ATTEMPTS,
     NotifierDispatcher,
+    RfSubjectFilteredEmailNotifier,
     SubscribedAtFilteredNotifier,
 )
 from tests.factories import make_lot, make_settings
@@ -1532,6 +1536,125 @@ def test_dispatcher_recovery_path_suppressed_pending_row_promoted_to_permanent_f
     assert (
         notif_repo.status_of(lot.id, "email", "user@example.com") == "permanent_fail"
     ), "stuck pending row must be promoted to permanent_fail to exit recovery"
+
+
+# ===========================================================================
+# Tests: RfSubjectFilteredEmailNotifier (ADR-035 + scrd) — email notify-scope
+# ===========================================================================
+
+_REGION_KHABAROVSK = 89  # default region in tests.factories.make_lot
+
+
+def _make_filters_settings(rf_subjects: list[int]) -> Settings:
+    return Settings(
+        notifications=NotificationsConfig(
+            email=EmailConfig(enabled=True, recipients=["user@example.com"])  # type: ignore[arg-type]
+        ),
+        filters=FiltersConfig(rf_subjects=rf_subjects),
+    )
+
+
+def test_rf_filter_should_suppress_when_region_outside_rf_subjects(caplog):
+    """scrd primary invariant: lot from a region NOT in filters.rf_subjects
+    is suppressed for the email channel."""
+    inner = FakeNotifier(channel_id="email")
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[1]))  # not 89
+    wrapper = RfSubjectFilteredEmailNotifier(
+        inner=inner, config_source=config, matcher=RfSubjectFilterMatcher()
+    )
+    lot = _make_lot_public(region_id=_REGION_KHABAROVSK)
+
+    with caplog.at_level(logging.DEBUG, logger="fis_monitor.services.notifier_dispatcher"):
+        result = wrapper.send(lot, "user@example.com")
+
+    assert result.ok is True
+    assert "suppressed" in (result.detail or "")
+    assert len(inner.send_calls) == 0
+    assert "notification.rf_subjects_dropped" in caplog.text
+
+
+def test_rf_filter_passes_when_region_inside_rf_subjects():
+    """Region IS in rf_subjects → email passes through to inner notifier."""
+    inner = FakeNotifier(channel_id="email")
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[_REGION_KHABAROVSK]))
+    wrapper = RfSubjectFilteredEmailNotifier(
+        inner=inner, config_source=config, matcher=RfSubjectFilterMatcher()
+    )
+    lot = _make_lot_public(region_id=_REGION_KHABAROVSK)
+
+    wrapper.send(lot, "user@example.com")
+
+    assert len(inner.send_calls) == 1
+
+
+def test_rf_filter_empty_rf_subjects_passes_all_lots():
+    """Empty rf_subjects list = no notify-scope filter → pass-through."""
+    inner = FakeNotifier(channel_id="email")
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[]))
+    wrapper = RfSubjectFilteredEmailNotifier(
+        inner=inner, config_source=config, matcher=RfSubjectFilterMatcher()
+    )
+    lot = _make_lot_public(region_id=_REGION_KHABAROVSK)
+
+    wrapper.send(lot, "user@example.com")
+
+    assert len(inner.send_calls) == 1
+
+
+def test_rf_filter_chains_inner_should_suppress():
+    """Composite chain (Rf → SubscribedAt → smtp): if rf passes but inner
+    subscribed_at suppresses, the OUTER ``should_suppress`` must reflect
+    the inner verdict so the dispatcher's pre-reserve hook fires.
+    """
+    smtp = FakeNotifier(channel_id="email")
+    region_repo = FakeRegionSubscriptionRepository()
+    region_repo.seed(_REGION_KHABAROVSK, _NOW + timedelta(days=1))  # next-day → suppress
+    subscribed_wrapper = SubscribedAtFilteredNotifier(
+        inner=smtp, region_sub_repo=region_repo
+    )
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[_REGION_KHABAROVSK]))
+    outer = RfSubjectFilteredEmailNotifier(
+        inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
+    )
+    lot = _make_lot_public(region_id=_REGION_KHABAROVSK)
+
+    assert outer.should_suppress(lot) is True
+    assert len(smtp.send_calls) == 0
+
+
+def test_dispatcher_rf_filtered_email_no_db_row_browser_called():
+    """scrd regression at the dispatcher level: a lot from a non-subscribed
+    region must (a) NOT create a notifications row for email, (b) STILL
+    reach the browser channel for live UI.
+    """
+    smtp = FakeNotifier(channel_id="email")
+    region_repo = FakeRegionSubscriptionRepository()
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[1]))  # not 89
+    email_wrapper = RfSubjectFilteredEmailNotifier(
+        inner=SubscribedAtFilteredNotifier(inner=smtp, region_sub_repo=region_repo),
+        config_source=config,
+        matcher=RfSubjectFilterMatcher(),
+    )
+    browser = FakeBrowserNotifier()
+
+    registry = ExplicitNotifierRegistry()
+    registry.register(email_wrapper)
+    registry.register(browser)
+
+    dispatcher, _registry, notif_repo, *_ = _make_dispatcher(
+        registry=registry, config_source=config
+    )
+    lot = _make_lot_public(region_id=_REGION_KHABAROVSK)
+
+    dispatcher.dispatch(lot)
+    lot_from_q = dispatcher._queue.get_nowait()
+    dispatcher._dispatch_all_channels(lot_from_q)
+
+    assert len(smtp.send_calls) == 0, "email must be suppressed for non-subscribed region"
+    assert len(browser.send_calls) == 1, "browser must receive the lot regardless of rf_subjects"
+    assert (
+        notif_repo.status_of(lot.id, "email", "user@example.com") is None
+    ), "no notifications row for rf_subjects-suppressed lot"
 
 
 # ===========================================================================
