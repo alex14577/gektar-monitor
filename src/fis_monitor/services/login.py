@@ -31,11 +31,12 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
-from fis_monitor.domain.errors import DomainError
+from fis_monitor.domain.errors import BrowserUnavailableError, DomainError
 from fis_monitor.domain.interfaces import Clock, LoginSession
 from fis_monitor.domain.models import LoginOutcome
 
 __all__ = [
+    "BrowserUnavailableError",
     "LoginBusyError",
     "LoginJobHandle",
     "LoginService",
@@ -122,7 +123,14 @@ class LoginService:
         self._on_login_success = on_login_success
         self._on_any_success = on_any_success
 
+        # Browser availability flag — set to False by mark_browser_unavailable()
+        # when the lifespan pre-flight check finds no Chromium executable.
+        self._browser_available: bool = True
+        # Guard: log the "marked unavailable" message only once.
+        self._browser_unavailable_logged: bool = False
+
         # Single-flight lock: held for the duration of the login job.
+
         self._lock = threading.Lock()
 
         # Protects _active_future and _last_outcome from data races.
@@ -143,10 +151,15 @@ class LoginService:
             ``LoginJobHandle`` wrapping the ``Future[LoginOutcome]``.
 
         Raises:
+            BrowserUnavailableError: if the Playwright binary is missing
+                (``mark_browser_unavailable()`` was called in lifespan).
             LoginBusyError: if another login is already in progress.
             RuntimeError: if no executor has been bound yet (``bind_executor``
                 has not been called — only possible in misconfigured startup).
         """
+        if not self._browser_available:
+            raise BrowserUnavailableError()
+
         acquired = self._lock.acquire(blocking=False)
         if not acquired:
             raise LoginBusyError("Login already in progress")
@@ -197,9 +210,14 @@ class LoginService:
             ``LoginJobHandle`` wrapping the ``Future[LoginOutcome]``.
 
         Raises:
+            BrowserUnavailableError: if the Playwright binary is missing
+                (``mark_browser_unavailable()`` was called in lifespan).
             LoginBusyError: if another login/refresh is already in progress.
             RuntimeError: if no executor has been bound yet.
         """
+        if not self._browser_available:
+            raise BrowserUnavailableError()
+
         acquired = self._lock.acquire(blocking=False)
         if not acquired:
             raise LoginBusyError("Login/refresh already in progress")
@@ -253,6 +271,36 @@ class LoginService:
         bound executor.
         """
         self._executor = executor
+
+    def mark_browser_unavailable(self) -> None:
+        """Mark the browser as unavailable (called from lifespan pre-flight).
+
+        Sets ``_browser_available`` to False and logs an ERROR once.  After
+        this call ``start_login()`` and ``start_refresh()`` raise
+        ``BrowserUnavailableError`` immediately without touching the lock.
+
+        Idempotent: subsequent calls are no-ops (the log line is emitted once).
+
+        Concurrency invariant: this method must only be called from lifespan
+        startup BEFORE any HTTP request can reach ``start_login()`` /
+        ``start_refresh()``. Under that invariant, the unsynchronised reads of
+        ``_browser_available`` in those methods are safe on CPython: the GIL
+        serialises simple attribute accesses and the flag is written exactly
+        once before any reader thread exists. A second call site would
+        introduce a real data race — do not add one without a proper
+        ``threading.Event`` or ``Lock``.
+        """
+        self._browser_available = False
+        if not self._browser_unavailable_logged:
+            self._browser_unavailable_logged = True
+            _log.error(
+                "login service marked unavailable: Playwright Chromium binary missing"
+                " — run `playwright install chromium` to enable"
+            )
+
+    def is_browser_available(self) -> bool:
+        """Return True if the Playwright Chromium binary is present and executable."""
+        return self._browser_available
 
     # ------------------------------------------------------------------
     # Internal helpers

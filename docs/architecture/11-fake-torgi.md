@@ -38,6 +38,10 @@ created: 2026-05-15
 
 `redirect_uri` проходит через `_safe_redirect_uri()` — отвергаются абсолютные URL (scheme/netloc), backslash-trick (`/\evil.com`), path traversal (`..` сегменты). Session-store — in-memory dict с Lock, TTL не реализован (dev-only). `/admin` и `/status` middleware не трогает — это публичные dev-endpoint-ы.
 
+### Auth bypass для headless-CI
+
+Если установить `FAKE_TORGI_NO_AUTH=1` (truthy: `1`/`true`/`yes`/`on`) — `SessionMiddleware` пропускает все `/cabinet/*` запросы без проверки cookie. Это нужно когда Playwright headed-окно недоступно (headless WSL без DISPLAY, CI-окружение): `monitor_cycle` сразу получает lot-list HTML и тестирует полный pipeline без шага login. Env-var читается per-request — можно тоглить рантайм. В `scripts/run_e2e_stack.sh` пробрасывается из `E2E_NO_AUTH=1`.
+
 ## Как запустить
 
 ```bash

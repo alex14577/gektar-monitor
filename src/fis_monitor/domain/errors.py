@@ -266,6 +266,22 @@ class SessionExpiredError(DomainError):
     """
 
 
+class BrowserUnavailableError(DomainError):
+    """Playwright browser binary is not installed on this server.
+
+    Raised by ``LoginService.start_login()`` and ``start_refresh()`` when
+    ``mark_browser_unavailable()`` has been called (typically because the
+    lifespan pre-flight check found no Chromium executable).
+
+    Callers should surface this as a hard installation error, NOT as a retry.
+
+    PII contract: message contains only a static string — no paths, user data.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Playwright browser is not installed on the server")
+
+
 class SmtpStarttlsError(UpstreamError):
     """Raised by ``SmtpEmailNotifier.send()`` when the STARTTLS handshake
     returns a non-220 SMTP reply code.

@@ -71,17 +71,48 @@ class FakeMonitorCycle:
 
 
 class FakeLoginService:
-    """Fake LoginService — records bind_executor and cancel_active_job calls."""
+    """Fake LoginService — full public-method stub (anti-mock convention).
+
+    Records side-effects for the methods lifespan exercises (bind_executor,
+    cancel_active_job, mark_browser_unavailable) and provides no-op stubs for
+    the remaining public methods (start_login, start_refresh, status) so that
+    interface drift between this fake and the real LoginService is caught at
+    the type-checker level rather than via silent runtime divergence.
+    """
 
     def __init__(self) -> None:
         self.bound_executor: ThreadPoolExecutor | None = None
         self.cancel_active_job_calls = 0
+        self.mark_browser_unavailable_calls = 0
+        self.start_login_calls = 0
+        self.start_refresh_calls = 0
+        self.status_calls = 0
+        self._browser_available: bool = True
 
     def bind_executor(self, executor: ThreadPoolExecutor) -> None:
         self.bound_executor = executor
 
     def cancel_active_job(self) -> None:
         self.cancel_active_job_calls += 1
+
+    def mark_browser_unavailable(self) -> None:
+        self.mark_browser_unavailable_calls += 1
+        self._browser_available = False
+
+    def is_browser_available(self) -> bool:
+        return self._browser_available
+
+    def start_login(self) -> None:
+        # lifespan does not call start_login; method present only to mirror the
+        # real public surface. Tests that drive logins use the real LoginService.
+        self.start_login_calls += 1
+
+    def start_refresh(self) -> None:
+        self.start_refresh_calls += 1
+
+    def status(self) -> None:
+        self.status_calls += 1
+        return None  # type: ignore[return-value]  # real method returns LoginStatus
 
 
 class FakeBackfillService:
@@ -255,6 +286,34 @@ async def _run_lifespan(app: FastAPI, *, action=None) -> None:
     async with lifespan_cm(app):
         if action is not None:
             await action(app)
+
+
+# ---------------------------------------------------------------------------
+# Anti-mock contract: FakeLoginService exercises every public method.
+# Guards against silent interface drift if LoginService gains a new method
+# without updating this fake (see project orchestrator-playbook §6).
+# ---------------------------------------------------------------------------
+
+
+def test_fake_login_service_all_methods_callable() -> None:
+    """Every public method of FakeLoginService must be invokable.
+
+    Prevents silent divergence between this stub and the real LoginService.
+    If the real service grows a new public method, mypy / interface drift
+    should surface here instead of biting at runtime.
+    """
+    fake = FakeLoginService()
+    fake.bind_executor(ThreadPoolExecutor(max_workers=1))
+    fake.cancel_active_job()
+    fake.mark_browser_unavailable()
+    fake.is_browser_available()
+    fake.start_login()
+    fake.start_refresh()
+    fake.status()
+    assert fake.start_login_calls == 1
+    assert fake.start_refresh_calls == 1
+    assert fake.status_calls == 1
+    assert fake.mark_browser_unavailable_calls == 1
 
 
 # ---------------------------------------------------------------------------

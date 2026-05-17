@@ -17,6 +17,9 @@ Coverage:
  10. start_refresh() while job running → LoginBusyError (single-flight).
  11. start_refresh() without executor → RuntimeError.
  12. start_refresh() outcome needs_manual_login propagates correctly.
+ 13. browser_available defaults to True on fresh LoginService.
+ 14. start_login() raises BrowserUnavailableError when marked unavailable.
+ 15. start_refresh() raises BrowserUnavailableError when marked unavailable.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from fis_monitor.domain.errors import BrowserUnavailableError
 from fis_monitor.domain.models import LoginOutcome
 from fis_monitor.services.login import LoginBusyError, LoginJobHandle, LoginService, LoginStatus
 
@@ -364,3 +368,48 @@ def test_start_refresh_needs_manual_login_propagates() -> None:
     st = svc.status()
     assert st.last_outcome is not None
     assert st.last_outcome.error == "needs_manual_login"
+
+
+# ---------------------------------------------------------------------------
+# Tests: browser availability flag
+# ---------------------------------------------------------------------------
+
+
+def test_browser_available_default_true() -> None:
+    """A fresh LoginService has is_browser_available() == True."""
+    svc, _ = _make_service()
+    assert svc.is_browser_available() is True
+
+
+def test_start_login_raises_browser_unavailable_when_marked() -> None:
+    """start_login() raises BrowserUnavailableError after mark_browser_unavailable()."""
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        svc, _ = _make_service(executor=ex)
+        svc.mark_browser_unavailable()
+        assert svc.is_browser_available() is False
+        with pytest.raises(BrowserUnavailableError):
+            svc.start_login()
+
+
+def test_start_refresh_raises_browser_unavailable_when_marked() -> None:
+    """start_refresh() raises BrowserUnavailableError after mark_browser_unavailable()."""
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        svc, _ = _make_service(executor=ex)
+        svc.mark_browser_unavailable()
+        with pytest.raises(BrowserUnavailableError):
+            svc.start_refresh()
+
+
+def test_mark_browser_unavailable_idempotent(caplog: pytest.LogCaptureFixture) -> None:
+    """mark_browser_unavailable() logs ERROR exactly once on repeated calls."""
+    import logging
+
+    svc, _ = _make_service()
+    with caplog.at_level(logging.ERROR, logger="fis_monitor.services.login"):
+        svc.mark_browser_unavailable()
+        svc.mark_browser_unavailable()
+        svc.mark_browser_unavailable()
+
+    error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(error_records) == 1
+    assert "playwright install chromium" in error_records[0].message

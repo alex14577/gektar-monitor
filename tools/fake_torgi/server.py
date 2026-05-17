@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import sys
 from datetime import UTC, datetime
@@ -86,14 +87,35 @@ app = FastAPI(title="fake-torgi", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
+def _auth_bypass_enabled() -> bool:
+    """Return True when FAKE_TORGI_NO_AUTH env-var enables /cabinet/* bypass.
+
+    Used by SessionMiddleware to short-circuit the fake-ESIA flow so monitor_cycle
+    can hit /cabinet/* without first running a Playwright headed login. Intended
+    for headless-CI / smoke-test environments where running a real browser is
+    impractical (e.g. WSL without DISPLAY). Accepted truthy values: 1/true/yes/on.
+    Evaluated per-request so it can be toggled at runtime without restart.
+    """
+    return os.environ.get("FAKE_TORGI_NO_AUTH", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 class SessionMiddleware(BaseHTTPMiddleware):
-    """Redirect unauthenticated /cabinet/* requests to fake-ESIA authorize."""
+    """Redirect unauthenticated /cabinet/* requests to fake-ESIA authorize.
+
+    Bypassed entirely when ``FAKE_TORGI_NO_AUTH=1`` is set in the environment
+    (see :func:`_auth_bypass_enabled`).
+    """
 
     _PROTECTED_PREFIX = "/cabinet/"
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path.startswith(self._PROTECTED_PREFIX):
+        if path.startswith(self._PROTECTED_PREFIX) and not _auth_bypass_enabled():
             token = request.cookies.get("fis_session")
             if not _is_valid_session(token):
                 redirect_uri = path
@@ -332,4 +354,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args(sys.argv[1:])
+    if _auth_bypass_enabled():
+        print(
+            "fake-torgi: FAKE_TORGI_NO_AUTH=1 — /cabinet/* auth bypass ENABLED "
+            "(monitor_cycle will hit endpoints without fake-ESIA login).",
+            file=sys.stderr,
+        )
     uvicorn.run(app, host=args.host, port=args.port)

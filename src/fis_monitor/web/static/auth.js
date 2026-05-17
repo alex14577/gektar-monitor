@@ -131,7 +131,18 @@
           }, RATE_LIMIT_DISABLE_MS);
         } else if (r.status === 503) {
           _setButtonState(btn, false, originalText);
-          _toast('Сервис запускается — попробуйте через несколько секунд');
+          r.json().then(function (body) {
+            var detail = (body && body.detail) ? body.detail : '';
+            if (detail.indexOf('browser is not installed') !== -1) {
+              var msg = 'Браузер не установлен на сервере. Установите Chromium: `playwright install chromium`';
+              _toast(msg);
+              _announce(msg, true);
+            } else {
+              _toast('Сервис запускается — попробуйте через несколько секунд');
+            }
+          }).catch(function () {
+            _toast('Сервис запускается — попробуйте через несколько секунд');
+          });
         } else {
           _setButtonState(btn, false, originalText);
           _toast('Ошибка запуска входа (' + r.status + ')');

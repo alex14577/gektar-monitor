@@ -26,6 +26,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+from fis_monitor.domain.errors import BrowserUnavailableError
 from fis_monitor.services.login import LoginBusyError, LoginService, LoginStatus
 from fis_monitor.web._helpers import client_ip
 from fis_monitor.web.deps import get_login
@@ -82,6 +83,12 @@ def auth_start(
 
     try:
         svc.start_login()
+    except BrowserUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Playwright browser is not installed on the server — "
+                   "run `playwright install chromium` to enable login.",
+        ) from exc
     except LoginBusyError as exc:
         raise HTTPException(status_code=409, detail="Login already in progress") from exc
     except RuntimeError as exc:
@@ -160,6 +167,12 @@ def auth_refresh(
 
     try:
         svc.start_refresh()
+    except BrowserUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Playwright browser is not installed on the server — "
+                   "run `playwright install chromium` to enable login.",
+        ) from exc
     except LoginBusyError as exc:
         raise HTTPException(status_code=409, detail="Login already in progress") from exc
     except RuntimeError as exc:

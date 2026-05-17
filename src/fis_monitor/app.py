@@ -206,6 +206,18 @@ async def _lifespan_impl(
         container = container_factory(settings, data_dir)
         app.state.container = container
 
+        # Pre-flight: verify Playwright Chromium binary is present.
+        # On failure, mark login service unavailable without crashing — other
+        # features (feed, settings, onboarding) continue to work normally.
+        from fis_monitor.infra.playwright.preflight import chromium_executable_exists
+
+        if not chromium_executable_exists():
+            container.services.login.mark_browser_unavailable()
+            logger.error(
+                "lifespan: Playwright Chromium binary not found. "
+                "Login is disabled. Run `playwright install chromium` to enable.",
+            )
+
         # pw_executor: one-worker pool for Playwright headed-login (phase 1.5 R3-C3).
         pw_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw-login")
         container.services.login.bind_executor(pw_executor)  # j19 closed here

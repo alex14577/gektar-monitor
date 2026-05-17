@@ -77,6 +77,16 @@ kill_if_running "$FIS_PID_FILE"
 kill_if_running "$FAKE_PID_FILE"
 rm -f "$DATA_DIR/app.lock"
 
+# ── Auth bypass mode ─────────────────────────────────────────────────
+# Set E2E_NO_AUTH=1 in the calling env to skip the fake-ESIA login step.
+# Useful for headless-CI / WSL-without-DISPLAY where Playwright can't open
+# a real browser. Propagates to fake_torgi as FAKE_TORGI_NO_AUTH.
+FAKE_TORGI_NO_AUTH="${E2E_NO_AUTH:-0}"
+if [[ "$FAKE_TORGI_NO_AUTH" == "1" ]]; then
+  log "Auth bypass ENABLED — /cabinet/* will respond without fake-ESIA login"
+fi
+export FAKE_TORGI_NO_AUTH
+
 # ── Launch fake_torgi ────────────────────────────────────────────────
 log "Starting fake_torgi on :${FAKE_PORT}..."
 uv run python tools/fake_torgi/server.py \
@@ -89,6 +99,7 @@ wait_ready "http://127.0.0.1:${FAKE_PORT}/status" "fake_torgi"
 log "Starting fis-monitor on :${FIS_PORT}..."
 FIS_TARGET__BASE_URL="http://127.0.0.1:${FAKE_PORT}" \
 LOG_JSON=0 \
+FIS_LOG_LEVEL_DEFAULT=DEBUG \
   uv run fis-monitor \
     --host 127.0.0.1 \
     --port "$FIS_PORT" \

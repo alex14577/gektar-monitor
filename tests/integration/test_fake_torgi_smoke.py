@@ -326,6 +326,33 @@ async def test_open_redirect_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_cabinet_bypass_via_env_var(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FAKE_TORGI_NO_AUTH=1 disables SessionMiddleware → /cabinet/* responds 200 without cookie."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    monkeypatch.setenv("FAKE_TORGI_NO_AUTH", "1")
+    async with _make_client() as c:
+        resp = await c.get("/cabinet/", follow_redirects=False)
+    assert resp.status_code == 200, resp.text
+    assert "Cabinet" in resp.text or "cabinet" in resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["0", "false", "", "no"])
+async def test_cabinet_bypass_disabled_when_env_falsy(
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Falsy / unset FAKE_TORGI_NO_AUTH keeps the auth requirement."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    monkeypatch.setenv("FAKE_TORGI_NO_AUTH", value)
+    async with _make_client() as c:
+        resp = await c.get("/cabinet/", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/fake-esia/authorize" in resp.headers["location"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "redirect_uri",
     [

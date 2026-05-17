@@ -17,6 +17,8 @@ Coverage:
  10. POST /auth/refresh → 409 when busy.
  11. POST /auth/refresh → 429 when rate-limited.
  12. POST /auth/refresh → 503 when no executor.
+ 13. POST /auth/start → 503 with browser-missing detail when browser unavailable.
+ 14. POST /auth/refresh → 503 with browser-missing detail when browser unavailable.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from concurrent.futures import Future
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fis_monitor.domain.errors import BrowserUnavailableError
 from fis_monitor.domain.models import LoginOutcome
 from fis_monitor.services.login import (
     LoginBusyError,
@@ -47,6 +50,7 @@ class FakeLoginService:
     Configurable to simulate: idle, running, busy, no-executor (503), outcomes.
     ``refresh_busy`` controls whether ``start_refresh()`` raises LoginBusyError
     independently of the ``busy`` flag (allows testing refresh-specific 409).
+    ``browser_unavailable`` simulates a missing Playwright binary.
     """
 
     def __init__(
@@ -58,6 +62,7 @@ class FakeLoginService:
         no_executor: bool = False,
         refresh_busy: bool = False,
         refresh_no_executor: bool = False,
+        browser_unavailable: bool = False,
     ) -> None:
         self._busy = busy
         self._running = running
@@ -65,14 +70,18 @@ class FakeLoginService:
         self._no_executor = no_executor
         self._refresh_busy = refresh_busy
         self._refresh_no_executor = refresh_no_executor
+        self._browser_unavailable = browser_unavailable
         self.start_called = False
         self.cancel_called = False
         self.status_called = False
         self.bind_executor_called = False
         self.refresh_called = False
+        self.mark_browser_unavailable_called = False
 
     def start_login(self) -> LoginJobHandle:
         self.start_called = True
+        if self._browser_unavailable:
+            raise BrowserUnavailableError()
         if self._busy:
             raise LoginBusyError("Login already in progress")
         if self._no_executor:
@@ -85,6 +94,8 @@ class FakeLoginService:
 
     def start_refresh(self) -> LoginJobHandle:
         self.refresh_called = True
+        if self._browser_unavailable:
+            raise BrowserUnavailableError()
         if self._refresh_busy or self._busy:
             raise LoginBusyError("Login/refresh already in progress")
         if self._refresh_no_executor or self._no_executor:
@@ -104,6 +115,13 @@ class FakeLoginService:
 
     def bind_executor(self, executor: object) -> None:
         self.bind_executor_called = True
+
+    def mark_browser_unavailable(self) -> None:
+        self.mark_browser_unavailable_called = True
+        self._browser_unavailable = True
+
+    def is_browser_available(self) -> bool:
+        return not self._browser_unavailable
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +176,11 @@ def test_fake_login_service_all_methods() -> None:
 
     fake.bind_executor(object())
     assert fake.bind_executor_called is True
+
+    assert fake.is_browser_available() is True
+    fake.mark_browser_unavailable()
+    assert fake.mark_browser_unavailable_called is True
+    assert fake.is_browser_available() is False
 
 
 # ---------------------------------------------------------------------------
@@ -382,3 +405,34 @@ def test_auth_refresh_503_when_no_executor() -> None:
         resp = client.post("/auth/refresh")
     assert resp.status_code == 503
     assert "not initialized" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# 503 Service Unavailable — browser binary missing (BrowserUnavailableError)
+# ---------------------------------------------------------------------------
+
+
+def test_auth_start_returns_503_when_browser_unavailable() -> None:
+    """POST /auth/start returns 503 with browser-missing detail when Playwright is absent."""
+    fake = FakeLoginService(browser_unavailable=True)
+    rl = RateLimiter(max_requests=100, window_seconds=60.0)
+    app = _build_app(fake, rate_limiter=rl)
+    with TestClient(app) as client:
+        resp = client.post("/auth/start")
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert "browser is not installed" in detail
+    assert "playwright install chromium" in detail
+
+
+def test_auth_refresh_returns_503_when_browser_unavailable() -> None:
+    """POST /auth/refresh returns 503 with browser-missing detail when Playwright is absent."""
+    fake = FakeLoginService(browser_unavailable=True)
+    rl = RateLimiter(max_requests=100, window_seconds=60.0)
+    app = _build_app(fake, refresh_rate_limiter=rl)
+    with TestClient(app) as client:
+        resp = client.post("/auth/refresh")
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert "browser is not installed" in detail
+    assert "playwright install chromium" in detail
