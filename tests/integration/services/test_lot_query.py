@@ -43,14 +43,14 @@ from fis_monitor.services.lot_query import (
 # ---------------------------------------------------------------------------
 
 _NOW = datetime(2026, 5, 14, 12, 0, 0, tzinfo=UTC)
-_FIRST_SEEN_HOT = datetime(2026, 5, 14, 11, 30, 0, tzinfo=UTC)   # 30 min ago → hot
-_FIRST_SEEN_WARM = datetime(2026, 5, 13, 12, 0, 0, tzinfo=UTC)   # 24 h ago → cold/warm boundary
-_FIRST_SEEN_COLD = datetime(2026, 5, 12, 0, 0, 0, tzinfo=UTC)    # >1 day ago → cold
+_FIRST_SEEN_HOT = datetime(2026, 5, 14, 11, 30, 0, tzinfo=UTC)  # 30 min ago → hot
+_FIRST_SEEN_WARM = datetime(2026, 5, 13, 12, 0, 0, tzinfo=UTC)  # 24 h ago → cold/warm boundary
+_FIRST_SEEN_COLD = datetime(2026, 5, 12, 0, 0, 0, tzinfo=UTC)  # >1 day ago → cold
 
 _LOT_COLS = (
     "id, cadastral_no, area_sqm, region, municipality, land_category, "
-    "permitted_use, ogv, status, date_create, date_update, lat, lon, "
-    "has_boundaries, raw_json, parser_version, first_seen, last_seen, "
+    "permitted_use, ogv, status, date_create, date_update, date_registry, "
+    "lat, lon, has_boundaries, raw_json, parser_version, first_seen, last_seen, "
     "detail_fetched_at, enrichment_status, enrichment_retries, "
     "enrichment_last_error, last_seen_at, last_status, last_status_at, "
     "is_active, inactive_reason, inactive_since, inactive_confirmed_at, "
@@ -70,40 +70,42 @@ def _make_db_row(
     """Build an in-memory sqlite3.Row matching the lots SELECT column list."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.execute(
-        f"CREATE TABLE lots ({_LOT_COLS})"
-    )
+    conn.execute(f"CREATE TABLE lots ({_LOT_COLS})")
     ts = first_seen.isoformat()
     now_ts = _NOW.isoformat()
     conn.execute(
-        "INSERT INTO lots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO lots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             lot_id,
             f"27:01:{lot_id:08d}:0001",  # cadastral_no
             area_sqm,
             region,
-            "Тест",          # municipality
-            None,            # land_category
-            None,            # permitted_use
-            None,            # ogv
+            "Тест",  # municipality
+            None,  # land_category
+            None,  # permitted_use
+            None,  # ogv
             status,
-            now_ts,          # date_create
-            None,            # date_update
-            None, None,      # lat, lon
-            None,            # has_boundaries
-            "{}",            # raw_json
-            1,               # parser_version
-            ts,              # first_seen
-            ts,              # last_seen
-            None,            # detail_fetched_at
-            "done",          # enrichment_status
-            0,               # enrichment_retries
-            None,            # enrichment_last_error
-            ts,              # last_seen_at
-            None,            # last_status
-            None,            # last_status_at
+            now_ts,  # date_create
+            None,  # date_update
+            None,  # date_registry
+            None,
+            None,  # lat, lon
+            None,  # has_boundaries
+            "{}",  # raw_json
+            1,  # parser_version
+            ts,  # first_seen
+            ts,  # last_seen
+            None,  # detail_fetched_at
+            "done",  # enrichment_status
+            0,  # enrichment_retries
+            None,  # enrichment_last_error
+            ts,  # last_seen_at
+            None,  # last_status
+            None,  # last_status_at
             is_active,
-            None, None, None,  # inactive_reason, inactive_since, inactive_confirmed_at
+            None,
+            None,
+            None,  # inactive_reason, inactive_since, inactive_confirmed_at
             region_id,
         ),
     )
@@ -465,9 +467,7 @@ def test_build_query_sql_fragments(
 
 def test_build_query_regions_params() -> None:
     svc = _make_service()
-    _sql, params = svc._build_query(
-        LotFilters(regions=(10, 20)), last_id=None, limit=5
-    )
+    _sql, params = svc._build_query(LotFilters(regions=(10, 20)), last_id=None, limit=5)
     assert "10" in params
     assert "20" in params
 
@@ -479,7 +479,7 @@ def test_build_query_area_sqm_params() -> None:
         last_id=None,
         limit=5,
     )
-    assert 100 in params   # truncated to int
+    assert 100 in params  # truncated to int
     assert 500 in params
 
 
