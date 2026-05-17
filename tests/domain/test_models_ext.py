@@ -42,6 +42,7 @@ from fis_monitor.domain import (
     SessionStatus,
     Settings,
     SoundEscalationConfig,
+    SseCycleDone,
     SseCycleError,
     SseEvent,
     SseLotNew,
@@ -490,6 +491,7 @@ def test_sse_event_union_members():
         SseSessionExpired,
         SseLotNew,
         SseLotStatus,
+        SseCycleDone,
     }
 
 

@@ -49,6 +49,7 @@ from fis_monitor.domain.models import (
     Settings,
     SmtpCredentials,
     SoundEscalationConfig,
+    SseCycleDone,
     SseCycleError,
     SseEvent,
     SseLotNew,
@@ -90,6 +91,7 @@ __all__ = [  # noqa: RUF022 — grouped by responsibility, NOT alphabetical
     "SseSessionExpired",
     "SseLotNew",
     "SseLotStatus",
+    "SseCycleDone",
     # Settings tree
     "Settings",
     "FiltersConfig",

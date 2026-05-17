@@ -472,6 +472,15 @@ class SseLotNew(BaseModel):
     priority: ClassVar[Literal["normal"]] = "normal"
 class SseLotStatus(BaseModel):
     priority: ClassVar[Literal["normal"]] = "normal"
+class SseCycleDone(BaseModel):
+    # Terminal UI signal — published exactly once per `run_cycle` invocation
+    # (happy path + every `_close_with_*` helper + session-expired branch).
+    # Carries cycle_id, status (ok|error), lots_fetched, new_lots, duration_ms.
+    # Consumed by `#cycle-done-listener` in base.html.jinja to clear the
+    # "Идёт проверка" spinner injected by POST /cycle/run. Direct publish from
+    # `MonitorCycleService` (same precedent as SseLotStatus; ADR-030 does not
+    # apply — no recipient, no `notifications` row).
+    priority: ClassVar[Literal["normal"]] = "normal"
 ```
 
 > `EventSubscription` (события EventBus) и `ConfigSubscription` (callback на config-reload) — **разные имена**, чтобы не путать.

@@ -30,7 +30,13 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment
 
-from fis_monitor.domain.models import LotPublicDTO, LotUserDTO, SseEvent, SseLotNew
+from fis_monitor.domain.models import (
+    LotPublicDTO,
+    LotUserDTO,
+    SseCycleDone,
+    SseEvent,
+    SseLotNew,
+)
 from fis_monitor.infra.sse.sse_stream import encode_sse_event
 
 if TYPE_CHECKING:
@@ -326,6 +332,9 @@ def make_html_sse_encoder(env: Environment) -> Callable[[SseEvent], bytes]:
     """
 
     def _encode(event: SseEvent) -> bytes:
+        if isinstance(event, SseCycleDone):
+            return _encode_cycle_done(env, event)
+
         if not isinstance(event, SseLotNew):
             return encode_sse_event(event)
 
@@ -349,3 +358,19 @@ def make_html_sse_encoder(env: Environment) -> Callable[[SseEvent], bytes]:
         return f"event: {event.event}\n{data_lines}\n\n".encode()
 
     return _encode
+
+
+_CYCLE_DONE_TEMPLATE = "partials/_cycle_done.html.jinja"
+
+
+def _encode_cycle_done(env: Environment, event: SseCycleDone) -> bytes:
+    """Render an ``SseCycleDone`` to an HTML SSE chunk for ``#cycle-result``.
+
+    The partial receives ``event`` as its sole context variable — no PII path
+    (counters + cycle_id only). Mirrors the SSE multi-line ``data:`` discipline
+    used for ``lot.new`` poster rendering above.
+    """
+    template = env.get_template(_CYCLE_DONE_TEMPLATE)
+    html: str = template.render(event=event)
+    data_lines = "\n".join(f"data: {line}" for line in html.split("\n"))
+    return f"event: {event.event}\n{data_lines}\n\n".encode()

@@ -61,6 +61,7 @@ from fis_monitor.domain.models import (
     CycleResult,
     ErrorCategory,
     Lot,
+    SseCycleDone,
     SseCycleError,
     SseSessionExpired,
 )
@@ -494,6 +495,7 @@ class MonitorCycleService:
                 error="session_expired",
             )
             self._cycles_repo.close(cycle_id, result)
+            self._publish_cycle_done(result)
             return result
         except ParseBugError as exc:
             return self._close_with_parse_bug(
@@ -640,6 +642,7 @@ class MonitorCycleService:
             error=None,
         )
         self._cycles_repo.close(cycle_id, result)
+        self._publish_cycle_done(result)
         logger.debug(
             "monitor_cycle.cycle.finish",
             extra={
@@ -655,6 +658,47 @@ class MonitorCycleService:
     # ------------------------------------------------------------------
     # Private error-handling helpers
     # ------------------------------------------------------------------
+
+    def _publish_cycle_done(self, result: CycleResult) -> None:
+        """Publish ``SseCycleDone`` so the UI can clear the "Идёт проверка" spinner.
+
+        Called exactly once per ``run_cycle`` invocation — happy path and every
+        ``_close_with_*`` error helper. On error paths the critical
+        ``SseCycleError`` (or ``SseSessionExpired``) is published first; this
+        event is the terminal UI signal that the cycle has ended regardless of
+        outcome.
+
+        Duration is derived from the ``CycleResult`` timestamps so the bus
+        timestamp is internally consistent with what the DB cycles row records.
+        ``finished_at - started_at`` may be slightly negative if a clock skews
+        between the two ``Clock.now()`` calls — clamp to 0 to keep the payload
+        a non-negative integer (``StrictInt`` on ``duration_ms``).
+        """
+        duration_ms = max(
+            0,
+            int((result.finished_at - result.started_at).total_seconds() * 1000),
+        )
+        self._event_bus.publish(
+            SseCycleDone(
+                timestamp=self._clock.now(),
+                cycle_id=result.id,
+                status=result.status,
+                lots_fetched=result.lots_fetched,
+                new_lots=result.new_lots,
+                duration_ms=duration_ms,
+            )
+        )
+        logger.info(
+            "monitor_cycle.cycle.done.published",
+            extra={
+                "cycle_id": result.id,
+                "region_id": result.region,
+                "status": result.status,
+                "lots_fetched": result.lots_fetched,
+                "new_lots": result.new_lots,
+                "duration_ms": duration_ms,
+            },
+        )
 
     def _close_with_upstream_error(
         self,
@@ -686,6 +730,7 @@ class MonitorCycleService:
             error=error_str,
         )
         self._cycles_repo.close(cycle_id, result)
+        self._publish_cycle_done(result)
         return result
 
     def _close_with_parse_bug(
@@ -717,6 +762,7 @@ class MonitorCycleService:
             error=error_str,
         )
         self._cycles_repo.close(cycle_id, result)
+        self._publish_cycle_done(result)
         return result
 
     def _close_with_unexpected_error(
@@ -729,7 +775,15 @@ class MonitorCycleService:
         lots_fetched: int = 0,
         new_lots: int = 0,
     ) -> CycleResult:
-        """Publish SseCycleError(internal_error), close cycle. Caller MUST re-raise ``exc``."""
+        """Publish SseCycleError(internal_error), close cycle. Caller MUST re-raise ``exc``.
+
+        CONTRACT (caller-enforced): the original exception is NOT re-raised
+        inside this helper because the unit tests for `_close_with_*` use it
+        as a building block. Every call site is responsible for re-raising
+        immediately after this method returns — failing to do so silently
+        swallows the bug and corrupts the supervisor's backoff state.
+        See ``run_cycle`` for the canonical call pattern.
+        """
         self._event_bus.publish(
             SseCycleError(
                 timestamp=self._clock.now(),
@@ -750,4 +804,5 @@ class MonitorCycleService:
             error=error_str,
         )
         self._cycles_repo.close(cycle_id, result)
+        self._publish_cycle_done(result)
         return result

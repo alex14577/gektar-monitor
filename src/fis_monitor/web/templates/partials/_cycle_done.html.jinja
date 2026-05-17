@@ -1,0 +1,18 @@
+{#-
+  cycle.done SSE fragment — replaces the static "Идёт проверка" spinner
+  injected by POST /cycle/run into #cycle-result.
+
+  Producer: src/fis_monitor/web/sse_encoder.py renders this partial when an
+  SseCycleDone event arrives on the bus. The fragment is consumed by the
+  hidden listener span #cycle-done-listener in base.html.jinja which targets
+  #cycle-result with hx-swap="innerHTML".
+
+  Context: ``event`` is the SseCycleDone instance (NOT a Lot — no PII).
+  Available fields: ``status``, ``lots_fetched``, ``new_lots``,
+  ``duration_ms`` (StrictInt non-negative), ``cycle_id``.
+-#}
+{%- if event.status == "ok" -%}
+<span class="cycle-result cycle-result--ok">Проверка завершена: {{ event.lots_fetched }} лотов, {{ event.new_lots }} новых ({{ (event.duration_ms / 1000) | round(1) }} с)</span>
+{%- else -%}
+<span class="cycle-result cycle-result--err">Проверка завершена с ошибкой</span>
+{%- endif -%}

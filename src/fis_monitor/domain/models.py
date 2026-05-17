@@ -924,6 +924,34 @@ class SseLotStatus(BaseModel):
     event_type: Literal["gone", "changed"]
 
 
+class SseCycleDone(BaseModel):
+    """Normal event: monitor cycle finished (terminal UI signal).
+
+    Published exactly once per ``run_cycle`` invocation, regardless of
+    outcome — both happy path and every ``_close_with_*`` error helper.
+    Carries summary counters so the UI can replace the "Идёт проверка"
+    spinner with a concrete result ("12 лотов, 3 новых, 1.4с").
+
+    On error paths, ``SseCycleError`` (critical) is published first to
+    drive the error UX; ``SseCycleDone(status="error")`` is the secondary
+    terminal signal so the spinner clears regardless of branch.
+
+    No PII vectors: counters and a numeric cycle id only.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["normal"]] = "normal"
+
+    event: Literal["cycle.done"] = "cycle.done"
+    timestamp: datetime
+    cycle_id: StrictInt
+    status: Literal["ok", "error"]
+    lots_fetched: StrictInt
+    new_lots: StrictInt
+    duration_ms: StrictInt
+
+
 # ---------------------------------------------------------------------------
 # Conversion helpers — public domain functions
 # ---------------------------------------------------------------------------
@@ -1037,4 +1065,11 @@ class ProviderSuggestion:
 #: `EventBus.subscribe() -> EventSubscription[SseEvent]` use this alias.
 #: Adding a new event type = extend this union AND register its priority
 #: ClassVar; nothing else changes (OCP).
-type SseEvent = SseCycleError | SseSmtpFailed | SseSessionExpired | SseLotNew | SseLotStatus
+type SseEvent = (
+    SseCycleError
+    | SseSmtpFailed
+    | SseSessionExpired
+    | SseLotNew
+    | SseLotStatus
+    | SseCycleDone
+)

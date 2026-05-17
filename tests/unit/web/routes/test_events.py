@@ -612,3 +612,71 @@ class TestHtmlSseEncoding:
         assert 'data-action="star"' not in payload, "Star button must be absent from poster"
         assert "▼ Детали" not in payload, "Expand button must be absent from poster"
         assert "lot__appeared" in payload, "published_at must appear in .lot__appeared span"
+
+
+# ---------------------------------------------------------------------------
+# #18 — SseCycleDone HTML rendering for #cycle-result spinner clear
+# ---------------------------------------------------------------------------
+
+
+class TestSseCycleDoneHtmlEncoding:
+    """gektar_monitor-akqg: SseCycleDone → HTML fragment via _cycle_done.html.jinja.
+
+    The frontend listener (#cycle-done-listener in base.html.jinja) swaps the
+    rendered HTML into #cycle-result, replacing the static "Идёт проверка"
+    spinner from POST /cycle/run.
+    """
+
+    def _emit(self, event: SseEvent) -> str:
+        from fis_monitor.web.sse_encoder import make_html_sse_encoder
+
+        streamer = _make_finite_streamer([event])
+        templates = build_templates()
+        streamer.bind_event_encoder(make_html_sse_encoder(templates.env))
+        client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
+        with client.stream("GET", "/events") as resp:
+            assert resp.status_code == 200
+            chunks = list(resp.iter_bytes(chunk_size=4096))
+        return b"".join(chunks).decode()
+
+    def test_cycle_done_ok_renders_ok_span_with_counters(self) -> None:
+        from fis_monitor.domain.models import SseCycleDone
+
+        evt = SseCycleDone(
+            timestamp=_TS,
+            cycle_id=42,
+            status="ok",
+            lots_fetched=12,
+            new_lots=3,
+            duration_ms=1400,
+        )
+
+        payload = self._emit(evt)
+
+        assert "event: cycle.done" in payload
+        assert "cycle-result--ok" in payload
+        # Counters in the rendered fragment so the user sees a concrete result.
+        assert "12" in payload and "3" in payload
+        # Duration rendered in seconds with one decimal (1400 ms → 1.4 с).
+        assert "1.4" in payload
+        # No JSON envelope leakage.
+        assert '"event":"cycle.done"' not in payload
+
+    def test_cycle_done_error_renders_err_span(self) -> None:
+        from fis_monitor.domain.models import SseCycleDone
+
+        evt = SseCycleDone(
+            timestamp=_TS,
+            cycle_id=99,
+            status="error",
+            lots_fetched=0,
+            new_lots=0,
+            duration_ms=0,
+        )
+
+        payload = self._emit(evt)
+
+        assert "event: cycle.done" in payload
+        assert "cycle-result--err" in payload
+        # Error message present, counters NOT rendered for error variant.
+        assert "ошибкой" in payload
