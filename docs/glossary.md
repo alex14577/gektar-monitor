@@ -391,6 +391,8 @@
 
 - **logging-satellite parametrize rule** — Тактика для logging-тестов: размер satellite-файла `test_*_logging.py` ≤120 строк (по `wc -l`); дублирующиеся (≥70% тела) fixtures между двумя+ файлами обязательно выносятся в shared conftest; однотипные assert «message contains X/Y/Z» одного события схлопываются в один `@pytest.mark.parametrize` тест. Разные события / разные уровни — параметризация не обязательна. SSOT: [[architecture/09-test-strategy]] §Logging tests.
 
+- **async-sync-repo check** — CI guard (`scripts/check_async_sync_repo.py`) that uses AST analysis to detect `async def` route handlers in `src/fis_monitor/web/routes/` that call a sync SQLite repository method without wrapping in `asyncio.to_thread`. Prevents event-loop blocking regressions (incident bd 45el). Suppressed per-call with `# noqa: async-sync-repo`. See [[decisions/ADR-044-async-sync-repo-ast-check|ADR-044]].
+
 ## См. также
 
 - [[decisions-log]]
