@@ -256,6 +256,8 @@
 
 - **Page[T]** (`services/lot_query.py`) — PEP-695 generic `@dataclass(frozen=True)` envelope для paginated results. Поля: `items: tuple[T, ...]`, `next_cursor: str | None`, `has_more: bool`. Контракт `has_more=True ⇔ next_cursor is not None`. Тип-параметр явный: `Page[LotUserDTO]` в публичном API сервиса.
 
+- **toggle_archive / archived (semantic overload)** — `LotUserStateService.toggle_archive(lot_id)` — UX-метод маршрута `POST /lots/{lot_id}/archive` (кнопка "Архив"). **Не существует отдельной колонки `archived`**: под капотом используется `UserStateRepository.set_submitted` / `LotUserState.submitted`. Это намеренный semantic overload: `submitted=True` ≡ "lot is archived by user". Оверлоад полностью инкапсулирован в `LotUserStateService` — снаружи сервиса `submitted` не интерпретируется как "архивировано". Если в будущем появится продуктовый смысл "submitted to deal" (отдельный от архивации), нужна миграция (Option B из [[decisions/ADR-042-toggle-archive-submitted-semantic-overload|ADR-042]]). Триггер для сплита: одновременно нужны оба значения `submitted` независимо.
+
 ## Веб-стек (Wave 7)
 
 - **CsrfHostOriginMiddleware** (`web/middleware.py`) — pure-ASGI middleware (НЕ Starlette `BaseHTTPMiddleware` — избегает streaming-проблем): на **state-changing methods** (POST/PUT/PATCH/DELETE) проверяет `Host` против allow-list И `Origin` против whitelist (точное совпадение, lower-case normalised на конструкторе). Mismatch → **421 Misdirected Request** (унифицировано Host- и Origin-fail per [[decisions/ADR-011-dns-rebinding-host-allowlist|ADR-011]] правка). Safe methods (GET/HEAD/OPTIONS) пропускаются. `scope["type"] != "http"` (lifespan/websocket) — early-return. Реализовано в oxy.1.

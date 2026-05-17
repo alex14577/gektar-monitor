@@ -76,8 +76,12 @@ class LotUserStateService:
     def toggle_archive(self, lot_id: int) -> None:
         """Toggle the archived flag for the given lot.
 
-        Archived maps to submitted in the underlying model (re-used boolean flag
-        available in LotUserState / UserStateRepository without schema changes).
+        SEMANTIC NOTE: "archived" (UX) is persisted via ``set_submitted`` /
+        ``LotUserState.submitted`` — there is no separate ``archived`` column.
+        This intentional overload is documented in
+        ``docs/decisions/ADR-042-toggle-archive-submitted-semantic-overload.md``.
+        If a distinct "submitted to deal" concept is ever needed, split the
+        column per Option B in that ADR.
 
         Raises LotNotFoundError if the lot does not exist.
         """
