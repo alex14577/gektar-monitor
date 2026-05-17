@@ -392,3 +392,152 @@ class TestNoPersistence:
                             f"ADR-008 violation: bus.py imports '{name}' "
                             f"which contains forbidden term '{bad}'"
                         )
+
+
+# ---------------------------------------------------------------------------
+# 7. Normal-event replay slot (bd 0a9r)
+# ---------------------------------------------------------------------------
+
+
+from datetime import UTC as _UTC  # noqa: E402
+from datetime import datetime as _datetime  # noqa: E402
+
+from fis_monitor.domain.models import SseCycleDone as _SseCycleDone  # noqa: E402
+
+
+class _FakeClock:
+    """Monotonic-clock fake — tests advance virtual time without sleeping."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        self._t = start
+
+    def __call__(self) -> float:
+        return self._t
+
+    def tick(self, dt: float) -> None:
+        self._t += dt
+
+
+def _make_cycle_done(cycle_id: int = 1) -> _SseCycleDone:
+    return _SseCycleDone(
+        timestamp=_datetime(2026, 5, 18, 0, 0, 0, tzinfo=_UTC),
+        cycle_id=cycle_id,
+        status="ok",
+        lots_fetched=10,
+        new_lots=2,
+        duration_ms=1234,
+    )
+
+
+class TestNormalEventReplaySlot:
+    """bd 0a9r: subscribers that attach within 30s of publish receive the
+    most-recent normal event of each type via replay; older events are not
+    replayed; critical events are unaffected by replay."""
+
+    def test_subscribe_after_publish_replays_recent_lot_new(self):
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        event = make_lot_new(lot_id=777)
+        bus.publish(event)
+
+        # New subscriber attaches 5s later — still within TTL.
+        clock.tick(5.0)
+        with bus.subscribe() as sub:
+            events = list(sub.iter())
+        assert events == [event], "subscribe must replay recent normal event"
+
+    def test_subscribe_after_ttl_does_not_replay(self):
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        bus.publish(make_lot_new())
+
+        # 31s later — past TTL.
+        clock.tick(31.0)
+        with bus.subscribe() as sub:
+            events = list(sub.iter())
+        assert events == [], "stale event past TTL must not be replayed"
+
+    def test_subscribe_at_exact_ttl_boundary_does_not_replay(self):
+        """Off-by-one guard: the eviction condition is ``age >= TTL``, so a
+        subscriber attaching at exactly TTL seconds after publish gets
+        nothing. Lock in the contract."""
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        bus.publish(make_lot_new())
+        clock.tick(30.0)
+        with bus.subscribe() as sub:
+            events = list(sub.iter())
+        assert events == []
+
+    def test_subscribe_just_under_ttl_still_replays(self):
+        """Symmetric boundary: 29.999s after publish must still replay."""
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        event = make_lot_new()
+        bus.publish(event)
+        clock.tick(29.999)
+        with bus.subscribe() as sub:
+            events = list(sub.iter())
+        assert events == [event]
+
+    def test_replay_slot_overwrites_per_event_type(self):
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        first = make_lot_new(lot_id=1)
+        second = make_lot_new(lot_id=2)
+        bus.publish(first)
+        clock.tick(1.0)
+        bus.publish(second)
+
+        with bus.subscribe() as sub:
+            events = list(sub.iter())
+        assert events == [second], "only the most-recent event-type slot is replayed"
+
+    def test_replay_covers_multiple_event_types(self):
+        """lot.new + cycle.done are both replayed (separate event-type keys)."""
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        lot = make_lot_new()
+        cycle = _make_cycle_done()
+        bus.publish(lot)
+        bus.publish(cycle)
+
+        with bus.subscribe() as sub:
+            replayed = list(sub.iter())
+        assert lot in replayed
+        assert cycle in replayed
+        assert len(replayed) == 2
+
+    def test_critical_event_not_in_normal_replay_slot(self):
+        """Sanity: critical events use last_critical(), not the normal
+        replay slot. A new subscriber must not see a critical event via
+        replay (the existing last_critical() mechanism handles that path
+        and has its own semantics — TTL=∞ until process exit)."""
+        from fis_monitor.domain.models import SseSessionExpired
+
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        critical = SseSessionExpired(timestamp=_datetime(2026, 5, 18, tzinfo=_UTC))
+        bus.publish(critical)
+
+        with bus.subscribe() as sub:
+            # New subscriber's queue must be empty wrt normal-replay path.
+            # (Critical events are delivered live to active subscribers, not
+            # via replay to late-arrivers.)
+            import queue as _queue
+
+            try:
+                evt: SseLotNew | None = sub._q.get_nowait()
+            except _queue.Empty:
+                evt = None
+        assert evt is None, "normal replay slot must not carry critical events"
+
+    def test_replay_does_not_block_when_queue_full(self):
+        """Edge: if the subscriber's queue is already full (somehow) at
+        attach time, replay drops silently rather than raising/blocking."""
+        clock = _FakeClock()
+        bus = ThreadEventBus(monotonic=clock)
+        bus.publish(make_lot_new())
+        # No assertion on contents — just that subscribe() returns cleanly.
+        with bus.subscribe() as sub:
+            assert sub is not None

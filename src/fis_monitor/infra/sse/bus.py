@@ -21,6 +21,8 @@ import contextlib
 import logging
 import queue
 import threading
+import time
+from collections.abc import Callable
 
 from fis_monitor.domain.models import SseEvent
 from fis_monitor.infra.sse.subscriptions import ThreadEventSubscription
@@ -28,6 +30,12 @@ from fis_monitor.infra.sse.subscriptions import ThreadEventSubscription
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CRITICAL_TIMEOUT = 2.0
+# bd 0a9r: replay window for the most-recent normal event of each event-type.
+# 30s is the design choice from the bd task — long enough to bridge a tab
+# reload or SSE reconnect, short enough that stale lots don't surface as
+# fresh on a tab opened minutes later. ADR-008 forbids DB persistence for
+# normal events; the slot is process-lifetime only.
+_REPLAY_TTL_SECONDS = 30.0
 
 
 class ThreadEventBus:
@@ -59,13 +67,27 @@ class ThreadEventBus:
             (matches ADR-008 / docs/architecture/07-concurrency.md §7.3).
     """
 
-    def __init__(self, critical_timeout: float = _DEFAULT_CRITICAL_TIMEOUT) -> None:
+    def __init__(
+        self,
+        critical_timeout: float = _DEFAULT_CRITICAL_TIMEOUT,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._critical_timeout = critical_timeout
+        # ``monotonic`` is injected so tests can advance virtual time without
+        # sleeping (DI for testability, not a public knob).
+        self._monotonic = monotonic
         self._lock = threading.Lock()
         self._subscribers: list[ThreadEventSubscription] = []
         # Per-type in-memory slot for last critical event.
         # Key: concrete SseEvent class; value: the event instance.
         self._last_critical: dict[type, SseEvent] = {}
+        # bd 0a9r: per-event-type slot for the most-recent normal event with
+        # its monotonic publish-time. New subscribers replay events with
+        # age < _REPLAY_TTL_SECONDS so the race window between publish and
+        # /events socket attach no longer drops the event.
+        # Key: ``event.event`` (str literal, e.g. "lot.new", "cycle.done").
+        self._last_normal: dict[str, tuple[SseEvent, float]] = {}
 
     # ------------------------------------------------------------------
     # EventBus Protocol
@@ -98,10 +120,28 @@ class ThreadEventBus:
             self._publish_normal(event, snapshot)
 
     def subscribe(self) -> ThreadEventSubscription:
-        """Return a new per-subscriber handle and register it."""
+        """Return a new per-subscriber handle and register it.
+
+        bd 0a9r: replay normal events with age < ``_REPLAY_TTL_SECONDS`` into
+        the new subscriber's queue. Closes the race where a publisher emits
+        ``lot.new`` or ``cycle.done`` between the page render and the
+        ``/events`` socket attach — the event would otherwise be silently
+        dropped because no subscriber existed at publish-time.
+        """
         sub = ThreadEventSubscription(remover=self._remove_subscriber)
         with self._lock:
             self._subscribers.append(sub)
+            now = self._monotonic()
+            # Iterate a snapshot of items so eviction (below) doesn't mutate
+            # during traversal. Order is insertion order (Py3.7+ dict) — fine
+            # for replay since clients don't depend on cross-type ordering.
+            for event_type, (event, at) in list(self._last_normal.items()):
+                if now - at >= _REPLAY_TTL_SECONDS:
+                    # Lazy eviction of stale slot — keeps the dict bounded.
+                    self._last_normal.pop(event_type, None)
+                    continue
+                with contextlib.suppress(queue.Full):
+                    sub._q.put_nowait(event)
         return sub
 
     # ------------------------------------------------------------------
@@ -134,7 +174,16 @@ class ThreadEventBus:
         (SSE clients receive fresher updates on next publish).
         DO NOT add per-subscriber lock — it would contend with the fast path
         and harm throughput.
+
+        bd 0a9r: also update the per-type replay slot so a subscriber that
+        attaches within ``_REPLAY_TTL_SECONDS`` of this publish receives the
+        event via ``subscribe()``'s replay path. Last-write-wins per
+        ``event.event`` key — clients only care about the most-recent state.
         """
+        event_type_key: str = event.event  # type: ignore[attr-defined]
+        with self._lock:
+            self._last_normal[event_type_key] = (event, self._monotonic())
+
         for sub in snapshot:
             # Lock-free read of _alive: safe in CPython (GIL guarantees boolean atomicity).
             # For PEP 703 free-threaded interpreter (3.13t+) — re-evaluate.
