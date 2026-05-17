@@ -73,6 +73,22 @@ def auth_start(
         429 Too Many Requests — rate limit exceeded (1 req / 60 s per IP).
         503 Service Unavailable — executor not bound (startup incomplete).
     """
+    # bd 2hi2: cheap availability probes BEFORE rate-limit acquire — 503-class
+    # failures (no Chromium, no executor) must not consume a rate-limit slot,
+    # otherwise an operator who fixes the environment and immediately retries
+    # gets 429 instead of the success they expect.
+    if not svc.is_browser_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Playwright browser is not installed on the server — "
+                   "run `playwright install chromium` to enable login.",
+        )
+    if not svc.is_executor_bound():
+        raise HTTPException(
+            status_code=503,
+            detail="Login service not initialized — startup not yet complete",
+        )
+
     ip = client_ip(request)
     now = time.monotonic()
     if not _auth_rate_limiter.acquire(ip, now=now):
@@ -84,6 +100,9 @@ def auth_start(
     try:
         svc.start_login()
     except BrowserUnavailableError as exc:
+        # Race: probe passed, then mark_browser_unavailable() fired concurrently.
+        # Translate to 503 but the slot is already consumed — acceptable since
+        # this is a TOCTOU edge, not the operator-error path 2hi2 fixes.
         raise HTTPException(
             status_code=503,
             detail="Playwright browser is not installed on the server — "
@@ -92,8 +111,7 @@ def auth_start(
     except LoginBusyError as exc:
         raise HTTPException(status_code=409, detail="Login already in progress") from exc
     except RuntimeError as exc:
-        # Executor not yet bound — lifespan phase 1.5 not completed (tracked: gektar_monitor-j19).
-        # Return 503 instead of 500 so clients know to retry after startup completes.
+        # Same TOCTOU edge for executor unbinding — rare.
         raise HTTPException(
             status_code=503,
             detail="Login service not initialized — startup not yet complete",
@@ -157,6 +175,19 @@ def auth_refresh(
         429 Too Many Requests — rate limit exceeded (1 req / 60 s per IP).
         503 Service Unavailable — executor not bound (startup incomplete).
     """
+    # bd 2hi2: availability probes precede rate-limit so 503 doesn't burn a slot.
+    if not svc.is_browser_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Playwright browser is not installed on the server — "
+                   "run `playwright install chromium` to enable login.",
+        )
+    if not svc.is_executor_bound():
+        raise HTTPException(
+            status_code=503,
+            detail="Login service not initialized — startup not yet complete",
+        )
+
     ip = client_ip(request)
     now = time.monotonic()
     if not _refresh_rate_limiter.acquire(ip, now=now):

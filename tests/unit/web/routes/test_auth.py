@@ -123,6 +123,13 @@ class FakeLoginService:
     def is_browser_available(self) -> bool:
         return not self._browser_unavailable
 
+    def is_executor_bound(self) -> bool:
+        # Both routes (auth_start, auth_refresh) probe this BEFORE rate-limit
+        # acquire (bd 2hi2). When either ``no_executor`` flag is set, the
+        # fake reports the executor as unbound so the route returns 503
+        # without consuming a slot.
+        return not (self._no_executor or self._refresh_no_executor)
+
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -436,3 +443,59 @@ def test_auth_refresh_returns_503_when_browser_unavailable() -> None:
     detail = resp.json()["detail"]
     assert "browser is not installed" in detail
     assert "playwright install chromium" in detail
+
+
+# ---------------------------------------------------------------------------
+# bd 2hi2: 503 must NOT consume a rate-limit slot
+# ---------------------------------------------------------------------------
+
+
+def test_auth_start_503_browser_unavailable_does_not_consume_rate_limit() -> None:
+    """Regression for bd 2hi2: a 503 response from /auth/start (Chromium
+    missing) must NOT consume a rate-limit slot. The operator installs
+    Chromium, retries immediately, and gets 202 — not 429.
+    """
+    fake = FakeLoginService(browser_unavailable=True)
+    # max=1 so any consumed slot blocks the next call.
+    rl = RateLimiter(max_requests=1, window_seconds=60.0)
+    app = _build_app(fake, rate_limiter=rl)
+
+    with TestClient(app) as client:
+        first = client.post("/auth/start")
+        assert first.status_code == 503
+        # Operator fixes the environment.
+        fake._browser_unavailable = False
+        second = client.post("/auth/start")
+        assert second.status_code == 202, (
+            f"slot leaked on 503 — got {second.status_code}: {second.text}"
+        )
+
+
+def test_auth_start_503_no_executor_does_not_consume_rate_limit() -> None:
+    """Regression for bd 2hi2: a 503 response from /auth/start (executor
+    not bound) must NOT consume a rate-limit slot."""
+    fake = FakeLoginService(no_executor=True)
+    rl = RateLimiter(max_requests=1, window_seconds=60.0)
+    app = _build_app(fake, rate_limiter=rl)
+
+    with TestClient(app) as client:
+        first = client.post("/auth/start")
+        assert first.status_code == 503
+        # Lifespan finishes binding the executor.
+        fake._no_executor = False
+        second = client.post("/auth/start")
+        assert second.status_code == 202
+
+
+def test_auth_refresh_503_browser_unavailable_does_not_consume_rate_limit() -> None:
+    """Same regression as auth_start for /auth/refresh path (bd 2hi2)."""
+    fake = FakeLoginService(browser_unavailable=True)
+    rl = RateLimiter(max_requests=1, window_seconds=60.0)
+    app = _build_app(fake, refresh_rate_limiter=rl)
+
+    with TestClient(app) as client:
+        first = client.post("/auth/refresh")
+        assert first.status_code == 503
+        fake._browser_unavailable = False
+        second = client.post("/auth/refresh")
+        assert second.status_code == 202

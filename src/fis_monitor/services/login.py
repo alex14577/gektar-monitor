@@ -302,6 +302,16 @@ class LoginService:
         """Return True if the Playwright Chromium binary is present and executable."""
         return self._browser_available
 
+    def is_executor_bound(self) -> bool:
+        """Return True if ``bind_executor()`` has been called (lifespan 1.5).
+
+        Side-effect-free probe used by route handlers (bd 2hi2) to gate rate-
+        limit consumption: 503-class failures (no browser, no executor) must
+        not consume a rate-limit slot so the operator can retry immediately
+        after fixing the environment.
+        """
+        return self._executor is not None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
