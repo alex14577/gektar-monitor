@@ -15,7 +15,9 @@ CSRF: POST endpoint passes through ``CsrfHostOriginMiddleware`` automatically.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import time
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -23,9 +25,19 @@ from starlette.requests import Request
 
 from fis_monitor.domain.interfaces import Clock
 from fis_monitor.services.dnd import DndService
+from fis_monitor.web._helpers import client_ip
 from fis_monitor.web.deps import get_clock, get_dnd_service, get_templates
+from fis_monitor.web.rate_limit import RateLimiter
 
 __all__ = ["router"]
+
+# ---------------------------------------------------------------------------
+# Rate limiter — 20 requests per 60 seconds per client IP.
+# Module-level singleton; can be replaced in tests by reassigning before
+# TestClient construction.
+# ---------------------------------------------------------------------------
+
+_dnd_rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
 
 router = APIRouter(prefix="/dnd", tags=["dnd"])
 
@@ -53,6 +65,7 @@ class DndRequest(BaseModel):
 
 @router.post("", status_code=204)
 def set_dnd(
+    request: Request,
     body: DndRequest,
     svc: DndService = Depends(get_dnd_service),
     clock: Clock = Depends(get_clock),
@@ -62,7 +75,11 @@ def set_dnd(
     Returns:
         204 No Content on success.
         422 Unprocessable Entity if ``minutes`` is out of range (Pydantic).
+        429 Too Many Requests if rate limit exceeded (20 req / 60 s per IP).
     """
+    ip = client_ip(request)
+    if not _dnd_rate_limiter.acquire(ip, now=time.monotonic()):
+        raise HTTPException(status_code=429, detail="Too many requests")
     svc.set_dnd_until(clock.now(), body.minutes)
 
 

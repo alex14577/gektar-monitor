@@ -5,17 +5,20 @@ Coverage:
   (b) POST /backfill/start → 409 when already running.
   (c) GET  /backfill/status → 200 with correct fields.
   (d) POST /backfill/cancel → 204 always (idempotent).
+  (e) Rate limiting: /start and /cancel share a quota (3 req / 60 s).
 """
 
 from __future__ import annotations
 
 import threading
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from fis_monitor.services.backfill import BackfillStatus
 from fis_monitor.web.deps import get_backfill
+from fis_monitor.web.rate_limit import RateLimiter
 from fis_monitor.web.routes.backfill import router
 
 # ---------------------------------------------------------------------------
@@ -109,10 +112,25 @@ def test_fake_backfill_service_all_methods() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_app(fake: FakeBackfillService) -> FastAPI:
+def _build_app(
+    fake: FakeBackfillService,
+    rate_limiter: Optional[RateLimiter] = None,
+) -> FastAPI:
+    import fis_monitor.web.routes.backfill as backfill_module
+
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_backfill] = lambda: fake
+
+    # Always inject an isolated limiter to prevent cross-test contamination via
+    # the module-level singleton.  Callers that need a specific budget pass one
+    # explicitly; all others get a permissive default (100 req / 60 s).
+    backfill_module._backfill_rate_limiter = (
+        rate_limiter
+        if rate_limiter is not None
+        else RateLimiter(max_requests=100, window_seconds=60.0)
+    )
+
     return app
 
 
@@ -251,3 +269,85 @@ class TestBackfillCancel:
 
         assert resp.status_code == 204
         assert fake.cancel_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Test (e): Rate limiting — /start and /cancel share a single quota
+# ---------------------------------------------------------------------------
+
+
+class TestBackfillRateLimit:
+    def test_backfill_start_rate_limit(self) -> None:
+        """3rd+ /start within window → 429."""
+        limiter = RateLimiter(max_requests=2, window_seconds=60.0)
+        app = _build_app(FakeBackfillService(running=False), rate_limiter=limiter)
+
+        with TestClient(app) as client:
+            r1 = client.post("/backfill/start")
+            # After first start the fake marks itself running; reset for next call.
+            assert r1.status_code == 202
+            # Re-start: fake now running → would be 409 but rate limit fires first.
+            # Use a fresh fake each request via overrides to isolate rate-limit behaviour.
+
+        # Fresh fake (idle) so we only see rate-limit, not 409.
+        fake2 = FakeBackfillService(running=False)
+        app2 = _build_app(fake2, rate_limiter=limiter)
+
+        with TestClient(app2) as client2:
+            r2 = client2.post("/backfill/start")
+            assert r2.status_code == 202
+
+            # 3rd request — quota exhausted.
+            r3 = client2.post("/backfill/start")
+            assert r3.status_code == 429, f"Expected 429, got {r3.status_code}: {r3.text}"
+
+            r4 = client2.post("/backfill/start")
+            assert r4.status_code == 429
+
+    def test_backfill_cancel_rate_limit(self) -> None:
+        """3rd+ /cancel within window → 429."""
+        limiter = RateLimiter(max_requests=2, window_seconds=60.0)
+        fake = FakeBackfillService(running=True)
+        app = _build_app(fake, rate_limiter=limiter)
+
+        with TestClient(app) as client:
+            r1 = client.post("/backfill/cancel")
+            assert r1.status_code == 204
+
+            r2 = client.post("/backfill/cancel")
+            assert r2.status_code == 204
+
+            r3 = client.post("/backfill/cancel")
+            assert r3.status_code == 429, f"Expected 429, got {r3.status_code}: {r3.text}"
+
+            r4 = client.post("/backfill/cancel")
+            assert r4.status_code == 429
+
+    def test_backfill_start_and_cancel_share_quota(self) -> None:
+        """2× /start + 1× /cancel with quota=2 → cancel gets 429."""
+        limiter = RateLimiter(max_requests=2, window_seconds=60.0)
+
+        # Build two apps backed by the same limiter so both endpoints consume it.
+        fake_start = FakeBackfillService(running=False)
+        app_start = _build_app(fake_start, rate_limiter=limiter)
+
+        fake_cancel = FakeBackfillService(running=True)
+        app_cancel = _build_app(fake_cancel, rate_limiter=limiter)
+
+        with TestClient(app_start) as start_client:
+            r1 = start_client.post("/backfill/start")
+            assert r1.status_code == 202
+
+            # fake_start is now running; reset so second POST reaches limiter
+            fake_start._running = False
+            fake_start._mode = "idle"
+
+            r2 = start_client.post("/backfill/start")
+            assert r2.status_code == 202
+
+        # Quota exhausted — cancel must be rejected.
+        with TestClient(app_cancel) as cancel_client:
+            r3 = cancel_client.post("/backfill/cancel")
+            assert r3.status_code == 429, (
+                f"Expected 429 after quota exhausted by /start, got {r3.status_code}"
+            )

@@ -19,7 +19,9 @@ from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
+import fis_monitor.web.routes.dnd as dnd_module
 from fis_monitor.web.deps import get_clock, get_dnd_service, get_templates
+from fis_monitor.web.rate_limit import RateLimiter
 from fis_monitor.web.routes.dnd import router
 from fis_monitor.web.templates import TEMPLATES_DIR
 
@@ -82,10 +84,22 @@ def test_fake_dnd_service_all_methods() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_app(fake_svc: FakeDndService) -> FastAPI:
-    """Build a minimal FastAPI app with the DnD router and injected fakes."""
+def _build_app(
+    fake_svc: FakeDndService,
+    *,
+    rate_limiter: RateLimiter | None = None,
+) -> FastAPI:
+    """Build a minimal FastAPI app with the DnD router and injected fakes.
+
+    If *rate_limiter* is provided it is installed into ``dnd_module`` before
+    the TestClient is constructed — xdist-safe, no module-global mutation in
+    the test body.
+    """
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     fake_clock = FakeClock()
+
+    if rate_limiter is not None:
+        dnd_module._dnd_rate_limiter = rate_limiter
 
     app = FastAPI()
     app.include_router(router)
@@ -217,3 +231,25 @@ class TestGetDndCustom:
         assert 'name="minutes"' in resp.text, (
             "Expected a minutes input in the partial HTML"
         )
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting: POST /dnd
+# ---------------------------------------------------------------------------
+
+
+class TestDndRateLimit:
+    def test_dnd_rate_limit_enforced(self) -> None:
+        """3rd POST within window returns 429 when limiter allows 2/60."""
+        fake = FakeDndService()
+        limiter = RateLimiter(max_requests=2, window_seconds=60)
+        app = _build_app(fake, rate_limiter=limiter)
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            r1 = client.post("/dnd", json={"minutes": 10})
+            r2 = client.post("/dnd", json={"minutes": 10})
+            r3 = client.post("/dnd", json={"minutes": 10})
+
+        assert r1.status_code == 204, f"1st request: {r1.status_code}"
+        assert r2.status_code == 204, f"2nd request: {r2.status_code}"
+        assert r3.status_code == 429, f"3rd request expected 429, got {r3.status_code}"

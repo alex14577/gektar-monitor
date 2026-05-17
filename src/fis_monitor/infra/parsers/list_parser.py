@@ -27,11 +27,15 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from typing import Final
 
 from selectolax.parser import HTMLParser, Node
 
 from fis_monitor.domain.errors import ParseBugError, SessionExpiredError
 from fis_monitor.domain.models import ParsedListPage, ParsedListRow
+
+# Hard cap protecting against pathological HTML; FIS lists rarely exceed 100 per page.
+_MAX_ROWS_PER_PAGE: Final[int] = 10_000
 
 # Markers that identify an ESIA (Gosuslugi) login-redirect response.
 # The site returns HTTP 200 with a login page when the session cookie is expired.
@@ -268,6 +272,11 @@ class SelectolaxListParser:
                     date_update=date_update,
                 )
             )
+            if len(rows) >= _MAX_ROWS_PER_PAGE:
+                raise ParseBugError(
+                    selector="tr[data-key]",
+                    context=f"row cap exceeded: {_MAX_ROWS_PER_PAGE}",
+                )
 
         total_count: int | None = None
         info_node = tree.css_first(".table-paginate__info")

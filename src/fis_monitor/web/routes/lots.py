@@ -15,6 +15,7 @@ Container and testable via app.dependency_overrides.
 
 from __future__ import annotations
 
+import time
 from decimal import Decimal
 from typing import Annotated
 
@@ -27,7 +28,9 @@ from fis_monitor.domain.models import LotUserDTO
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.lot_query import LotFilters, LotQueryService, Page
 from fis_monitor.services.lot_user_state import LotNotFoundError, LotUserStateService
+from fis_monitor.web._helpers import client_ip
 from fis_monitor.web.deps import get_lot_query, get_lot_user_state_service, get_templates
+from fis_monitor.web.rate_limit import RateLimiter
 
 # Canonical upstream base URL — domain constant, not user-configurable (ADR-024).
 _TORGI_URL_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai")
@@ -37,6 +40,10 @@ _TORGI_URL_BUILDER = TorgiUrlBuilder(base_url="https://xn--80aaggvgieoeoa2bo7l.x
 # ---------------------------------------------------------------------------
 
 router = APIRouter(prefix="/lots", tags=["lots"])
+
+# Rate limiter for POST /lots/{lot_id}/note — 10 req / 60 s per client IP.
+# Module-level singleton; can be replaced in tests by reassigning this variable.
+_note_rate_limiter = RateLimiter(max_requests=10, window_seconds=60.0)
 
 
 # ---------------------------------------------------------------------------
@@ -184,13 +191,18 @@ class _NoteBody(BaseModel):
 def set_note(
     lot_id: int,
     body: _NoteBody,
+    request: Request,
     svc: LotUserStateService = Depends(get_lot_user_state_service),
 ) -> Response:
     """Persist a free-text note for a lot.
 
     Accepts JSON body: ``{"note": "..."}`` (max 4096 chars).
-    Returns 204 on success, 400 if note too long, 404 if lot missing.
+    Returns 204 on success, 400 if note too long, 404 if lot missing,
+    429 if rate limit exceeded (10 req / 60 s per IP).
     """
+    ip = client_ip(request)
+    if not _note_rate_limiter.acquire(ip, now=time.monotonic()):
+        raise HTTPException(status_code=429, detail="rate limit exceeded")
     try:
         svc.set_note(lot_id, body.note)
     except LotNotFoundError as exc:

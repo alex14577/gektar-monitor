@@ -8,19 +8,33 @@ Endpoints:
 DI: ``BackfillService`` is injected via ``Depends(get_backfill)``.
 
 CSRF: POST endpoints pass through ``CsrfHostOriginMiddleware`` automatically.
+
+Rate limiting: 3 requests per 60 seconds per client IP, shared across /start
+and /cancel (backfill is a heavy operation; start and cancel are logically
+coupled — the same budget governs both).
 """
 
 from __future__ import annotations
 
 import threading
+import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from fis_monitor.services.backfill import BackfillService, BackfillStatus
+from fis_monitor.web._helpers import client_ip
 from fis_monitor.web.deps import get_backfill
+from fis_monitor.web.rate_limit import RateLimiter
 
 __all__ = ["router"]
+
+# ---------------------------------------------------------------------------
+# Rate limiter — 3 requests per 60 seconds per client IP, shared across
+# /start and /cancel.  Module-level singleton; reassign in tests.
+# ---------------------------------------------------------------------------
+
+_backfill_rate_limiter = RateLimiter(max_requests=3, window_seconds=60.0)
 
 router = APIRouter(prefix="/backfill", tags=["backfill"])
 
@@ -32,6 +46,7 @@ router = APIRouter(prefix="/backfill", tags=["backfill"])
 
 @router.post("/start", status_code=202)
 def backfill_start(
+    request: Request,
     svc: BackfillService = Depends(get_backfill),
 ) -> JSONResponse:
     """Start a paginated backfill of the lot catalogue.
@@ -44,7 +59,15 @@ def backfill_start(
     Returns:
         202 Accepted  — backfill started.
         409 Conflict  — another backfill is already running.
+        429 Too Many Requests — rate limit exceeded (3 req / 60 s per IP,
+            shared with /cancel).
     """
+    ip = client_ip(request)
+    if not _backfill_rate_limiter.acquire(ip, now=time.monotonic()):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests — try again later",
+        )
     # A never-set external stop event; shutdown is coordinated via
     # BackfillService.cancel() from the lifespan (P0-4).
     external_stop = threading.Event()
@@ -82,6 +105,7 @@ def backfill_status(
 
 @router.post("/cancel", status_code=204)
 def backfill_cancel(
+    request: Request,
     svc: BackfillService = Depends(get_backfill),
 ) -> Response:
     """Cancel any running backfill.
@@ -89,7 +113,15 @@ def backfill_cancel(
     Idempotent — safe to call when no backfill is active.
 
     Returns:
-        204 No Content — always.
+        204 No Content — cancelled (or was already idle).
+        429 Too Many Requests — rate limit exceeded (3 req / 60 s per IP,
+            shared with /start).
     """
+    ip = client_ip(request)
+    if not _backfill_rate_limiter.acquire(ip, now=time.monotonic()):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests — try again later",
+        )
     svc.cancel()
     return Response(status_code=204)

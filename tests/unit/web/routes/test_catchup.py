@@ -14,8 +14,10 @@ from datetime import UTC, datetime, timedelta
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import fis_monitor.web.routes.catchup as catchup_module
 from fis_monitor.services.catchup_dismiss import CatchupDismissService
 from fis_monitor.web.deps import get_catchup_dismiss
+from fis_monitor.web.rate_limit import RateLimiter
 from fis_monitor.web.routes.catchup import router
 
 # ---------------------------------------------------------------------------
@@ -73,8 +75,20 @@ def test_fake_state_repo_all_methods() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_app(svc: CatchupDismissService) -> FastAPI:
-    """Build a minimal FastAPI app with the catchup router and injected fake."""
+def _build_app(
+    svc: CatchupDismissService,
+    *,
+    rate_limiter: RateLimiter | None = None,
+) -> FastAPI:
+    """Build a minimal FastAPI app with the catchup router and injected fake.
+
+    If *rate_limiter* is provided it is installed into ``catchup_module`` before
+    the TestClient is constructed — xdist-safe, no module-global mutation in
+    the test body.
+    """
+    if rate_limiter is not None:
+        catchup_module._catchup_rate_limiter = rate_limiter
+
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_catchup_dismiss] = lambda: svc
@@ -159,3 +173,27 @@ class TestCatchupDismissPersistence:
         assert _DISMISSED_KEY in repo._store, (
             f"Expected key '{_DISMISSED_KEY}' in repo, got keys: {list(repo._store)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting: POST /catchup/dismiss
+# ---------------------------------------------------------------------------
+
+
+class TestCatchupDismissRateLimit:
+    def test_catchup_dismiss_rate_limit_enforced(self) -> None:
+        """3rd POST within window returns 429 when limiter allows 2/60."""
+        repo = FakeStateRepo()
+        clock = FakeClock(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
+        svc = CatchupDismissService(state_repo=repo, clock=clock)
+        limiter = RateLimiter(max_requests=2, window_seconds=60)
+        app = _build_app(svc, rate_limiter=limiter)
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            r1 = client.post("/catchup/dismiss")
+            r2 = client.post("/catchup/dismiss")
+            r3 = client.post("/catchup/dismiss")
+
+        assert r1.status_code == 204, f"1st request: {r1.status_code}"
+        assert r2.status_code == 204, f"2nd request: {r2.status_code}"
+        assert r3.status_code == 429, f"3rd request expected 429, got {r3.status_code}"

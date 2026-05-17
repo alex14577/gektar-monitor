@@ -8,6 +8,7 @@ import pytest
 
 from fis_monitor.domain.errors import ParseBugError, SessionExpiredError
 from fis_monitor.domain.models import ParsedListRow
+from fis_monitor.infra.parsers import list_parser
 from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
 
 from .conftest import load_fixture
@@ -639,3 +640,36 @@ def test_parse_returns_parsedlistpage_type(
 
     page = parser.parse(html_perpage50)
     assert isinstance(page, ParsedListPage)
+
+
+def _make_rows_html(n: int) -> str:
+    """Build a minimal lot-list page with *n* valid <tr data-key> rows."""
+    rows = ""
+    for i in range(1, n + 1):
+        rows += (
+            f'<tr data-key="{i}">'
+            + "<td><a>77:01:0001001:1</a></td>"  # col 0 cadastral
+            + "<td>1000 кв.м</td>"                # col 1 area
+            + "<td>Москва</td>"                   # col 2 region
+            + "<td></td>"                         # col 3 municipality
+            + "<td></td><td></td><td></td>"       # col 4,5,6 skipped
+            + "<td>земли</td>"                    # col 7 land_category
+            + "<td>под ИЖС</td>"                  # col 8 permitted_use
+            + '<td title="ОГВ">ОГВ</td>'          # col 9 ogv
+            + "<td>01.01.2024</td>"               # col 10 date_create
+            + "<td></td>"                         # col 11 skipped
+            + "<td></td>"                         # col 12 date_update
+            + "<td>active</td>"                   # col 13 status
+            + "</tr>"
+        )
+    return f"<html><body><table><tbody>{rows}</tbody></table></body></html>"
+
+
+def test_parse_raises_on_row_cap_exceeded(
+    monkeypatch: pytest.MonkeyPatch, parser: SelectolaxListParser
+) -> None:
+    monkeypatch.setattr(list_parser, "_MAX_ROWS_PER_PAGE", 3)
+    html = _make_rows_html(5)
+    with pytest.raises(ParseBugError) as exc_info:
+        parser.parse(html)
+    assert exc_info.value.selector == "tr[data-key]"
