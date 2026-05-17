@@ -38,6 +38,13 @@
     {% block fs %}{% endblock %}
   {% else %}
 
+  {# bd bjw4: single EventSource for the whole page. All sse-swap children
+     (header-status, feed, cycle-done-listener, session-expired-modal)
+     attach under this one sse-connect — htmx-sse's MutationObserver wires
+     up sse-swap descendants automatically, including those swapped in via
+     hx-target later (e.g. POST /filters/view replacing #feed). #}
+  <div id="sse-root" hx-ext="sse" sse-connect="/events">
+
   {# ============== Sticky header ============== #}
   <header class="header" role="banner">
     <div class="header__inner">
@@ -46,10 +53,9 @@
       <span>Монитор&nbsp;гектара</span>
     </a>
 
-    {# SSE-driven status: server pushes <span hx-swap-oob> updates #}
+    {# SSE-driven status: server pushes <span hx-swap-oob> updates.
+       sse-connect lives on #sse-root above (bjw4). #}
     <div id="header-status" class="header__center"
-         hx-ext="sse"
-         sse-connect="/events"
          sse-swap="status"
          role="region" aria-label="Статус мониторинга">
       {% include "partials/_header_status.html.jinja" %}
@@ -76,17 +82,9 @@
         "Идёт проверка" spinner that POST /cycle/run injects into #cycle-result.
         Separate hidden element (SRP / low coupling) — does not entangle the
         header-status SSE container with cycle-completion concerns.
-
-        Trade-off: this is the FOURTH `sse-connect="/events"` element on the
-        base layout (alongside #header-status, #feed-lots, and
-        #session-expired-modal). htmx-sse 1.9.x opens one EventSource per
-        sse-connect element — no deduplication. Acceptable given existing
-        per-feature listener pattern; follow-up bd-task tracks consolidating
-        all SSE swaps into a single root EventSource with sse-swap multiplexing.
+        sse-connect lives on #sse-root above (bjw4 — single EventSource).
       -#}
       <span id="cycle-done-listener"
-            hx-ext="sse"
-            sse-connect="/events"
             sse-swap="cycle.done"
             hx-target="#cycle-result"
             hx-swap="innerHTML"
@@ -132,10 +130,11 @@
     </main>
   </div>
 
-  {# Expired-session modal (rendered, hidden until SSE flips it) #}
+  {# Expired-session modal (rendered, hidden until SSE flips it).
+     sse-connect lives on #sse-root above (bjw4). #}
   <div id="session-expired-modal" class="modal-backdrop"
        {% if not session.expired %}hidden{% endif %}
-       hx-ext="sse" sse-connect="/events" sse-swap="expired"
+       sse-swap="expired"
        role="dialog" aria-modal="true" aria-labelledby="ses-title">
     <div class="modal">
       <h2 id="ses-title">Сессия истекла</h2>
@@ -152,6 +151,8 @@
   {# aria-live regions #}
   <div id="__live_polite" class="sr-only" aria-live="polite"    aria-atomic="true"></div>
   <div id="__live_assert" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+
+  </div>{# /#sse-root — bjw4 #}
 
   {% endif %}
 

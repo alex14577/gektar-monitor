@@ -6,13 +6,15 @@
              the subject-filter trigger button outside #feed on POST responses.
 #}
 <div id="feed"
-     hx-ext="sse"
-     sse-connect="/events"
      sse-swap="lot.new,lot.status"
      hx-target="this"
      hx-swap="afterbegin"
      aria-live="polite"
      aria-relevant="additions text">
+  {# bd bjw4: sse-connect lives on #sse-root in base.html.jinja. htmx-sse's
+     MutationObserver re-wires sse-swap when this fragment is replaced via
+     hx-target=#feed (POST /filters/view), so removing the local
+     sse-connect does not break live updates. #}
 
   {# HOT (≤ 1 hour) #}
   {% if zones.hot %}

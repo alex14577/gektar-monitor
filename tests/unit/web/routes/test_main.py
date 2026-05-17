@@ -240,6 +240,27 @@ def test_get_root_returns_200_with_feed_marker() -> None:
     assert 'id="feed"' in resp.text
 
 
+def test_single_sse_connect_on_root_page() -> None:
+    """bd bjw4: a rendered GET / must expose exactly ONE ``sse-connect``
+    element (the #sse-root wrapper). Multiple sse-connect entries in
+    htmx-sse 1.9 would open one EventSource per element — the very thing
+    this task consolidates. Lock the invariant in a test so future template
+    edits don't silently reintroduce a parallel connection.
+    """
+    app, _, _ = _make_app()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    html = resp.text
+    assert resp.status_code == 200
+    occurrences = html.count('sse-connect="/events"')
+    assert occurrences == 1, (
+        f"expected exactly one sse-connect, found {occurrences} — "
+        "did a template add a parallel EventSource?"
+    )
+    # And the consolidating element is the explicit root.
+    assert 'id="sse-root"' in html
+
+
 def test_session_active_no_warning_no_expired_modal_visible() -> None:
     """AC#3: ACTIVE session → no expiry banner, modal has hidden attribute."""
     app, _, _ = _make_app(session_status=SessionStatus.ACTIVE)
