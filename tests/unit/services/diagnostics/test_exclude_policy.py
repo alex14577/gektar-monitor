@@ -324,6 +324,28 @@ class TestRedactError:
         assert "MyApp" not in result
         assert "config.dat" not in result
 
+    # --- M3: IPv6 host with path ---
+
+    def test_redact_error_ipv6_with_path(self) -> None:
+        """[::1]/api/secret must be fully redacted — host must not remain visible."""
+        result = DiagnosticsExcludePolicy.redact_error("connect error at [::1]/api/secret")
+        assert result is not None
+        assert "[::1]" not in result
+        assert "api/secret" not in result
+        assert "[REDACTED]" in result
+
+    def test_redact_error_ipv6_without_path(self) -> None:
+        """Bare bracketed IPv6 address with no path must also be redacted."""
+        result = DiagnosticsExcludePolicy.redact_error("timeout connecting to [2001:db8::1]")
+        assert result is not None
+        assert "2001:db8::1" not in result
+
+    def test_redact_error_ipv6_loopback_only(self) -> None:
+        """[::1] with no trailing path is caught by the IPv6 pattern."""
+        result = DiagnosticsExcludePolicy.redact_error("refused by [::1]")
+        assert result is not None
+        assert "[::1]" not in result
+
 
 # ---------------------------------------------------------------------------
 # filter_state_keys

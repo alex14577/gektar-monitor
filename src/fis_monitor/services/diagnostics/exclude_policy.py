@@ -23,9 +23,10 @@ placeholder (order matters — URLs before emails to avoid double-matching):
 
 1. ``https?://...`` — full URLs (path, query, fragment included).
 2. ``[\\w.+\\-]+@[\\w.\\-]+\\.[a-z]{2,}`` — RFC-5321-ish email addresses.
-3. Relative traversal paths ``../../...`` — directory traversal sequences.
-4. Unix absolute paths  ``/...`` (non-whitespace run starting with ``/``).
-5. Windows absolute paths ``C:\\...`` (drive-letter + colon + backslash,
+3. IPv6 addresses ``[::1]/path`` — bracketed IPv6 host with optional path.
+4. Relative traversal paths ``../../...`` — directory traversal sequences.
+5. Unix absolute paths  ``/...`` (non-whitespace run starting with ``/``).
+6. Windows absolute paths ``C:\\...`` (drive-letter + colon + backslash,
    capturing space-separated path segments until a double-space, end of line,
    or a hard delimiter ``,:;``).
 
@@ -64,6 +65,10 @@ _REDACT_PATTERNS: Final[list[re.Pattern[str]]] = [
     re.compile(r"https?://\S+", re.IGNORECASE),
     # email address
     re.compile(r"[\w.+\-]+@[\w.\-]+\.[a-z]{2,}", re.IGNORECASE),
+    # IPv6 address (bracketed, as in URLs/log lines) with optional path:
+    # e.g. [::1]/api/secret, [2001:db8::1], [fe80::1%eth0]/foo
+    # Must appear before the Unix-path pattern so [::1]/path is caught whole.
+    re.compile(r"\[[0-9a-fA-F:]+\](?:/\S*)?"),
     # Relative traversal: one or more "../" sequences followed by a path
     re.compile(r"(?:\.\./)+\S+"),
     # Unix absolute path: starts with / followed by at least one non-space char

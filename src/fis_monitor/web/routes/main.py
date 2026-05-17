@@ -27,12 +27,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from fis_monitor.domain.interfaces import Clock, LotRepository, UserStateRepository
+
+if TYPE_CHECKING:
+    from fis_monitor.container import SessionProbe
 from fis_monitor.domain.models import SessionStatus, Settings
 from fis_monitor.services.catchup_dismiss import CatchupDismissService
 from fis_monitor.services.dnd import DndService
@@ -168,7 +172,7 @@ def _build_catchup_context(
 async def feed_page(
     request: Request,
     config_source: object = Depends(get_config_source),
-    session_probe: object = Depends(get_session_probe),
+    session_probe: SessionProbe = Depends(get_session_probe),
     login: LoginService = Depends(get_login),
     dnd_svc: DndService = Depends(get_dnd_service),
     catchup_svc: CatchupDismissService = Depends(get_catchup_dismiss),
@@ -196,7 +200,7 @@ async def feed_page(
     # _NotImplementedSessionProbe (bd a4t.8 — HttpSessionProbe deferred).
     # Defensive fallback: NotImplementedError → consult LoginService.
     try:
-        raw_status: SessionStatus = session_probe.check()  # type: ignore[attr-defined]
+        raw_status: SessionStatus = session_probe.check()
     except NotImplementedError:
         last = login.status().last_outcome
         raw_status = (

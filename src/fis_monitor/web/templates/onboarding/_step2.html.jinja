@@ -76,7 +76,7 @@
        id="smtp-test-area">
     <button class="btn" type="button"
             hx-post="/onboarding/smtp-test"
-            hx-include="#smtp-host, #smtp-port, #smtp-login, #smtp-pass"
+            hx-include="closest form"
             hx-target="#smtp-test-result"
             hx-swap="outerHTML"
             hx-disabled-elt="this"

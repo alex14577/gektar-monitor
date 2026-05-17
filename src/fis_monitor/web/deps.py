@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from fis_monitor.services.view_filters import ViewFiltersService
 
 if TYPE_CHECKING:
-    from fis_monitor.container import Container
+    from fis_monitor.container import Container, SessionProbe
     from fis_monitor.domain.interfaces import (
         Clock,
         ConfigSource,
@@ -148,7 +148,7 @@ def get_config_source(c: Container = Depends(get_container)) -> ConfigSource:
     return c.infra.config_source
 
 
-def get_session_probe(c: Container = Depends(get_container)) -> object:
+def get_session_probe(c: Container = Depends(get_container)) -> SessionProbe:
     """Return the SessionProbe from the composition root.
 
     ``session_probe`` lives on ``Infra`` (layer 2 — external-system adapter).

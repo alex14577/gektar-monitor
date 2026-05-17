@@ -20,10 +20,15 @@ from typing import Literal
 class DomainError(Exception):
     """Root of the domain exception tree.
 
-    Do NOT include PII in exception args (URLs with query params, cadastral_no,
-    emails, recipient addresses) — they propagate to `logging.exception` →
-    `audit.jsonl`. See bd issue `gektar_monitor-4kh` for the redaction
-    helper / lint rule follow-up.
+    PII rule
+    --------
+    Exception args (the *args/message passed to raise) MUST NOT contain
+    personally identifiable or sensitive data: URLs with query params or
+    auth tokens, cadastral_no, email addresses, recipient identifiers,
+    SMTP credentials, lot detail bodies. logging.exception propagates
+    args verbatim into audit.jsonl — any PII here leaks downstream.
+    Use safe categorical detail ("auth_failed", "parse_error"); attach
+    identifiers via structured log fields, never via the exception message.
     """
 
 
@@ -135,6 +140,8 @@ class BusyError(DomainError):
 class ParseBugError(DomainError):
     """DOM-shape сломан — селектор не нашёл ожидаемого узла.
 
+    See DomainError PII rule.
+
     raise → cycle.error event. ``selector`` и ``context`` — короткие
     PII-safe строки (никаких raw HTML фрагментов, recipient, email).
 
@@ -175,7 +182,10 @@ class ParseBugError(DomainError):
 
 
 class ParserVersionMismatch(DomainError):
-    """Stored `raw_json` schema version ≠ current parser version → lazy reparse."""
+    """Stored `raw_json` schema version ≠ current parser version → lazy reparse.
+
+    See DomainError PII rule.
+    """
 
 
 class AlreadyRunningError(DomainError):
