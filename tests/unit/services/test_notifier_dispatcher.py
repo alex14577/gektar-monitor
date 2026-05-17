@@ -1255,19 +1255,23 @@ def test_all_fake_config_source_methods_invoked():
 # ===========================================================================
 
 _MACRO_REGION_DFO = 1
-_SUBSCRIBED_AT_BEFORE = _NOW - timedelta(hours=1)   # date_create > subscribed_at → pass
-_SUBSCRIBED_AT_EQUAL = _NOW                          # date_create == subscribed_at → pass (>=)
-_SUBSCRIBED_AT_AFTER = _NOW + timedelta(hours=1)    # date_create < subscribed_at → suppress
+# date_create == _NOW (2026-05-13 12:00 UTC) per factories._DEFAULT_NOW.
+# ADR-039 fix (gn89): comparison is day-precision — `date()` of both sides.
+_SUBSCRIBED_AT_PRIOR_DAY = _NOW - timedelta(days=1)        # day-12 → 13: pass (lot day > sub day)
+_SUBSCRIBED_AT_SAME_DAY_EARLIER = _NOW - timedelta(hours=2)  # same day 10:00: pass (same day)
+_SUBSCRIBED_AT_SAME_DAY_LATER = _NOW + timedelta(hours=1)    # same day 13:00: PASS (gn89 fix)
+_SUBSCRIBED_AT_NEXT_DAY = _NOW + timedelta(days=1)         # day-14: SUPPRESS (lot day < sub day)
 
 
-def test_filtered_notifier_suppresses_old_lot(caplog):
-    """Invariant 631y-1a: date_create < subscribed_at → send() suppressed, inner NOT called."""
+def test_filtered_notifier_suppresses_prior_day_lot(caplog):
+    """Invariant 631y-1a (ADR-039 day-precision): lot.date_create.date() <
+    subscribed_at.date() → send() suppressed, inner NOT called."""
     inner = FakeNotifier(channel_id="email")
     repo = FakeRegionSubscriptionRepository()
-    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_NEXT_DAY)
     wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
-    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # date_create=_NOW < _SUBSCRIBED_AT_AFTER
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # day-13 < day-14 → suppress
 
     with caplog.at_level(logging.DEBUG, logger="fis_monitor.services.notifier_dispatcher"):
         result = wrapper.send(lot, "test@example.com")
@@ -1283,11 +1287,16 @@ def test_filtered_notifier_suppresses_old_lot(caplog):
     assert drop_records[0].decision == "dropped_subscribed_at"  # type: ignore[attr-defined]
 
 
-def test_filtered_notifier_passes_equal_cutoff():
-    """date_create == subscribed_at → send() passes through to inner (>= condition)."""
+def test_filtered_notifier_passes_same_day_lot_subscribed_earlier_in_day():
+    """ADR-039 gn89 fix: subscribed_at earlier the same day → same-day lot PASSES.
+
+    This is the regression direction of the fix: previous timestamp-precision
+    compare would have suppressed (lot=midnight < sub=10:00). Day-precision
+    compare treats them as the same calendar day.
+    """
     inner = FakeNotifier(channel_id="email")
     repo = FakeRegionSubscriptionRepository()
-    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_EQUAL)
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_SAME_DAY_EARLIER)
     wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
     lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
@@ -1295,14 +1304,37 @@ def test_filtered_notifier_passes_equal_cutoff():
     result = wrapper.send(lot, "test@example.com")
 
     assert result.ok is True
+    assert "suppressed" not in (result.detail or "")
+    assert len(inner.send_calls) == 1
+
+
+def test_filtered_notifier_passes_same_day_lot_subscribed_later_in_day():
+    """ADR-039 gn89 fix (primary regression): user onboards mid-day, lot
+    arrives later the same day — must be delivered.
+
+    With the OLD timestamp-precision compare this scenario was the actual
+    production bug: ``lot.date_create=00:00 < subscribed_at=13:00`` → all
+    same-day lots silently suppressed. Day-precision compare delivers.
+    """
+    inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_SAME_DAY_LATER)
+    wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
+
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
+
+    result = wrapper.send(lot, "test@example.com")
+
+    assert result.ok is True
+    assert "suppressed" not in (result.detail or "")
     assert len(inner.send_calls) == 1
 
 
 def test_filtered_notifier_passes_newer_lot():
-    """date_create > subscribed_at → send() passes through."""
+    """date_create.date() > subscribed_at.date() → send() passes through."""
     inner = FakeNotifier(channel_id="email")
     repo = FakeRegionSubscriptionRepository()
-    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_BEFORE)
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_PRIOR_DAY)
     wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
     lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
@@ -1310,6 +1342,37 @@ def test_filtered_notifier_passes_newer_lot():
     wrapper.send(lot, "test@example.com")
 
     assert len(inner.send_calls) == 1
+
+
+def test_filtered_notifier_handles_midnight_lot_same_day_onboarding():
+    """Production-fidelity edge case: ``date_create`` is midnight UTC (real
+    parser output for "DD.MM.YYYY"). Onboarding the same day → must pass.
+
+    This is the exact scenario from bd-task gn89 reproduction notes (lot
+    666 was added the same day after onboarding and got silently dropped).
+    """
+    inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    onboarding = datetime(2026, 5, 17, 22, 31, 19, tzinfo=UTC)
+    repo.seed(_MACRO_REGION_DFO, onboarding)
+    wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
+
+    # date_create as the parser produces it: midnight UTC of the same day.
+    lot_data = make_lot(
+        id=666,
+        region_id=_MACRO_REGION_DFO,
+        date_create=datetime(2026, 5, 17, tzinfo=UTC),
+    )
+    lot = LotPublicDTO(
+        **lot_data.model_dump(),
+        age_seconds=3600,
+        tier="match",
+        freshness="warm",
+    )
+
+    wrapper.send(lot, "test@example.com")
+
+    assert len(inner.send_calls) == 1, "same-day lot must not be suppressed (gn89)"
 
 
 def test_filtered_notifier_passes_no_subscribed_at():
@@ -1329,7 +1392,7 @@ def test_filtered_notifier_passes_region_id_none():
     """lot.region_id=None (legacy lot) → filter skipped, send() passes through (graceful)."""
     inner = FakeNotifier(channel_id="email")
     repo = FakeRegionSubscriptionRepository()
-    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_NEXT_DAY)
     wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
     lot = _make_lot_public(region_id=None)
@@ -1340,10 +1403,16 @@ def test_filtered_notifier_passes_region_id_none():
 
 
 def test_dispatcher_old_lot_email_suppressed_browser_called():
-    """Invariant 631y-1: old lot → email wrapper suppresses send; browser channel IS called."""
+    """Invariant 631y-1: old lot → email wrapper suppresses send; browser channel IS called.
+
+    Additionally (gn89 fix): suppressed lots must NOT create a row in the
+    notifications repository — pre-reserve ``should_suppress`` hook fires
+    before ``reserve()`` so the audit log stays clean and recovery never
+    sees a misleading ``status='sent'`` entry for an email that never went out.
+    """
     email_inner = FakeNotifier(channel_id="email")
     repo = FakeRegionSubscriptionRepository()
-    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_AFTER)
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_NEXT_DAY)
     filtered_email = SubscribedAtFilteredNotifier(inner=email_inner, region_sub_repo=repo)
 
     browser = FakeBrowserNotifier()
@@ -1352,8 +1421,11 @@ def test_dispatcher_old_lot_email_suppressed_browser_called():
     registry.register(filtered_email)
     registry.register(browser)
 
-    dispatcher, *_ = _make_dispatcher(registry=registry)
-    old_lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # date_create < SUBSCRIBED_AT_AFTER
+    config_source = FakeConfigSource(_make_email_settings(["user@example.com"]))
+    dispatcher, _registry, notif_repo, *_ = _make_dispatcher(
+        registry=registry, config_source=config_source
+    )
+    old_lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # day-13 < day-14 → suppress
 
     dispatcher.dispatch(old_lot)
     lot_from_q = dispatcher._queue.get_nowait()
@@ -1361,13 +1433,19 @@ def test_dispatcher_old_lot_email_suppressed_browser_called():
 
     assert len(email_inner.send_calls) == 0, "email must be suppressed for old lot"
     assert len(browser.send_calls) == 1, "browser must receive old lot"
+    # gn89 secondary fix: no notifications row for suppressed email channel.
+    email_status = notif_repo.status_of(old_lot.id, "email", "user@example.com")
+    assert email_status is None, (
+        "suppressed lots MUST NOT create a notifications row "
+        "(no misleading status='sent', recovery-loop safe)"
+    )
 
 
 def test_dispatcher_new_lot_both_channels_called():
     """Invariant 631y-2: new lot → both email and browser channels called."""
     email_inner = FakeNotifier(channel_id="email")
     repo = FakeRegionSubscriptionRepository()
-    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_BEFORE)
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_PRIOR_DAY)
     filtered_email = SubscribedAtFilteredNotifier(inner=email_inner, region_sub_repo=repo)
 
     browser = FakeBrowserNotifier()
@@ -1379,7 +1457,7 @@ def test_dispatcher_new_lot_both_channels_called():
     config_source = FakeConfigSource(_make_email_settings(["user@example.com"]))
     dispatcher, *_ = _make_dispatcher(registry=registry, config_source=config_source)
 
-    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # date_create=_NOW > _SUBSCRIBED_AT_BEFORE
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)  # day-13 > day-12 → pass
 
     dispatcher.dispatch(lot)
     lot_from_q = dispatcher._queue.get_nowait()
@@ -1387,6 +1465,73 @@ def test_dispatcher_new_lot_both_channels_called():
 
     assert len(email_inner.send_calls) == 1, "email must be called for new lot"
     assert len(browser.send_calls) == 1, "browser must be called for new lot"
+
+
+def test_dispatcher_same_day_lot_passes_both_channels():
+    """gn89 regression test (dispatcher level): same-day lot must reach BOTH
+    email and browser channels, and the email row in notifications must be
+    marked sent (not suppressed).
+    """
+    email_inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_SAME_DAY_EARLIER)
+    filtered_email = SubscribedAtFilteredNotifier(inner=email_inner, region_sub_repo=repo)
+
+    browser = FakeBrowserNotifier()
+
+    registry = ExplicitNotifierRegistry()
+    registry.register(filtered_email)
+    registry.register(browser)
+
+    config_source = FakeConfigSource(_make_email_settings(["user@example.com"]))
+    dispatcher, _registry, notif_repo, *_ = _make_dispatcher(
+        registry=registry, config_source=config_source
+    )
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
+
+    dispatcher.dispatch(lot)
+    lot_from_q = dispatcher._queue.get_nowait()
+    dispatcher._dispatch_all_channels(lot_from_q)
+
+    assert len(email_inner.send_calls) == 1, "same-day lot must reach email"
+    assert len(browser.send_calls) == 1, "same-day lot must reach browser"
+    assert notif_repo.status_of(lot.id, "email", "user@example.com") == "sent"
+
+
+def test_dispatcher_recovery_path_suppressed_pending_row_promoted_to_permanent_fail():
+    """gn89 recovery-zombie regression: if ``_retry_one`` invokes ``_send_one``
+    on an already-reserved (``pending``) row and ``should_suppress`` fires
+    (e.g. ``subscribed_at`` was reset to a future date after the row was
+    reserved), the row MUST be promoted to ``permanent_fail`` so the
+    recovery sweep stops re-picking it up indefinitely.
+    """
+    email_inner = FakeNotifier(channel_id="email")
+    repo = FakeRegionSubscriptionRepository()
+    repo.seed(_MACRO_REGION_DFO, _SUBSCRIBED_AT_NEXT_DAY)
+    filtered_email = SubscribedAtFilteredNotifier(inner=email_inner, region_sub_repo=repo)
+
+    registry = ExplicitNotifierRegistry()
+    registry.register(filtered_email)
+
+    config_source = FakeConfigSource(_make_email_settings(["user@example.com"]))
+    dispatcher, _registry, notif_repo, *_ = _make_dispatcher(
+        registry=registry, config_source=config_source
+    )
+
+    lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
+    # Pre-seed the notifications row as if a prior delivery attempt reserved
+    # it BEFORE suppression criteria changed (the zombie scenario).
+    notif_repo.reserve(lot.id, "email", "user@example.com")
+    assert notif_repo.status_of(lot.id, "email", "user@example.com") == "pending"
+
+    # Now suppression fires (subscribed_at moved to future). Recovery-path
+    # _send_one must terminate the row, not leave it as a sweep-magnet.
+    dispatcher._send_one(lot, filtered_email, "user@example.com")
+
+    assert len(email_inner.send_calls) == 0, "suppressed lot must not be sent"
+    assert (
+        notif_repo.status_of(lot.id, "email", "user@example.com") == "permanent_fail"
+    ), "stuck pending row must be promoted to permanent_fail to exit recovery"
 
 
 # ===========================================================================

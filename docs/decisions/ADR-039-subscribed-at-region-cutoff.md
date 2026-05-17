@@ -1,6 +1,6 @@
 # ADR-039 — subscribed_at region cutoff: per-region filter для подавления старых лотов
 
-**Status**: Accepted
+**Status**: Accepted (amended 2026-05-18, gn89: day-precision compare + pre-reserve hook)
 **Date**: 2026-05-15
 **Deciders**: Backend Architect
 **Tags**: notifications, suppression, region_subscriptions, filter, backfill, delta-trigger
@@ -60,14 +60,43 @@ class RegionSubscriptionRepository(Protocol):
 ### Точка фильтра
 
 `SubscribedAtFilteredNotifier` — decorator-класс в `notifier_dispatcher.py`, оборачивает `SmtpEmailNotifier`.
-Применяет subscribed_at check **только для email-канала** в `send()`:
+Применяет subscribed_at check **только для email-канала**.
+
+**Сравнение — day-precision** (amendment 2026-05-18, gn89):
 
 ```python
 if lot.region_id is not None:
     subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
-    if subscribed_at is not None and lot.date_create < subscribed_at:
-        return NotifyResult(ok=True, detail="suppressed (subscribed_at)", retryable=False)
+    if subscribed_at is not None and lot.date_create.date() < subscribed_at.date():
+        # suppress
 ```
+
+Обоснование calendar-date compare: `lot.date_create` парсится из upstream-формата `DD.MM.YYYY` и
+всегда имеет day-precision (`datetime(Y, M, D, 0, 0, 0, tzinfo=UTC)`, см.
+`infra/parsers/list_parser.py:_parse_date`). `subscribed_at` — точный wallclock-момент
+`Clock.now()`. При timestamp-precision-сравнении любой same-day лот (`00:00:00 < HH:MM:SS`)
+суппрессируется ложно — это и был bug gn89: пользователь, подписавшийся днём, не получал
+email о лотах того же дня. Сравнение по `.date()` восстанавливает intent («не флудить
+ИСТОРИЧЕСКИМИ лотами») без false-positive на same-day.
+
+**Pre-reserve suppression hook** (amendment 2026-05-18, gn89):
+
+`SubscribedAtFilteredNotifier` выставляет публичный метод
+`should_suppress(lot: LotPublicDTO) -> bool`. `NotifierDispatcher._send_one` вызывает его
+**ДО** `reserve()`/`mark_attempt`/`send()`. Если возвращает `True`:
+
+- **Fresh-dispatch path** (`status_of` = `None`): `_send_one` возвращается без `reserve()`.
+  В `notifications` строка не создаётся. Аудит-таблица не содержит misleading `status='sent'`
+  для лотов, для которых SMTP никогда не вызывался.
+- **Recovery path** (`status_of` = `'pending'`): строка уже существовала с предыдущей
+  попытки и теперь подпадает под suppression (например, регион был удалён и заведён
+  заново — `subscribed_at` сместился вперёд). `_send_one` промотает строку в
+  `permanent_fail` — иначе recovery-sweep бесконечно вытягивал бы её через
+  `list_pending_older_than` без шанса на терминальный статус.
+
+Метод `should_suppress` — duck-typed hook (не часть `Notifier`-Protocol), это сохраняет
+минимальный Protocol-surface и оставляет дверь для будущих filter-декораторов с тем же
+контрактом без модификации унаследованных нотификаторов (OCP).
 
 `NotifierDispatcher.dispatch()` — фильтр убран. Dispatcher передаёт все лоты без предварительной проверки.
 `BrowserSseNotifier` — регистрируется в registry без wrapper'а; browser-канал получает все лоты.
@@ -92,6 +121,13 @@ registry.register(BrowserSseNotifier(event_bus=event_bus))  # no filter
 SLO определён над notifications, которые система **решает** отправить — не над universe of lots.
 `subscribed_at` filter — намеренная suppression до стадии dispatch, не нарушение at-least-once.
 Документируется явно в ADR-019 §«Intentional dispatch suppression».
+
+SLO применяется только к лотам, прошедшим suppression-check. Same-day лоты
+(`date_create.date() == subscribed_at.date()`) **не** suppressed — входят в SLO.
+
+Recovery-promotion suppressed `pending` → `permanent_fail` (см. §«Точка фильтра») — это
+терминальный статус по ADR-019; SLO такие записи не покрывает (suppression — намеренная,
+не доставка failed).
 
 ---
 

@@ -74,9 +74,24 @@ _CHANNEL_HEARTBEAT = "heartbeat"
 class SubscribedAtFilteredNotifier:
     """Decorator applying subscribed_at suppression for the wrapped email Notifier.
 
-    Suppresses send() if lot.date_create < region's subscribed_at.
+    Suppression rule (ADR-039, day-precision compare): a lot is suppressed when
+    ``lot.date_create.date() < region.subscribed_at.date()``.
+
+    Rationale: ``date_create`` is parsed from upstream "DD.MM.YYYY" so it always
+    has day precision (midnight UTC). ``subscribed_at`` is a wallclock moment.
+    Comparing them with full timestamp precision would silently drop every
+    same-day lot — `00:00:00 < HH:MM:SS` is always true within the same day.
+    Calendar-date comparison restores ADR-039 intent ("don't flood with
+    historical lots") without false-positives for same-day lots.
+
     Browser/heartbeat notifiers are registered without this wrapper — they
     always receive all lots so the UI feed updates in real-time.
+
+    Dispatcher integration: ``should_suppress(lot)`` is queried by
+    ``NotifierDispatcher._send_one`` BEFORE ``reserve()``. Suppressed lots
+    leave no row in ``notifications`` (no misleading ``status='sent'`` audit
+    entry, no recovery-loop interaction). ``send()`` keeps the same check as
+    defence-in-depth for direct callers that bypass the dispatcher.
     """
 
     channel_id: ClassVar[str] = "email"
@@ -97,21 +112,39 @@ class SubscribedAtFilteredNotifier:
         if inner_schema is not None:
             type(self).config_schema = inner_schema
 
+    def should_suppress(self, lot: LotPublicDTO) -> bool:
+        """Pre-reserve suppression check (ADR-039).
+
+        Returns True iff the lot's calendar publication date precedes the
+        region's subscription calendar date. Lots with no region or no
+        ``subscribed_at`` record pass through unfiltered.
+
+        Emits ``notification.subscribed_at_dropped`` at DEBUG for traceability;
+        log level is intentional — onboarding-time suppression can be high
+        volume during backfill and must not flood INFO/WARNING streams.
+        """
+        if lot.region_id is None:
+            return False
+        subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
+        if subscribed_at is None:
+            return False
+        if lot.date_create.date() >= subscribed_at.date():
+            return False
+        logger.debug(
+            "notification.subscribed_at_dropped",
+            extra={
+                "region_id": lot.region_id,
+                "lot_id": lot.id,
+                "lot_date_create": lot.date_create.isoformat(),
+                "subscribed_at": subscribed_at.isoformat(),
+                "decision": "dropped_subscribed_at",
+            },
+        )
+        return True
+
     def send(self, lot: LotPublicDTO, recipient: str) -> NotifyResult:
-        if lot.region_id is not None:
-            subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
-            if subscribed_at is not None and lot.date_create < subscribed_at:
-                logger.debug(
-                    "notification.subscribed_at_dropped",
-                    extra={
-                        "region_id": lot.region_id,
-                        "lot_id": lot.id,
-                        "lot_date_create": lot.date_create.isoformat(),
-                        "subscribed_at": subscribed_at.isoformat(),
-                        "decision": "dropped_subscribed_at",
-                    },
-                )
-                return NotifyResult(ok=True, detail="suppressed (subscribed_at)", retryable=False)
+        if self.should_suppress(lot):
+            return NotifyResult(ok=True, detail="suppressed (subscribed_at)", retryable=False)
         return self._inner.send(lot, recipient)  # type: ignore[attr-defined]
 
     def test(self, recipient: str) -> NotifyResult:
@@ -320,6 +353,29 @@ class NotifierDispatcher:
         """
         channel_id: str = type(notifier).channel_id  # type: ignore[attr-defined]
         notifier_send = notifier.send  # type: ignore[attr-defined]
+
+        # --- Step 0: pre-reserve suppression hook (ADR-039) -------------------
+        # Notifier filters (e.g. SubscribedAtFilteredNotifier) opt in by
+        # exposing a ``should_suppress(lot: LotPublicDTO) -> bool`` method
+        # (duck-typed; intentionally not on ``Notifier`` Protocol — keeps the
+        # Protocol surface minimal and lets new filters opt in without
+        # touching unrelated notifiers — OCP).
+        #
+        # Fresh-dispatch path: no row exists yet → return without ``reserve``.
+        # No misleading ``status='sent'`` audit entry is created.
+        #
+        # Recovery path (``_retry_one``): a ``pending`` row may already exist.
+        # Returning without state-change would let the recovery sweep see the
+        # row on every iteration without progress — a zombie. Promote to
+        # ``permanent_fail`` so the row exits the recovery set cleanly. This
+        # also gives operators an audit-visible terminal state for lots that
+        # became suppressed AFTER reservation (e.g. region delete + re-add
+        # reset ``subscribed_at`` to a future date).
+        should_suppress = getattr(notifier, "should_suppress", None)
+        if callable(should_suppress) and should_suppress(lot):
+            if self._notif_repo.status_of(lot.id, channel_id, recipient) == "pending":
+                self._notif_repo.mark_permanent_fail(lot.id, channel_id, recipient)
+            return
 
         # --- Step 1: reserve (idempotent INSERT OR IGNORE) --------------------
         status = self._notif_repo.status_of(lot.id, channel_id, recipient)
