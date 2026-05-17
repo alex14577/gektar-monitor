@@ -1,162 +1,236 @@
+---
+title: Структура проекта (src/fis_monitor)
+status: canon
+---
+
 # Структура проекта
 
-Раскладка кода — **рабочая гипотеза**. Конкретные имена модулей и разбиение могут меняться. Финализация после выбора тех-стека.
+Фактическая раскладка `src/fis_monitor/` с описанием назначения каждого пакета.
+Архитектурные принципы: [[architecture/02-layers-dip]] (слои + DIP), [[architecture/04-composition-root]] (сборка зависимостей).
 
-## Дерево
+## Корень пакета (`src/fis_monitor/`)
 
-```
-src/fis_monitor/
-  __init__.py
-  app.py                # FastAPI entry, lifespan, монтаж роутов и SSE
-  config.py             # Pydantic-модели config.json, валидация, file-watch hook
-  data_model.py         # Реализация Pydantic-моделей из docs/data-model.md
-                        # (Lot, LotUserState, LotDTO, SSE*, CycleResult, OnboardingState, ...)
+| Файл | Назначение |
+|---|---|
+| `app.py` | FastAPI application factory + lifespan. Монтирует роуты, запускает supervised threads (monitor cycle, full scan, enrichment, config watchdog). Трёхфазный shutdown per ADR-014. |
+| `composition.py` | Composition root: `build_container()` — топологическая сборка всех зависимостей без DI-фреймворка. Создаёт `TorgiUrlBuilder` из `config_source.current().target.base_url`. Слои 0–4. Подробнее: [[architecture/04-composition-root]]. |
+| `container.py` | Frozen dataclasses `Infra` (слои 0–2), `Services` (слои 3–4), мutable `Container`. Чёткий шов: сервисы зависят только от Protocol-интерфейсов `Infra`. |
 
-  db/
-    schema.sql          # Канон схемы (копия/symlink на docs/db/schema.sql):
-                        # mirror + user-state + FTS5 + R-tree + smtp_credentials
-    migrations/         # Версионные миграции (alembic или своё)
-    repository.py       # CRUD: lots, lot_history, notifications, cycles, settings
+## `domain/`
 
-  monitor/
-    cycle.py            # monitor_cycle background task, planning + backoff
-    parser_list.py      # Парсер /cabinet/free-lot (список, 10 на страницу)
-    parser_detail.py    # Парсер /cabinet/free-lot-view (карточка лота)
-    sort_strategy.py    # early-exit: sort=-DATE_CREATE, остановка на last_known_id
+Чистый доменный слой. Никаких зависимостей на инфраструктуру. См. [[architecture/02-layers-dip]].
 
-  enrichment/
-    worker.py           # Фоновый enrichment до 10 параллельно, приоритет ниже monitor
+| Файл | Назначение |
+|---|---|
+| `models.py` | Pydantic-модели домена: `Lot`, `LotUserState`, `CycleResult`, `OnboardingState`, `Settings`, `TargetConfig` (base_url / request_timeout_seconds / user_agent, ADR-024), `EmailConfig` и т.д. Один источник правды по defaults и валидации `config.json`. |
+| `interfaces.py` | Протоколы (Protocols) для всех внешних зависимостей: `LotRepository`, `HttpClient`, `ListParser`, `DetailParser`, `Clock`, `EventBus`, `Locker`, `NotificationsRepository` и др. Инверсия зависимостей (DIP). |
+| `diff.py` | Алгоритм сравнения снапшотов лотов (new/removed/changed). |
+| `errors.py` | Доменные исключения. |
+| `regions.py` | Константы макро-регионов (ДФО=1, Арктика=2) и отображение субъектов. |
 
-  notifiers/
-    base.py             # Notifier ABC: send(lot, event) -> Result
-    email.py            # SMTP (бот-ящик по умолчанию + override клиентский)
-    browser.py          # Notification API через SSE → клиентский JS
-    registry.py         # Регистрация и discovery плагинов
+## `infra/`
 
-  auth/
-    playwright_login.py # Headed login через ЕСИА в persistent context (profile/)
-    session.py          # Проверка валидности сессии, триггер перелогина
+Инфраструктурный слой. Реализует Protocols из `domain/interfaces.py`. [[architecture/02-layers-dip]] §DIP.
 
-  web/
-    routes/             # API endpoints (FastAPI routers)
-      lots.py
-      settings.py
-      auth.py
-      notifications.py
-      diagnostics.py
-    sse.py              # SSE-стрим: `queue.Queue` (thread-safe) + sync→async через
-                        # `await loop.run_in_executor(None, q.get)`. Multi-tab fan-out:
-                        # один источник → N очередей подписчиков (по вкладкам).
-                        # См. decisions-log → «SSE мост sync→async».
-    csrf.py             # Origin-header + cookie-token middleware
-    static/             # CSS/JS, HTMX-инициализация
-    templates/          # Jinja2 layouts и фрагменты
+### `infra/http/`
 
-  utils/
-    paths.py            # Обёртка над platformdirs: user_data_dir, user_config_dir, cache_dir
-    lock.py             # single-instance: paths.data_dir / "app.lock" + PID
-    logging.py          # Структурные JSON-логи, ротация посуточно 30 дней
-    timezone.py         # МСК-канон + опциональный display-TZ
+| Файл | Назначение |
+|---|---|
+| `client.py` | `RequestsHttpClient` — реализация `HttpClient` Protocol поверх `requests`. `verify=False` для upstream с self-signed cert (ADR-024 §SSL). |
+| `url_builder.py` | `TorgiUrlBuilder` — frozen dataclass, единственный источник URL-логики для надальнийвосток.рф. Endpoint paths — module-level константы, не конфиг. ADR-024. |
+| `cookie_bridge.py` | Перенос Playwright-cookies в `requests.Session`. |
 
-  autostart/
-    __init__.py         # Выбор по sys.platform
-    windows.py          # Task Scheduler At-Logon через schtasks
-    linux.py            # XDG Autostart: ~/.config/autostart/fis-monitor.desktop
+### `infra/sqlite/`
 
-tests/
-  fixtures/             # HTML-снапшоты сайта (датированные)
-  unit/                 # Парсеры, sort-strategy, идемпотентность, lock
-  integration/          # SQLite + FastAPI TestClient, без сети
-```
+SQLite-адаптеры. Все SQL в репозиториях; sync sqlite3 (без aiosqlite). [[decisions/ADR-016-repository-invariants-begin-immediate]].
 
-## Описание модулей
+| Пакет/файл | Назначение |
+|---|---|
+| `connection.py` | `ConnectionProvider` — thread-local connections, `PRAGMA busy_timeout=5000` на каждом коннекте. |
+| `init_db.py` | Инициализация схемы БД. |
+| `migrations.py` | Оркестратор миграций; `migrations_v1_to_v2.py` … `v4_to_v5.py` — версионные миграции. |
+| `repositories/` | По одному файлу на репозиторий: `lots.py`, `notifications.py`, `cycles.py`, `region_subscriptions.py`, `settings.py`, `smtp_credentials.py`, `state.py`, `user_state.py`. |
 
-- **`app.py`** — точка входа. Создаёт FastAPI, монтирует роуты, стартует фоновые таски (monitor cycle, enrichment worker, file-watch конфига), биндит на `127.0.0.1`.
-- **`config.py`** — Pydantic-модели для `config.json`. Один источник правды по дефолтам и валидации. File-watch перезагружает без рестарта.
-- **`db/repository.py`** — все SQL в одном месте. Разделение mirror (можно стереть) и user-state (бережём). См. [[db/schema|db/schema.sql]].
-- **`monitor/cycle.py`** — оркестратор цикла: запросить первую страницу, разобрать, найти новые ID, посчитать backoff при 5xx, записать `cycles`.
-- **`monitor/parser_list.py` / `parser_detail.py`** — парсинг HTML. Изолированы от сетевого слоя, тестируются на фикстурах.
-- **`monitor/sort_strategy.py`** — алгоритм early-exit и защита от регрессии ID (см. [[parser/sort-strategy]] и [[product/monitoring-plan]] → «Защита от смены ID-схемы»).
-- **`enrichment/worker.py`** — фоновое дозаполнение карточек, очередь с приоритетом ниже монитора, до 10 параллельно. См. [[product/monitoring-plan]].
-- **`notifiers/*`** — плагин-архитектура. `base.Notifier` — ABC, конкретные каналы регистрируются через `registry`. Идемпотентность по `(lot_id, channel)`. См. [[notifications]].
-- **`auth/playwright_login.py`** — открывает headed Chromium с persistent context, ждёт пока клиент пройдёт ЕСИА сам.
-- **`auth/session.py`** — детектит 302 на login, поднимает флаг «нужен релогин», останавливает enrichment.
-- **`web/routes/`** — API-эндпоинты по доменам (лоты, настройки, авторизация, уведомления, диагностика).
-- **`web/sse.py`** — server-sent events: пуш новых лотов в открытую вкладку UI.
-- **`web/csrf.py`** — проверка `Origin` + secure-cookie токен. См. [[architecture]] → §1 CSRF middleware.
-- **`utils/paths.py`** — единая точка для всех путей данных. Использует `platformdirs`: на Windows → `%LOCALAPPDATA%\fis-monitor\`, на Linux → `~/.local/share/fis-monitor/`. Никакого хардкода `%LOCALAPPDATA%` в остальном коде.
-- **`utils/lock.py`** — single-instance защита через PID-файл с авто-захватом «осиротевшего» lock.
-- **`utils/logging.py`** — структурный JSON-логгер, ротация, отдельный `requests.jsonl` для журнала запросов.
-- **`autostart/`** — кросс-платформенный автозапуск. `__init__.py` диспатчит на windows/linux по `sys.platform`. В MVP реализована Windows-ветка (Task Scheduler), Linux-ветка — заглушка под будущий хостинг.
+### `infra/parsers/`
 
-## Тесты
+| Файл | Назначение |
+|---|---|
+| `list_parser.py` | `SelectolaxListParser` — парсит `/cabinet/free-lot` HTML (tr[data-key], td[data-col-seq]). Изолирован от сети, тестируется на fixture-снапшотах. |
+| `detail_parser.py` | `SelectolaxDetailParser` — парсит `/cabinet/free-lot-view` (`.request-declaration__block-main`). |
 
-- **`tests/fixtures/`** — датированные HTML-снапшоты (`cabinet-free-lot-2026-05-12.html`, `cabinet-free-lot-view-<id>-2026-05-12.html`). При апгрейде парсера полная регрессия должна давать тот же output.
-- **`tests/unit/`** — парсеры, sort-strategy, lock-файл, идемпотентность нотификатора.
-- **`tests/integration/`** — FastAPI TestClient + SQLite, без сети. Покрывают CSRF, SSE, API.
+### `infra/notifiers/`
+
+| Файл | Назначение |
+|---|---|
+| `registry.py` | `ExplicitNotifierRegistry` — реестр нотификаторов. [[architecture/06-notifier-registry]]. |
+
+### `infra/smtp/`
+
+| Файл | Назначение |
+|---|---|
+| `email_notifier.py` | `SmtpEmailNotifier` — отправка через SMTP, ManualSTARTTLS. ADR-021. |
+| `host_policy.py` | `DefaultSmtpHostPolicy` — определяет SMTP host по домену email. [[architecture/03-protocols#SmtpHostPolicy]]. |
+| `provider_catalog.py` | `StaticSmtpProviderCatalog` — таблица провайдеров (Yandex, Gmail, Mail.ru, …). |
+| `constants.py` | `DEFAULT_SMTP_HOST`, `DEFAULT_SMTP_PORT` — перенесены из domain/models.py (ADR-020, ADR-024). |
+
+### `infra/playwright/`
+
+| Файл | Назначение |
+|---|---|
+| `login.py` | `PlaywrightLoginSession` — headed Chromium с persistent context, ЕСИА-авторизация. Встроен в FastAPI threadpool. |
+
+### `infra/sse/`
+
+SSE-подсистема (server-sent events). Sync→async мост.
+
+| Файл | Назначение |
+|---|---|
+| `bus.py` | `SSEBus` — единая шина событий. Управляет подписчиками. |
+| `subscriptions.py` | `SSESubscription` — per-tab subscription с `queue.Queue`. Multi-tab fan-out: один источник → N очередей. |
+| `sse_stream.py` | ASGI-генератор потока: `queue.get()` через `run_in_executor` (sync→async). |
+| `browser_sse_notifier.py` | `BrowserSSENotifier` — реализует `Notifier` Protocol, пушит события в SSE-шину. |
+
+## `services/`
+
+Application-layer use cases. Зависят только от Protocols из `domain/interfaces.py`. [[architecture/02-layers-dip]] §Layer 3.
+
+| Файл | Назначение |
+|---|---|
+| `monitor_cycle.py` | `MonitorCycleService` — основной цикл мониторинга: fetch list → parse → diff → dispatch. Использует `TorgiUrlBuilder`. |
+| `enrichment.py` | `EnrichmentService` — фоновое дозаполнение detail-карточек. ThreadPoolExecutor до 10 тредов. |
+| `full_scan.py` | `FullScanService` — полная пагинированная выгрузка (backfill / catchup). |
+| `paginated_list_fetcher.py` | `PaginatedListFetcher` — обход страниц с ранним выходом по sort=-DATE_CREATE. |
+| `notifier_dispatcher.py` | `NotifierDispatcher` — очередь нотификаций, consumer_loop, идемпотентность по (lot_id, channel). |
+| `onboarding.py` | `OnboardingService` — FSM onboarding flow. [[onboarding]], [[decisions/ADR-018-onboarding-fsm-server-enforced]]. |
+| `settings.py` | `SettingsService` — чтение/запись пользовательских настроек (регионы, recipients). |
+| `login.py` | `LoginService` — оркестрирует Playwright headed-login, управляет сессией. |
+| `lot_query.py` | Запросы к репозиторию лотов (фильтрация, сортировка, пагинация). |
+| `lot_user_state.py` | Обновление пользовательского состояния лота (saved/dismissed/read). |
+| `filter_matcher.py` | Матчинг лотов по пользовательским фильтрам (area, region, status). |
+| `view_filters.py` | Применение фильтров к view-запросу. |
+| `backfill.py` | `BackfillService` — запуск полного сканирования по запросу. |
+| `catchup_dismiss.py` | Dismiss исторических лотов до выбранного порога. |
+| `dnd.py` | Do-Not-Disturb расписание уведомлений. |
+| `smtp_test.py` | Тестовая отправка SMTP-письма (диагностика). |
+| `session_expired_email.py` | Уведомление по email об истечении ЕСИА-сессии. |
+
+### `services/diagnostics/`
+
+| Файл | Назначение |
+|---|---|
+| `service.py` | `DiagnosticsService` — сбор состояния системы (БД, сессия, last cycle). |
+| `exclude_policy.py` | Политика исключения чувствительных данных из диагностического отчёта. |
+
+## `web/`
+
+HTTP-слой (FastAPI). Не содержит бизнес-логики — делегирует в `services/`.
+
+| Файл | Назначение |
+|---|---|
+| `middleware.py` | CSRF + DNS-rebinding защита (ADR-011). Pure ASGI class, без BaseHTTPMiddleware. Host-allowlist + Origin-check для state-changing методов. |
+| `onboarding_gate.py` | Middleware/depends: перенаправляет незаконченный onboarding на `/onboarding`. |
+| `rate_limit.py` | Rate-limiting для отдельных эндпоинтов (login, SMTP test). |
+| `deps.py` | FastAPI dependencies (Container, ConfigSource и пр.). |
+| `feed_context.py` | Сборка контекста для главной страницы (feed). |
+| `sse_encoder.py` | Сериализация SSE-событий в JSON-фрагменты для клиента. |
+| `templates.py` | Jinja2 environment factory, фильтры, глобальные функции. |
+| `_helpers.py` | Вспомогательные функции для route-handlers. |
+
+### `web/routes/`
+
+Один router-файл на домен. Все handlers — `def` (sync), FastAPI разносит в threadpool.
+
+| Файл | Назначение |
+|---|---|
+| `main.py` | Корневой роут (`/`), feed-страница. |
+| `lots.py` | API лотов (`/lots/`, детали лота, lot-actions). |
+| `onboarding.py` | Onboarding wizard (4 шага). |
+| `settings.py` | Пользовательские настройки (регионы, recipients, фильтры). |
+| `auth.py` | ЕСИА-авторизация (запуск Playwright, статус сессии). |
+| `notifications.py` | Управление уведомлениями (DND, SMTP test). |
+| `diagnostics.py` | Диагностический эндпоинт. |
+| `events.py` | SSE-эндпоинт (`/events`). |
+| `filters.py` | CRUD пользовательских фильтров. |
+| `backfill.py` | Запуск backfill / catchup. |
+| `catchup.py` | Catchup-dismiss эндпоинт. |
+| `cycle.py` | Ручной запуск monitor cycle. |
+| `dnd.py` | DND-расписание API. |
+
+### `web/static/` и `web/templates/`
+
+CSS/JS (HTMX-инициализация) и Jinja2 шаблоны (feed, onboarding, layout-фрагменты). Финальные файлы из дизайн-handoff (`claude-design/`).
+
+## `auth/`
+
+Заглушка-пакет (`__init__.py`). Логика авторизации вынесена в `infra/playwright/login.py` и `services/login.py`.
+
+## `monitor/`
+
+Заглушка-пакет (`__init__.py`). Логика цикла в `services/monitor_cycle.py`.
+
+## `notifiers/`
+
+Заглушка-пакет (`__init__.py`). Реализации нотификаторов: `infra/smtp/email_notifier.py`, `infra/sse/browser_sse_notifier.py`. Реестр: `infra/notifiers/registry.py`. [[architecture/06-notifier-registry]].
+
+## `enrichment/`
+
+Заглушка-пакет (`__init__.py`). Логика в `services/enrichment.py`.
+
+## `utils/`
+
+| Файл | Назначение |
+|---|---|
+| `log.py` | Структурный JSON-логгер, ротация посуточно 30 дней. |
+| `log_filters.py` | Фильтры логов (подавление чувствительных данных). |
+| `log_level.py` | Утилиты управления уровнем логирования. |
+
+> Пути данных (`platformdirs`) вынесены в `infra/` (нет отдельного `utils/paths.py` — поиск по коду).
+
+## `autostart/`
+
+Заглушка-пакет (`__init__.py`). Кросс-платформенный автозапуск (Task Scheduler / XDG Autostart) — pending bd-задача a4t.9.
+
+## `db/`
+
+Заглушка-пакет (`__init__.py`). Вся SQL-логика в `infra/sqlite/`.
 
 ## Конфигурация и данные (вне `src/`)
 
-Пути берутся из `utils/paths.py` (через `platformdirs`):
+Пути через `platformdirs`:
 
 | Файл/папка | Windows | Linux |
 |---|---|---|
 | `config.json` | `%LOCALAPPDATA%\fis-monitor\` | `~/.config/fis-monitor/` |
-| `state.db`, `profile/`, `logs/`, `app.lock` | `%LOCALAPPDATA%\fis-monitor\` | `~/.local/share/fis-monitor/` |
+| `state.db`, `profile/`, `logs/` | `%LOCALAPPDATA%\fis-monitor\` | `~/.local/share/fis-monitor/` |
 
-Структура внутри директории идентична:
 ```
-state.db                    # SQLite, WAL
-profile/                    # Playwright persistent context (cookies ЕСИА)
+state.db                    # SQLite WAL — зеркало лотов + user state
+profile/                    # Playwright persistent context (ЕСИА cookies)
 logs/
-  app.jsonl                 # ротация посуточно, 30 дней
+  app.jsonl
   requests.jsonl
-app.lock                    # PID single-instance
 ```
 
-## Сборка артефактов
+## Тесты (`tests/`)
 
-Nuitka не умеет кросс-компиляцию. Сборка обоих бинарей через CI:
+| Папка | Содержимое |
+|---|---|
+| `tests/fixtures/` | Датированные HTML-снапшоты сайта для парсер-тестов. |
+| `tests/unit/` | Юнит-тесты: парсеры, diff, filter_matcher, сервисы (без сети и БД). |
+| `tests/infra/` | Инфра-тесты с реальным SQLite (без сети). |
+| `tests/fakes/` | Реализации фейков для Protocol-интерфейсов (typed, mypy --strict). |
 
-| Платформа | Раннер CI | Артефакт |
-|---|---|---|
-| Windows | `windows-2022` | `fis-monitor.exe` |
-| Linux | `ubuntu-22.04` | `fis-monitor` (ELF) |
+## Staging (`tools/fake_torgi/`)
 
-Релиз клиенту — только Windows. Linux-бинарь — для разработки и будущего хостинга (см. [[decisions-log]] → forward-compat).
-
-## Зафиксированный стек
-
-См. [[decisions-log]] → «Технологический стек». Кратко:
-
-- **Python 3.12+**
-- **Pydantic v2** — модели `config.json` и NotifierConfig (плагин-схемы)
-- **sqlite3** sync (встроенный) — без `aiosqlite`. Один коннект на поток,
-  `PRAGMA busy_timeout=5000` на каждом коннекте
-- **requests** sync — HTTP-клиент. Параллельность enrichment через
-  `concurrent.futures.ThreadPoolExecutor` (до 10 тредов)
-- **selectolax 0.4.8** — HTML-парсер (верифицирован на фикстурах 12.05.2026)
-- **playwright 1.58.0** + Chromium 145 (Chrome for Testing). Embedded в FastAPI
-  threadpool, не subprocess. Fallback на 1.56.0 если ЕСИА flag-ает CfT
-  (см. [[ops/runbook]] сценарий 9)
-- **FastAPI handlers как `def ...`** (sync), не `async def`. FastAPI разносит по
-  threadpool сам
-- **CSRF**: своя минимальная middleware в `web/csrf.py` (`Origin` + `Host` +
-  `X-CSRF-Token`), ~30 строк, без внешних зависимостей
-- **SSE**: `sse-starlette` (`EventSourceResponse`) в `web/sse.py`. Sync→async
-  мост через `queue.Queue` + `run_in_executor`, multi-tab fan-out
-- **jinja2** — серверный рендер шаблонов; tier/freshness считает сервер и
-  кладёт в `data-tier`/`data-freshness` атрибуты карточки
-- **platformdirs** — кросс-платформенные пути для данных и конфига
-  (`~/.local/share/fis-monitor/` на Linux, `%LOCALAPPDATA%\fis-monitor\` на
-  Windows)
-- **watchdog** — file-watch на `config.json` для hot-reload без рестарта
-- **psutil** — PID-проверка для single-instance lock
-- **SMTP-учётка** — `state.db` (таблица `smtp_credentials`), **не** `config.json`
+Локальный двойник надальнийвосток.рф для ручной проверки end-to-end сценариев. Подробнее: [[staging-fake-site]].
 
 ## См. также
 
-- [[ops/getting-started]]
-- [[decisions-log]]
-- [[product/monitoring-plan]]
-- [[web/ui-architecture]]
+- [[architecture/02-layers-dip]] — слои, DIP, границы между пакетами
+- [[architecture/04-composition-root]] — порядок сборки зависимостей в `build_container()`
+- [[architecture/03-protocols]] — каталог Protocol-интерфейсов
+- [[architecture/06-notifier-registry]] — архитектура нотификаторов
+- [[decisions/ADR-016-repository-invariants-begin-immediate]] — инварианты репозиториев
+- [[decisions/ADR-018-onboarding-fsm-server-enforced]] — onboarding FSM
+- [[decisions/ADR-024-target-config-and-url-builder]] — TargetConfig + TorgiUrlBuilder
+- [[onboarding]] — пользовательский flow onboarding

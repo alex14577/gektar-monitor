@@ -1,11 +1,11 @@
 ---
-title: Staging fake-site (локальный двойник fis.gov.kz)
-status: draft
+title: Staging fake-site (локальный двойник надальнийвосток.рф)
+status: canon
 ---
 
-# Staging fake-site — локальный двойник fis.gov.kz
+# Staging fake-site — локальный двойник надальнийвосток.рф
 
-> Manual-staging инструмент: запускается на dev-машине оператора, имитирует целевой сайт ровно настолько, насколько нужно, чтобы перед отдачей клиенту вручную проверить «появился новый лот → пришло уведомление». Реальные лоты на fis.gov.kz появляются редко, поэтому ждать естественного события нерационально.
+> Manual-staging инструмент: запускается на dev-машине оператора, имитирует целевой сайт ровно настолько, насколько нужно, чтобы перед отдачей клиенту вручную проверить «появился новый лот → пришло уведомление». Реальные лоты на надальнийвосток.рф появляются редко, поэтому ждать естественного события нерационально.
 >
 > **Не E2E-автотест.** Долгоживущий процесс, управляется оператором через admin-UI.
 >
@@ -16,7 +16,7 @@ status: draft
 Три процесса, три браузерных вкладки:
 
 ```
-Терминал 1: python tools/fake_fis/server.py --port 8765
+Терминал 1: python tools/fake_torgi/server.py --port 8765
 Терминал 2: FIS_TARGET__BASE_URL=http://localhost:8765 python -m fis_monitor
             # (либо python -m fis_monitor --config config.staging.json)
 
@@ -45,7 +45,7 @@ status: draft
 |---|---|
 | `state.db` (user-editable) | **Нет.** Это операционный параметр инсталляции, не пользовательская настройка. Конфликт с [[decisions/ADR-020-smtp-creds-state-db\|ADR-020]] semantics (SSOT для credentials, не для infra-endpoints). К тому же `state.db` читается после Container-инициализации — HTTP-клиент нужен раньше. |
 | Голая env-переменная | **Не как единственный механизм.** Нет документированного default'а рядом с кодом. |
-| Pydantic `Settings` + `config.json` | **Да.** Новый sub-model `TargetConfig`, compile-time default `https://fis.gov.kz` как доменная константа в коде, override через `config.json` (уже читается через `WatchdogConfigSource`). |
+| Pydantic `Settings` + `config.json` | **Да.** Новый sub-model `TargetConfig`, compile-time default (Punycode домен `xn--80aaggvgieoeoa2bo7l.xn--p1ai`) как доменная константа в коде, override через `config.json` (уже читается через `WatchdogConfigSource`). |
 
 ### Layered resolution
 
@@ -57,7 +57,7 @@ compiled-in defaults  →  config.json (operator)  →  env-override (FIS_TARGET
 
 ### Prod vs Staging — один файл + env, не два файла
 
-- **Prod build:** `config.json` НЕ содержит ключ `target.base_url` → используется compile-time default `https://fis.gov.kz`.
+- **Prod build:** `config.json` НЕ содержит ключ `target.base_url` → используется compile-time default (Punycode домен надальнийвосток.рф).
   - Защита: prod URL никогда не попадает в пользовательский конфиг → его нельзя случайно переписать.
 - **Staging:** одно из:
   - `FIS_TARGET__BASE_URL=http://localhost:8765 python -m fis_monitor` (через Pydantic `env_nested_delimiter="__"`)
@@ -79,7 +79,7 @@ compiled-in defaults  →  config.json (operator)  →  env-override (FIS_TARGET
 - **`smtp_host` defaults** — security-инвариант через [[architecture/03-protocols#SmtpHostPolicy]] и [[decisions/ADR-021-manual-starttls\|ADR-021]]. SSOT — `state.db` ([[decisions/ADR-020-smtp-creds-state-db\|ADR-020]]).
 - **Playwright host-whitelist** (ADR-011) — security-инвариант.
 
-### DI-композиция: `FisUrlBuilder`
+### DI-композиция: `TorgiUrlBuilder`
 
 `HttpClient` — generic Protocol, принимает полный URL в каждом вызове. `base_url` в него прокидывать нельзя — нарушит шов. Варианты:
 
@@ -87,9 +87,9 @@ compiled-in defaults  →  config.json (operator)  →  env-override (FIS_TARGET
 |---|---|
 | `base_url: str` прямо в конструктор `PollingService` | Размазывает знание URL-структуры по сервисам. |
 | `FisHttpClient` обёртка над `HttpClient` | Ломает Protocol-смысл: generic vs site-specific. |
-| **`FisUrlBuilder` value-object** | **Выбран.** Один источник URL-логики. |
+| **`TorgiUrlBuilder` value-object** | **Выбран.** Один источник URL-логики. |
 
-`FisUrlBuilder` принимает `base_url`, предоставляет методы `lot_list_url(region, page)`, `lot_detail_url(lot_id)`. Endpoint paths — module-level константы рядом с builder'ом. PollingService зависит от `FisUrlBuilder` + `HttpClient`, оба инжектируются. Hot-reload: пересоздать builder в Container без рестарта сервиса.
+`TorgiUrlBuilder` принимает `base_url`, предоставляет методы `lot_list_url(region, page)`, `lot_detail_url(lot_id)`. Endpoint paths — module-level константы рядом с builder'ом. Сервисы зависят от `TorgiUrlBuilder` + `HttpClient`, оба инжектируются. Пересборка builder-а происходит только на рестарт сервиса (hot-reload — future work, ADR-024).
 
 ### Артефакт `smtp_host="smtp.yandex.ru"` (models.py:372)
 
@@ -98,13 +98,13 @@ Default в Pydantic-модели противоречит [[decisions/ADR-020-sm
 - `EmailConfig.smtp_host: str | None = None`
 - Константа `DEFAULT_SMTP_HOST = "smtp.yandex.ru"` живёт в `infra/smtp/constants.py`, не в доменной модели
 
-### Точки изменений в проекте
+### Реализованные изменения в проекте (ADR-024)
 
-1. `src/fis_monitor/domain/models.py` — добавить `TargetConfig` (base_url / request_timeout_seconds / user_agent) как sub-model в `Settings`. Убрать `smtp_host="smtp.yandex.ru"` default из `EmailConfig`.
-2. `src/fis_monitor/infra/http/` — новый `FisUrlBuilder` + endpoint paths как module-level константы.
-3. `src/fis_monitor/infra/config_source.py` — поддержка `FIS_CONFIG` env / `--config` CLI override.
+1. `src/fis_monitor/domain/models.py` — добавлен `TargetConfig` (base_url / request_timeout_seconds / user_agent) как sub-model в `Settings`; убран `smtp_host="smtp.yandex.ru"` default из `EmailConfig`.
+2. `src/fis_monitor/infra/http/` — реализованы `TorgiUrlBuilder` + endpoint paths как module-level константы.
+3. `src/fis_monitor/infra/config_source.py` — добавлена поддержка `FIS_CONFIG` env / `--config` CLI override.
 4. `src/fis_monitor/infra/smtp/constants.py` — `DEFAULT_SMTP_HOST` перенесён сюда из models.
-5. Composition root — `FisUrlBuilder` инстанциируется из `config_source.current().target.base_url`, инжектируется в PollingService.
+5. Composition root — `TorgiUrlBuilder` инстанциируется из `config_source.current().target.base_url`, инжектируется в сервисы (MonitorCycleService, FullScanService, EnrichmentService).
 
 ## Fake-сайт MVP
 
@@ -116,7 +116,7 @@ Default в Pydantic-модели противоречит [[decisions/ADR-020-sm
 
 ```
 tools/
-  fake_fis/
+  fake_torgi/
     server.py           # FastAPI app + uvicorn entry-point
     lots.json           # persistence (gitignored, есть .example)
     templates/
@@ -129,7 +129,7 @@ tools/
 
 ### Хранение состояния — JSON-файл
 
-`tools/fake_fis/lots.json` — золотая середина:
+`tools/fake_torgi/lots.json` — золотая середина:
 
 - **Persistence через перезапуск.** Сценарий «утром добавил лоты, после обеда проверил» — единственный реалистичный workflow. In-memory это убивает.
 - **Редактируется вручную.** Хочешь батч из 10 лотов — копируешь JSON.
@@ -173,17 +173,17 @@ Cookie-auth для `/cabinet/*` — на старте **не нужна**. Ре�
 ### Запуск
 
 ```bash
-python tools/fake_fis/server.py --port 8765
+python tools/fake_torgi/server.py --port 8765
 ```
 
 - `argparse` (stdlib), default port = 8765
 - `if __name__ == "__main__": uvicorn.run(app, host="127.0.0.1", port=args.port)`
 - Console-script в `pyproject.toml` — **нет**, засоряет prod namespace
-- `python -m tools.fake_fis` — **нет**, потребует `__init__.py` и сломает изоляцию
+- `python -m tools.fake_torgi` — **нет**, потребует `__init__.py` и сломает изоляцию
 
 Альтернатива для разработки самого fake-сайта (auto-reload):
 ```bash
-uvicorn tools.fake_fis.server:app --port 8765 --reload
+uvicorn tools.fake_torgi.server:app --port 8765 --reload
 ```
 
 ### Документация
@@ -198,7 +198,7 @@ uvicorn tools.fake_fis.server:app --port 8765 --reload
 2. `GET /cabinet/free-lot-view?id=N` с точной structure `.request-declaration__block-main`
 3. `GET /admin` + `POST /admin/lots` — форма + список + удаление
 4. `lots.json` persistence
-5. `python tools/fake_fis/server.py --port 8765` без extra `pip install`
+5. `python tools/fake_torgi/server.py --port 8765` без extra `pip install`
 
 ### Что добавить через месяц (если реально понадобится)
 
@@ -210,16 +210,15 @@ uvicorn tools.fake_fis.server:app --port 8765 --reload
 
 ## Связь с архитектурой
 
-- [[architecture/03-protocols]] — `HttpClient` Protocol остаётся generic; URL-логика концентрируется в `FisUrlBuilder` (новый value-object)
-- [[architecture/04-composition-root]] — Container получает `base_url` из `ConfigSource.current().target.base_url`, создаёт `FisUrlBuilder`
+- [[architecture/03-protocols]] — `HttpClient` Protocol остаётся generic; URL-логика концентрируется в `TorgiUrlBuilder` (value-object, [[decisions/ADR-024-target-config-and-url-builder|ADR-024]])
+- [[architecture/04-composition-root]] — Container получает `base_url` из `ConfigSource.current().target.base_url`, создаёт `TorgiUrlBuilder`
 - [[onboarding]] — staging проходит обычный onboarding flow (ADR-018), SMTP-credentials оператора → `state.db`
 - [[decisions/ADR-020-smtp-creds-state-db\|ADR-020]] — SMTP SSOT в `state.db`, не дублируется в config-файле
 - [[decisions/ADR-006-import-linter\|ADR-006]] — `tools/` изолирован от `src/fis_monitor/` через import-linter контракты
 
-## Open questions / решения, требующие подтверждения
+## Принятые решения
 
-1. **Имя env-переменной.** `FIS_TARGET__BASE_URL` (Pydantic nested) или просто `FIS_BASE_URL` (явный override без nested-механики)? Тождественно, но второе короче.
-2. **`config.staging.json` под git или нет.** Если под git — пример для всех разработчиков; если нет — каждый разработчик настраивает локально.
-3. **`lots.json` под git.** Скорее всего нет (`lots.json.example` под git). Подтвердить.
-4. **ADR на эту фичу.** Стоит ли заводить `ADR-023 staging-fake-site + config seam`, или ограничиться этим документом + краткими ADR на `TargetConfig` и `FisUrlBuilder` отдельно?
-5. **Сроки.** Когда заводить bd-задачи на имплементацию — после первой реальной потребности (первый клиент, первый релиз-кандидат) или вперёд?
+- **Имя env-переменной:** `FIS_TARGET__BASE_URL` — Pydantic nested delimiter `__`, согласован с моделью `TargetConfig` (ADR-024).
+- **`config.staging.json`:** не под git; оператор создаёт локально. `lots.json.example` — под git как стартовый образец.
+- **`lots.json`:** не под git (`.gitignore`). Только `lots.json.example` в репозитории.
+- **ADR:** решение зафиксировано в [[decisions/ADR-024-target-config-and-url-builder|ADR-024]]; отдельный ADR на staging-fake-site не создавался — не содержит архитектурных решений сверх ADR-024.
