@@ -6,7 +6,7 @@ View-filters are ephemeral session state — they live in a signed JSON cookie
 Endpoints:
   GET  /filters/subjects — partial HTML with subject checkboxes (modal/popover).
   POST /filters/view     — apply filters; 200 HTML (feed partial) + Set-Cookie.
-  POST /filters/clear    — reset filters; 204 + expiring Set-Cookie.
+  POST /filters/clear    — reset filters; 200 HTML (feed partial) + expiring Set-Cookie.
 
 Cookie design:
   name      : view_filters
@@ -253,13 +253,39 @@ def post_view_filters(
     return response
 
 
-@router.post("/clear", status_code=204, response_model=None)
-def post_clear_filters() -> Response:
-    """Reset view filters by expiring the cookie.
+@router.post("/clear", status_code=200, response_model=None)
+def post_clear_filters(
+    request: Request,
+    config_source: object = Depends(get_config_source),
+    lot_repo: LotRepository = Depends(get_lot_repo),
+    lot_query: LotQueryService = Depends(get_lot_query),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> Response:
+    """Reset view filters and return the rendered feed partial.
 
-    Returns 204 No Content + Set-Cookie with max_age=0 (browser deletes cookie).
+    Returns 200 text/html with #feed partial (no filters applied) + Set-Cookie
+    max_age=0. htmx outerHTML swap on #feed restores the unfiltered feed
+    without F5; OOB swap on #filter-trigger resets the subject-counter button.
+    Symmetric with post_view_filters — htmx requires a non-204 response to
+    update the DOM.
     """
-    response = Response(status_code=204)
+    filters = ViewFilters()
+    settings: Settings = config_source.current()  # type: ignore[attr-defined]
+    ctx = build_feed_context(
+        filters=filters,
+        lot_query=lot_query,
+        settings=settings,
+        active_lot_count=lot_repo.count_active(),
+    )
+    ctx["session"] = SessionStubForFilter()
+    ctx["render_oob"] = True
+
+    response = templates.TemplateResponse(
+        request,
+        "partials/_feed_lots.html.jinja",
+        ctx,
+        status_code=200,
+    )
     _clear_filter_cookie(response)
     _log.debug("view_filters cleared")
     return response

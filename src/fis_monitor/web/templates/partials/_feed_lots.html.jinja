@@ -73,7 +73,7 @@
     <div class="zone" style="text-align: center; padding: 48px 24px;">
       <p style="margin: 0; color: var(--ink-2);">Ничего не подходит под текущие фильтры.</p>
       <p style="margin: 6px 0 14px; color: var(--muted); font-size: 0.875rem;">Снимите часть, чтобы увидеть остальное.</p>
-      <button class="btn" hx-post="/filters/clear" hx-target="body">Очистить фильтры</button>
+      <button class="btn" hx-post="/filters/clear" hx-target="#feed" hx-swap="outerHTML">Очистить фильтры</button>
     </div>
   {% endif %}
 

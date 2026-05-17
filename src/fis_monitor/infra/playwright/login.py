@@ -323,10 +323,13 @@ class PlaywrightLoginSession:
                 # (zakupki.gov.ru cyrillic punycode, gosuslugi.ru) are served
                 # with certificates from the Russian Trusted Root CA (Минцифры),
                 # which is NOT in Chromium's default trust store. Without this
-                # flag goto() fails instantly with ERR_CERT_AUTHORITY_INVALID
-                # and the browser window opens then immediately closes.
-                # Risk is bounded by the host whitelist in _make_route_handler:
-                # all non-whitelisted hosts are aborted before any TLS happens.
+                # flag goto() fails instantly with ERR_CERT_AUTHORITY_INVALID.
+                #
+                # Residual MITM risk accepted — see ADR-047. The host-whitelist
+                # in _make_route_handler filters which hosts the app talks to but
+                # does NOT authenticate the TLS peer (Playwright route() fires
+                # post-TLS via CDP Fetch.enable, so this flag applies to
+                # whitelisted hosts too).
                 browser = pw.chromium.launch_persistent_context(
                     str(self._profile_dir),
                     headless=False,

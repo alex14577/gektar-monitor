@@ -3,7 +3,7 @@
 Coverage:
   (a) POST /filters/view — valid form body → 200 text/html + id="feed" + Set-Cookie.
   (b) POST /filters/view — invalid form body → 422.
-  (c) POST /filters/clear → 204 + Set-Cookie with max_age=0.
+  (c) POST /filters/clear → 200 text/html + Set-Cookie with max_age=0.
   (d) GET /filters/subjects → 200 text/html containing a checkbox input.
   (e) Anti-mock: ViewFiltersService — all methods exercised.
   (f) Edge cases: subjects empty/multi, area_* empty/number/negative,
@@ -576,11 +576,24 @@ class TestRoundTripCookieApplied:
 
 
 class TestPostClearFilters:
-    def test_returns_204(self) -> None:
+    def test_returns_200(self) -> None:
         app = _build_app()
         with TestClient(app) as client:
             resp = client.post("/filters/clear")
-        assert resp.status_code == 204, resp.text
+        assert resp.status_code == 200, resp.text
+
+    def test_content_type_is_html(self) -> None:
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/clear")
+        assert resp.headers["content-type"].startswith("text/html")
+
+    def test_body_contains_feed_div(self) -> None:
+        """Response must contain id='feed' so htmx outerHTML swap finds the target."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/clear")
+        assert 'id="feed"' in resp.text
 
     def test_set_cookie_with_max_age_zero(self) -> None:
         """Clear response must set the cookie with max-age=0 to delete it."""
@@ -590,6 +603,14 @@ class TestPostClearFilters:
         set_cookie = resp.headers.get("set-cookie", "")
         assert "view_filters" in set_cookie
         assert "max-age=0" in set_cookie.lower()
+
+    def test_oob_filter_trigger_present(self) -> None:
+        """Response must include the OOB swap for #filter-trigger (counter reset)."""
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/clear")
+        assert 'hx-swap-oob="true"' in resp.text
+        assert 'id="filter-trigger"' in resp.text
 
 
 # ---------------------------------------------------------------------------
