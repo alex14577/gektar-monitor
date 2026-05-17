@@ -21,7 +21,6 @@ Stubbed fields and their tracking tasks:
   - autostart        → a4t.9 (platform-specific AutostartManager)
   - session_probe    → a4t.8 (HttpSessionProbe)
   - login            → real LoginService (executor bound in lifespan per j19)
-  - session_monitor  → a4t.7 (SessionMonitor)
 
 See: docs/architecture/04-composition-root.md §4.2
 """
@@ -88,6 +87,7 @@ from fis_monitor.services.notifier_dispatcher import (
 from fis_monitor.services.onboarding import OnboardingService
 from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
 from fis_monitor.services.session_expired_email import SessionExpiredEmailService
+from fis_monitor.services.session_monitor import SessionMonitor
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 
@@ -145,12 +145,6 @@ class _NotImplementedSessionProbe:
         raise NotImplementedError("_NotImplementedSessionProbe.check() deferred to a4t.8")
 
 
-class _NotImplementedSessionMonitor:
-    """Stub for SessionMonitor until a4t.7 lands."""
-
-    def run_forever(self, stop_event: threading.Event) -> None:
-        raise NotImplementedError("_NotImplementedSessionMonitor.run_forever() deferred to a4t.7")
-
 
 # ---------------------------------------------------------------------------
 # Allowed hosts for PlaywrightLoginSession
@@ -197,8 +191,8 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     Raises:
         FrozenInstanceError: never (Container is mutable; Infra/Services are frozen).
 
-    Note: Three Infra/Services fields remain stubbed pending deferred
-    bd-issues (autostart=bye.7, session_probe=a4t.9, session_monitor=a4t.9).
+    Note: Two Infra/Services fields remain stubbed pending deferred
+    bd-issues (autostart=bye.7, session_probe=a4t.8).
     Those stubs raise NotImplementedError on call. Every other field is a
     real implementation — build_container is fully runtime-exercisable on
     the monitoring + notification paths.
@@ -483,7 +477,12 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         clock=clock,
     )
 
-    session_monitor = _NotImplementedSessionMonitor()
+    session_monitor = SessionMonitor(
+        http_client=http_client,
+        event_bus=event_bus,
+        clock=clock,
+        base_url=config_source.current().target.base_url,
+    )
     exclude_policy = DiagnosticsExcludePolicy()
     diagnostics = DiagnosticsService(
         data_dir=data_dir,
