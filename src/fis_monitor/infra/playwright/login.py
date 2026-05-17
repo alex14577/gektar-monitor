@@ -48,14 +48,6 @@ _log = logging.getLogger(__name__)
 # Playwright interprets this as a glob; we wait until the page URL matches.
 _LOGIN_SUCCESS_URL_GLOB = "**/cabinet/**"
 
-# Initial navigation target — the гектар cabinet page.
-# Hitting /cabinet/ on an unauthenticated session triggers a full OAuth
-# redirect chain to ЕСИА (esia.gosuslugi.ru). After successful auth the
-# user is bounced back here, which both sets the Госуслуги session cookies
-# AND establishes the гектар-side session cookies the monitor needs for
-# scraping — going straight to esia.gosuslugi.ru would skip the latter.
-_LOGIN_START_URL = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/"
-
 # Initial navigation timeout. Kept generous to absorb the multi-hop OAuth
 # chain on slow networks; success/cancel still race the user-controlled
 # wait_for_url(_LOGIN_SUCCESS_URL_GLOB) bounded by ``deadline``.
@@ -73,6 +65,10 @@ class PlaywrightLoginSession:
     Args:
         profile_dir: Path to the persistent-context profile directory.
             Created automatically by Playwright if absent.
+        login_start_url: Full URL passed to ``page.goto()`` to initiate the
+            login flow (e.g. ``https://example.com/cabinet/``).  Passed from
+            composition so the URL can be derived from the configured
+            ``target.base_url`` at runtime rather than being hard-coded here.
         allowed_hosts: Sequence of hostnames that are allowed to receive
             network requests during the login flow (e.g. the FIS domain and
             any required CDN/auth endpoints).  All other hosts are aborted.
@@ -86,12 +82,14 @@ class PlaywrightLoginSession:
         self,
         profile_dir: Path,
         *,
+        login_start_url: str,
         allowed_hosts: Sequence[str],
         clock: Clock,
         cookie_store: CookieStore | None = None,
         playwright_factory: Callable[[], Any] = sync_playwright,
     ) -> None:
         self._profile_dir = profile_dir
+        self._login_start_url = login_start_url
         self._allowed_hosts: frozenset[str] = frozenset(allowed_hosts)
         self._clock = clock
         self._cookie_store = cookie_store
@@ -256,7 +254,7 @@ class PlaywrightLoginSession:
 
         try:
             page.goto(
-                _LOGIN_START_URL,
+                self._login_start_url,
                 wait_until="domcontentloaded",
                 timeout=_INITIAL_GOTO_TIMEOUT_MS,
             )
@@ -266,7 +264,7 @@ class PlaywrightLoginSession:
                 _log.error(
                     "PlaywrightLoginSession._wait_for_silent_refresh: goto failed type=%s url=%s",
                     type(exc).__name__,
-                    _LOGIN_START_URL,
+                    self._login_start_url,
                     exc_info=exc,
                 )
             else:
@@ -393,7 +391,7 @@ class PlaywrightLoginSession:
         # fires from <head> JS / Location headers either way.
         try:
             page.goto(
-                _LOGIN_START_URL,
+                self._login_start_url,
                 wait_until="domcontentloaded",
                 timeout=_INITIAL_GOTO_TIMEOUT_MS,
             )
@@ -403,7 +401,7 @@ class PlaywrightLoginSession:
                 _log.error(
                     "PlaywrightLoginSession._wait_for_login: goto failed type=%s url=%s",
                     type(exc).__name__,
-                    _LOGIN_START_URL,
+                    self._login_start_url,
                     exc_info=exc,
                 )
             else:

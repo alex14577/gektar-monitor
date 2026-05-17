@@ -17,15 +17,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any
+from urllib.parse import quote, urlparse
 
 import uvicorn
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
@@ -33,8 +37,74 @@ _LOTS_FILE = _HERE / "lots.json"
 
 _STATUSES = ["Свободен", "Зарезервирован", "Оформляется"]
 
+_SESSIONS: dict[str, float] = {}  # token → created_at (epoch seconds)
+_SESSIONS_LOCK = Lock()
+
+
+def _create_session() -> str:
+    """Create a new fake-ESIA session and return its token."""
+    import time
+
+    token = secrets.token_urlsafe(16)
+    with _SESSIONS_LOCK:
+        _SESSIONS[token] = time.time()
+    return token
+
+
+def _is_valid_session(token: str | None) -> bool:
+    """Return True iff token exists in the session store."""
+    if not token:
+        return False
+    with _SESSIONS_LOCK:
+        return token in _SESSIONS
+
+
+def _safe_redirect_uri(redirect_uri: str | None, default: str = "/cabinet/") -> str:
+    """Accept only relative paths starting with /. Reject scheme/netloc and traversal."""
+    if not redirect_uri:
+        return default
+    # Reject backslashes outright — some legacy browsers treat them as / and
+    # collapse `/\evil.com` into a host. urlparse() does not catch this.
+    if "\\" in redirect_uri:
+        return default
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme or parsed.netloc:
+        return default
+    if not parsed.path.startswith("/"):
+        return default
+    # Reject path traversal — any `..` segment makes the redirect target
+    # unpredictable and violates the relative-path contract.
+    if ".." in parsed.path.split("/"):
+        return default
+    path = parsed.path
+    if parsed.query:
+        path += f"?{parsed.query}"
+    return path
+
+
 app = FastAPI(title="fake-torgi", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+
+class SessionMiddleware(BaseHTTPMiddleware):
+    """Redirect unauthenticated /cabinet/* requests to fake-ESIA authorize."""
+
+    _PROTECTED_PREFIX = "/cabinet/"
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path.startswith(self._PROTECTED_PREFIX):
+            token = request.cookies.get("fis_session")
+            if not _is_valid_session(token):
+                redirect_uri = path
+                if request.url.query:
+                    redirect_uri += f"?{request.url.query}"
+                target = f"/fake-esia/authorize?redirect_uri={quote(redirect_uri, safe='/')}"
+                return RedirectResponse(target, status_code=302)
+        return await call_next(request)
+
+
+app.add_middleware(SessionMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +193,33 @@ def _enrich(lot: dict[str, Any]) -> dict[str, Any]:
     result.setdefault("lon", "")
     result.setdefault("date_update", "")
     return result
+
+
+@app.get("/cabinet/", response_class=HTMLResponse)
+async def cabinet_stub(request: Request) -> HTMLResponse:
+    """Minimal cabinet page; satisfies Playwright wait_for_url('**/cabinet/**')."""
+    return templates.TemplateResponse(request, "cabinet_stub.html", {})
+
+
+@app.get("/fake-esia/authorize", response_class=HTMLResponse)
+async def fake_esia_authorize(request: Request, redirect_uri: str = "/cabinet/") -> HTMLResponse:
+    """Render fake-ESIA login form."""
+    safe = _safe_redirect_uri(redirect_uri)
+    return templates.TemplateResponse(
+        request, "fake_esia.html", {"redirect_uri": safe}
+    )
+
+
+@app.post("/fake-esia/login")
+async def fake_esia_login(redirect_uri: str = Form("/cabinet/")) -> RedirectResponse:
+    """Issue a fake-ESIA session cookie and redirect back to the original URL."""
+    safe = _safe_redirect_uri(redirect_uri)
+    token = _create_session()
+    response = RedirectResponse(safe, status_code=302)
+    response.set_cookie(
+        "fis_session", token, httponly=True, samesite="lax", path="/"
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------

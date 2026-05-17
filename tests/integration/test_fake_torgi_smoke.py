@@ -38,6 +38,16 @@ def _make_client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+def _make_authed_client() -> AsyncClient:
+    """Return a client pre-seeded with a valid fake-ESIA session cookie."""
+    token = srv_module._create_session()
+    return AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        cookies={"fis_session": token},
+    )
+
+
 def _patch_lots(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
     """Point srv_module._LOTS_FILE at *path* for this test."""
     monkeypatch.setattr(srv_module, "_LOTS_FILE", path)
@@ -65,7 +75,7 @@ async def test_list_endpoint_returns_200_with_tbody(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_lots(monkeypatch, tmp_path / "lots.json")
-    async with _make_client() as c:
+    async with _make_authed_client() as c:
         resp = await c.get("/cabinet/free-lot", params={"region": 1})
     assert resp.status_code == 200
     assert "<tbody>" in resp.text
@@ -79,7 +89,7 @@ async def test_list_endpoint_parseable_by_list_parser(
     from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
 
     _patch_lots(monkeypatch, tmp_path / "lots.json")
-    async with _make_client() as c:
+    async with _make_authed_client() as c:
         resp = await c.get("/cabinet/free-lot", params={"region": 1})
     rows = SelectolaxListParser().parse(resp.text).rows
     assert rows == []
@@ -90,7 +100,7 @@ async def test_detail_endpoint_returns_200_with_main_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_lots(monkeypatch, tmp_path / "lots.json")
-    async with _make_client() as c:
+    async with _make_authed_client() as c:
         resp = await c.get("/cabinet/free-lot-view", params={"id": 9999})
     assert resp.status_code == 200
     assert "request-declaration__block-main" in resp.text
@@ -104,7 +114,7 @@ async def test_detail_endpoint_parseable_by_detail_parser(
     from fis_monitor.infra.parsers.detail_parser import SelectolaxDetailParser
 
     _patch_lots(monkeypatch, tmp_path / "lots.json")
-    async with _make_client() as c:
+    async with _make_authed_client() as c:
         resp = await c.get("/cabinet/free-lot-view", params={"id": 42})
     detail = SelectolaxDetailParser().parse(resp.text)
     assert detail is not None
@@ -147,7 +157,7 @@ async def test_add_lot_then_appears_in_list(
 ) -> None:
     """POST /admin/lots -> PRG redirect -> lot ID visible in list HTML."""
     _patch_lots(monkeypatch, tmp_path / "lots.json")
-    async with _make_client() as c:
+    async with _make_authed_client() as c:
         resp = await c.post("/admin/lots", data=_SAMPLE_LOT_FORM, follow_redirects=False)
         assert resp.status_code == 303
         assert "/admin" in resp.headers["location"]
@@ -165,7 +175,7 @@ async def test_add_lot_parseable_by_list_parser(
     from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
 
     _patch_lots(monkeypatch, tmp_path / "lots.json")
-    async with _make_client() as c:
+    async with _make_authed_client() as c:
         await c.post("/admin/lots", data=_SAMPLE_LOT_FORM, follow_redirects=False)
         list_resp = await c.get("/cabinet/free-lot", params={"region": 1})
 
@@ -184,7 +194,7 @@ async def test_delete_lot_removes_from_list(
 ) -> None:
     """POST /admin/lots/{id}/delete removes the lot; list HTML no longer contains ID."""
     _patch_lots(monkeypatch, tmp_path / "lots.json")
-    async with _make_client() as c:
+    async with _make_authed_client() as c:
         await c.post("/admin/lots", data=_SAMPLE_LOT_FORM, follow_redirects=False)
         del_resp = await c.post("/admin/lots/2002/delete", follow_redirects=False)
         assert del_resp.status_code == 303
@@ -209,6 +219,134 @@ async def test_change_status_persists(tmp_path: Path, monkeypatch: pytest.Monkey
     lots = json.loads(lots_path.read_text())
     lot = next(lo for lo in lots if lo["id"] == 2002)
     assert lot["status"] == "Зарезервирован"
+
+
+# ---------------------------------------------------------------------------
+# fake-ESIA / session flow
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cabinet_redirects_without_cookie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /cabinet/ without session cookie -> 302 to /fake-esia/authorize."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        resp = await c.get("/cabinet/", follow_redirects=False)
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert "/fake-esia/authorize" in location
+    assert "redirect_uri" in location
+
+
+@pytest.mark.asyncio
+async def test_authorize_renders_form(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET /fake-esia/authorize -> 200 with login form."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        resp = await c.get("/fake-esia/authorize", params={"redirect_uri": "/cabinet/"})
+    assert resp.status_code == 200
+    assert 'action="/fake-esia/login"' in resp.text
+    assert 'id="fake-esia-login-btn"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_login_sets_cookie_and_redirects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /fake-esia/login -> 302 with Set-Cookie fis_session and Location=/cabinet/."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        resp = await c.post(
+            "/fake-esia/login",
+            data={"redirect_uri": "/cabinet/"},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    assert "fis_session=" in resp.headers.get("set-cookie", "")
+    assert resp.headers["location"] == "/cabinet/"
+
+
+@pytest.mark.asyncio
+async def test_cabinet_200_with_valid_cookie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After login, GET /cabinet/ with session cookie -> 200."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        await c.post(
+            "/fake-esia/login",
+            data={"redirect_uri": "/cabinet/"},
+            follow_redirects=False,
+        )
+        # httpx stores cookies automatically in the client jar
+        resp = await c.get("/cabinet/", follow_redirects=False)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_cabinet_redirects_with_invalid_cookie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /cabinet/ with bogus cookie -> 302 (session not valid)."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        resp = await c.get(
+            "/cabinet/",
+            follow_redirects=False,
+            headers={"Cookie": "fis_session=bogus"},
+        )
+    assert resp.status_code == 302
+
+
+@pytest.mark.asyncio
+async def test_status_unaffected_by_middleware(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /status without cookie -> 200 (middleware must not touch non-cabinet routes)."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        resp = await c.get("/status", follow_redirects=False)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_open_redirect_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /fake-esia/login with absolute external redirect_uri -> falls back to /cabinet/."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        resp = await c.post(
+            "/fake-esia/login",
+            data={"redirect_uri": "http://evil.com/x"},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/cabinet/"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "/cabinet/../../../etc/passwd",  # path traversal
+        "/\\evil.com",  # backslash trick (legacy browser quirk)
+        "/foo/../bar",  # traversal even if path is harmless
+    ],
+)
+async def test_redirect_uri_rejects_traversal_and_backslash(
+    redirect_uri: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_safe_redirect_uri must reject path traversal and backslash sequences."""
+    _patch_lots(monkeypatch, tmp_path / "lots.json")
+    async with _make_client() as c:
+        resp = await c.post(
+            "/fake-esia/login",
+            data={"redirect_uri": redirect_uri},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/cabinet/"
 
 
 # ---------------------------------------------------------------------------

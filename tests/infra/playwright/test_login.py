@@ -91,9 +91,11 @@ def _make_session(
     allowed_hosts: list[str] | None = None,
     playwright_factory=None,
     profile_dir: Path | None = None,
+    login_start_url: str = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/",
 ) -> PlaywrightLoginSession:
     return PlaywrightLoginSession(
         profile_dir=profile_dir or Path("/tmp/profile"),
+        login_start_url=login_start_url,
         allowed_hosts=allowed_hosts or ["fis.gosuslugi.ru"],
         clock=clock or FakeClock(),
         playwright_factory=playwright_factory or MagicMock(),
@@ -348,6 +350,7 @@ def test_di_playwright_factory(tmp_path: Path) -> None:
 
     session = PlaywrightLoginSession(
         profile_dir=tmp_path,
+        login_start_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/",
         allowed_hosts=["example.com"],
         clock=FakeClock(),
         playwright_factory=custom_factory,
@@ -441,8 +444,8 @@ def test_map_exception_unmapped_logs_error(tmp_path: Path, caplog) -> None:  # t
 
 
 def test_initial_goto_called(tmp_path: Path) -> None:
-    """page.goto() must be called with the гектар /cabinet/ URL before wait_for_url."""
-    from fis_monitor.infra.playwright.login import _LOGIN_START_URL
+    """page.goto() must be called with the login_start_url injected at construction."""
+    _EXPECTED_URL = "https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/"
 
     page = _make_page_mock()
     context = _make_context_mock(page)
@@ -454,8 +457,8 @@ def test_initial_goto_called(tmp_path: Path) -> None:
     assert outcome.success is True
     page.goto.assert_called_once()
     args, kwargs = page.goto.call_args
-    # URL is the first positional arg.
-    assert args[0] == _LOGIN_START_URL
+    # URL is the first positional arg — must match login_start_url passed to constructor.
+    assert args[0] == _EXPECTED_URL
     # We want wait_until="domcontentloaded" — not "load" (slow third-party
     # blocked-by-route assets) and not "networkidle" (never settles).
     assert kwargs.get("wait_until") == "domcontentloaded"
@@ -695,6 +698,7 @@ def test_cookie_store_called_after_login(tmp_path: Path) -> None:
 
     session = PlaywrightLoginSession(
         profile_dir=tmp_path,
+        login_start_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/",
         allowed_hosts=["example.com"],
         clock=clock,
         cookie_store=cookie_store,
@@ -727,6 +731,7 @@ def test_cookie_store_called_after_silent_refresh(tmp_path: Path) -> None:
 
     session = PlaywrightLoginSession(
         profile_dir=tmp_path,
+        login_start_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/",
         allowed_hosts=["example.com"],
         clock=clock,
         cookie_store=cookie_store,
@@ -767,6 +772,7 @@ def test_cookie_store_not_called_on_failed_login(tmp_path: Path) -> None:
 
     session = PlaywrightLoginSession(
         profile_dir=tmp_path,
+        login_start_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/",
         allowed_hosts=["example.com"],
         clock=clock,
         cookie_store=cookie_store,
@@ -814,6 +820,7 @@ def test_failing_cookie_store_login_succeeds_cookies_updated_false(tmp_path: Pat
 
     session = PlaywrightLoginSession(
         profile_dir=tmp_path,
+        login_start_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/",
         allowed_hosts=["example.com"],
         clock=clock,
         cookie_store=cookie_store,

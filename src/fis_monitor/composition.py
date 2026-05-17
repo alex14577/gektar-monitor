@@ -146,31 +146,31 @@ class _NotImplementedSessionProbe:
 
 
 
-# ---------------------------------------------------------------------------
-# Allowed hosts for PlaywrightLoginSession
-# ---------------------------------------------------------------------------
-# The login flow is: гектар /cabinet/ -> OAuth redirect -> ЕСИА login form ->
-# back to гектар. Every host in this chain must be whitelisted; everything
-# else (3rd-party analytics, ad networks, fonts CDNs) is aborted by the
-# route handler — preventing cookie/UA exfil during a headed session.
-#
-# Entries starting with "." use suffix-match (see PlaywrightLoginSession.
-# _make_route_handler) — chosen for the gosuslugi.ru subdomain fan-out
-# (esia, id, lk, pos, static, …) which is too volatile to enumerate.
-# We do NOT use a bare "*" or empty whitelist — that would be a security
-# regression (any host could be contacted from a headed user session).
-_TORGI_ALLOWED_HOSTS: tuple[str, ...] = (
-    # Target site — гектар (надальнийвосток.рф) ─────────────────────────────
-    "xn--80aaggvgieoeoa2bo7l.xn--p1ai",  # Punycode for надальнийвосток.рф
-    "надальнийвосток.рф",  # unicode alias
-    # Госуслуги OAuth / ЕСИА login chain ────────────────────────────────────
-    # Suffix-match covers esia., id., lk., pos., static., my., … subdomains.
-    # The OAuth code is hosted by Минцифры; the exact subdomain set changes
-    # across releases (id.gosuslugi.ru is the newer flow, esia.gosuslugi.ru
-    # the legacy one — both are live in 2026).
-    ".gosuslugi.ru",
-    "gosuslugi.ru",  # bare apex (some redirects land here briefly)
-)
+def _derive_login_config(base_url: str) -> tuple[str, tuple[str, ...]]:
+    """Derive (login_start_url, allowed_hosts) from target base_url.
+
+    Returns (login_start_url, allowed_hosts).
+
+    - Production base_url → real torgi + gosuslugi OAuth chain hosts.
+    - Local base_url (127.0.0.1 / localhost) → loopback hosts only;
+      fake-ESIA runs on the same host as fake_torgi, no gosuslugi.
+
+    The is-local heuristic keeps Playwright-host-allowlist concerns out of
+    TargetConfig (which describes "what site to talk to", not "what hosts
+    the browser login is allowed to reach").
+    """
+    from urllib.parse import urlparse
+
+    login_start_url = f"{base_url}/cabinet/"
+    hostname = urlparse(base_url).hostname or ""
+    if hostname in ("127.0.0.1", "localhost"):
+        return login_start_url, ("127.0.0.1", "localhost")
+    return login_start_url, (
+        "xn--80aaggvgieoeoa2bo7l.xn--p1ai",
+        "надальнийвосток.рф",
+        ".gosuslugi.ru",
+        "gosuslugi.ru",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -250,9 +250,12 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     )
     list_parser = SelectolaxListParser()
     detail_parser = SelectolaxDetailParser()
+    base_url = config_source.current().target.base_url
+    login_start_url, allowed_hosts = _derive_login_config(base_url)
     login_session = PlaywrightLoginSession(
         profile_dir=data_dir / "profile",
-        allowed_hosts=_TORGI_ALLOWED_HOSTS,
+        login_start_url=login_start_url,
+        allowed_hosts=allowed_hosts,
         clock=clock,
         cookie_store=cookie_store,
     )

@@ -68,6 +68,7 @@ def _make_session(
 ) -> PlaywrightLoginSession:
     return PlaywrightLoginSession(
         profile_dir=Path("/tmp/test_profile"),
+        login_start_url="https://xn--80aaggvgieoeoa2bo7l.xn--p1ai/cabinet/",
         allowed_hosts=["example.com"],
         clock=clock or _FakeClock(),
         playwright_factory=playwright_factory or MagicMock(),

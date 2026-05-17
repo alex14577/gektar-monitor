@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Госуслуги — Вход (тестовый режим)</title>
+  <style>
+    body { font-family: sans-serif; display: flex; justify-content: center;
+           align-items: center; min-height: 100vh; margin: 0; background: #f0f4f8; }
+    .card { background: #fff; border-radius: 8px; padding: 40px; text-align: center;
+            box-shadow: 0 2px 12px rgba(0,0,0,.15); max-width: 360px; width: 100%; }
+    h1 { color: #003087; margin-bottom: 8px; font-size: 1.4rem; }
+    .badge { background: #ffc107; color: #333; border-radius: 4px;
+             padding: 4px 10px; font-size: .8rem; margin-bottom: 24px; display: inline-block; }
+    button { background: #003087; color: #fff; border: none; border-radius: 6px;
+             padding: 14px 32px; font-size: 1rem; cursor: pointer; width: 100%; }
+    button:hover { background: #00409a; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Госуслуги</h1>
+    <div class="badge">Тестовый режим — fake ЕСИА</div>
+    <form method="POST" action="/fake-esia/login">
+      <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+      <button type="submit" id="fake-esia-login-btn">Войти</button>
+    </form>
+  </div>
+</body>
+</html>
