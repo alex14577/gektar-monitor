@@ -91,46 +91,7 @@
   </section>
 
   {% if scope_saved %}
-  <script>
-    (function () {
-      var label = '{{ scope_saved }}' === 'subjects' ? 'Субъекты сохранены' : 'Округа сохранены';
-      if (window.Monitor && window.Monitor.toast) {
-        window.Monitor.toast(label, { timeout: 3000 });
-      }
-    })();
-  </script>
+  <script type="application/json" id="scope-saved-data">{{ scope_saved | tojson }}</script>
   {% endif %}
-
-  <script>
-    (function () {
-      // Disable Save button for regions when zero checkboxes are checked
-      // (at least one region required).  The subjects Save button is always
-      // enabled — empty selection means notify-all (ADR-035 I4).
-      function syncDisabled(group) {
-        var boxes = document.querySelectorAll(
-          'input[data-scope-checkbox="' + group + '"]'
-        );
-        var btn = document.querySelector(
-          'button[data-scope-submit="' + group + '"]'
-        );
-        if (!btn) return;
-        if (group === 'subjects') {
-          // Empty notify-scope is valid — always allow save.
-          btn.disabled = false;
-          return;
-        }
-        var any = false;
-        boxes.forEach(function (b) { if (b.checked) any = true; });
-        btn.disabled = !any;
-      }
-      ['regions', 'subjects'].forEach(function (g) {
-        syncDisabled(g);
-        document
-          .querySelectorAll('input[data-scope-checkbox="' + g + '"]')
-          .forEach(function (b) {
-            b.addEventListener('change', function () { syncDisabled(g); });
-          });
-      });
-    })();
-  </script>
+  <script defer src="/static/scope_subjects.js"></script>
 </div>

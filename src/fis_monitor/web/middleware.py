@@ -110,11 +110,9 @@ class CspMiddleware:
         app.add_middleware(CspMiddleware, policy=MY_POLICY)
     """
 
-    # TODO(bd b5c follow-up): Remove 'unsafe-inline' from script-src once all
-    # inline <script> blocks in templates are extracted to /static/*.js files.
     DEFAULT_POLICY: str = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; "
         "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data:; "

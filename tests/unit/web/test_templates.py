@@ -6,8 +6,13 @@ Verifies:
 3. build_templates() returns a properly configured Jinja2Templates instance
    whose environment can load and compile the key templates without error.
 4. Each call to build_templates() returns a distinct object (no hidden singleton).
+5. Extracted JS static files exist (bd gektar_monitor-dus6).
+6. Templates contain no executable inline <script> blocks — only src= or
+   type="application/json" data islands are permitted (CSP script-src 'self').
 """
 from __future__ import annotations
+
+import re
 
 from fastapi.templating import Jinja2Templates
 
@@ -86,3 +91,58 @@ def test_build_templates_returns_new_instance_each_call() -> None:
     a = build_templates()
     b = build_templates()
     assert a is not b, "build_templates() must not return a cached singleton"
+
+
+# ---------------------------------------------------------------------------
+# Extracted JS static files (bd gektar_monitor-dus6)
+# ---------------------------------------------------------------------------
+
+_EXTRACTED_JS_FILES = [
+    "feed.js",
+    "scope_subjects.js",
+    "onboarding_step2.js",
+    "settings.js",
+]
+
+
+def test_extracted_js_files_exist() -> None:
+    """All four extracted JS static files must be present and non-empty."""
+    for name in _EXTRACTED_JS_FILES:
+        path = STATIC_DIR / name
+        assert path.is_file(), f"Missing extracted JS file: {path}"
+        assert path.stat().st_size > 0, f"Extracted JS file is empty: {path}"
+
+
+# ---------------------------------------------------------------------------
+# No executable inline scripts in templates (CSP script-src 'self')
+# ---------------------------------------------------------------------------
+
+# Regex: matches a <script ...> opening tag that does NOT have type="application/json"
+# and does NOT have a src= attribute — i.e. an executable inline script block.
+_INLINE_EXEC_SCRIPT_RE = re.compile(
+    r"<script(?![^>]*\bsrc=)(?![^>]*type=['\"]application/json['\"])[^>]*>",
+    re.IGNORECASE,
+)
+
+_TEMPLATES_TO_CHECK = [
+    "feed.html.jinja",
+    "partials/_scope_and_subjects.html.jinja",
+    "onboarding/_step2.html.jinja",
+    "settings.html.jinja",
+]
+
+
+def test_no_executable_inline_scripts_in_templates() -> None:
+    """All four modified templates must have zero executable inline <script> blocks.
+
+    CSP invariant: script-src 'self' allows only external scripts.
+    Data islands (<script type="application/json">) are permitted — they are
+    not executable and CSP does not restrict them.
+    """
+    for rel in _TEMPLATES_TO_CHECK:
+        content = (TEMPLATES_DIR / rel).read_text(encoding="utf-8")
+        matches = _INLINE_EXEC_SCRIPT_RE.findall(content)
+        assert not matches, (
+            f"Template {rel} still contains executable inline <script> tag(s): "
+            f"{matches!r} — extract to /static/*.js"
+        )

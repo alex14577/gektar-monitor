@@ -73,6 +73,18 @@ def test_csp_default_policy_mandatory_directives() -> None:
     assert "frame-ancestors 'none'" in csp
 
 
+def test_csp_script_src_no_unsafe_inline() -> None:
+    """script-src must not contain 'unsafe-inline' (all JS is in /static/)."""
+    client = TestClient(_build_app())
+    csp = _csp_header(client.get("/"))
+    # Confirm script-src is present but does not carry 'unsafe-inline'.
+    assert "script-src" in csp
+    # Extract just the script-src directive to avoid matching style-src.
+    directives = {d.strip(): d.strip() for d in csp.split(";")}
+    script_src = next((v for v in directives if v.startswith("script-src")), "")
+    assert "'unsafe-inline'" not in script_src
+
+
 def test_csp_default_policy_google_fonts() -> None:
     """Default policy must allow Google Fonts origins."""
     client = TestClient(_build_app())
