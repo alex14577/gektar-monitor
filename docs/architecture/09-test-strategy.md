@@ -151,6 +151,7 @@ forbidden_modules =
   - Пример: `LotRepository` → `tests/fakes/lot_repository.py`
 - **Класс:** `Fake<ProtocolName>` — реализует все методы Protocol с точно совпадающими сигнатурами.
 - **Проверка:** `mypy --strict tests/fakes/` должна проходить без ошибок. Несовпадение сигнатуры = ошибка типов.
+- **Dev/CI step:** `uv run mypy --strict tests/fakes/` — запускать локально перед коммитом и в любом lint-job. Зависимость: `mypy>=1.13` в `[project.optional-dependencies] dev`. Пакет `fis_monitor` должен содержать `py.typed` (PEP 561) чтобы mypy не давал `import-untyped` при анализе fakes.
 - **Единственность:** один canonical fake на Protocol. Callsite-специфичные вариации — через subclass или параметр конструктора (`raise_on_call: bool = False`), но не через отдельный файл.
 - **Полнота вызовов:** в тест-сьюте должен существовать хотя бы один тест, вызывающий **все публичные методы** fake (не только `isinstance()`). Покрывает runtime-баги невалидного API.
 
