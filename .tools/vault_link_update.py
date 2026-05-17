@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-shot script for vault wiki-link migration after restructure."""
-import re
 import pathlib
+import re
 
 ADR_MAP = {
     "001": "ADR-001-notifier-protocol-not-abc",

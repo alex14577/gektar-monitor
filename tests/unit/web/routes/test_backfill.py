@@ -11,7 +11,6 @@ Coverage:
 from __future__ import annotations
 
 import threading
-from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -114,7 +113,7 @@ def test_fake_backfill_service_all_methods() -> None:
 
 def _build_app(
     fake: FakeBackfillService,
-    rate_limiter: Optional[RateLimiter] = None,
+    rate_limiter: RateLimiter | None = None,
 ) -> FastAPI:
     import fis_monitor.web.routes.backfill as backfill_module
 

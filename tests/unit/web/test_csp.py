@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 
 from fis_monitor.web.middleware import CspMiddleware
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

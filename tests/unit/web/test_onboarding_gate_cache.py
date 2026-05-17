@@ -17,7 +17,6 @@ import pytest
 from fis_monitor.domain.models import OnboardingState
 from fis_monitor.web.onboarding_gate import OnboardingGateMiddleware
 
-
 # ---------------------------------------------------------------------------
 # Fake svc (sync, as the real OnboardingService is sync — offloaded by mw)
 # ---------------------------------------------------------------------------
@@ -36,7 +35,9 @@ class _CountingSvc:
         return "/onboarding/regions"
 
 
-def _make_mw(state: OnboardingState = OnboardingState.NOT_STARTED) -> tuple[OnboardingGateMiddleware, _CountingSvc]:
+def _make_mw(
+    state: OnboardingState = OnboardingState.NOT_STARTED,
+) -> tuple[OnboardingGateMiddleware, _CountingSvc]:
     svc = _CountingSvc(state)
     mw = OnboardingGateMiddleware(app=None, svc=svc)  # type: ignore[arg-type]
     return mw, svc

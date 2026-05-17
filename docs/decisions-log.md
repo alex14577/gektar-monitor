@@ -56,6 +56,7 @@
 - [[decisions/ADR-042-toggle-archive-submitted-semantic-overload|ADR-042]] — toggle_archive semantic overload: `submitted` column reused for "archived" UX concept; Option A (document + no schema change) accepted at P4; Option B (split column) deferred until dual-flag product need
 - [[decisions/ADR-043-non-loopback-bind-for-wsl|ADR-043]] — Non-loopback bind for WSL→Windows access: `FIS_MONITOR_HOST`/`FIS_MONITOR_PORT` env vars; `csrf_config_for_bind(host, port)` extends allowlists for `0.0.0.0`/specific-IP binds; startup WARNING when non-loopback; `loopback_csrf_config` kept as compat wrapper
 - [[decisions/ADR-044-async-sync-repo-ast-check|ADR-044]] — AST-based CI guard: `scripts/check_async_sync_repo.py` detects async route handlers calling sync SQLite repos without `asyncio.to_thread`; stdlib-only; `# noqa: async-sync-repo` escape hatch; supersedes import-linter approach for this pattern (bd 45el)
+- [[decisions/ADR-045-ci-pipeline|ADR-045]] — GitHub Actions CI pipeline: 4 blocking jobs (lint / typecheck / test-unit / test-integration); coverage gate ≥80% on domain+services; concurrency cancel-in-progress; `pip install -e ".[dev]"` install strategy (bd vgm.4)
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

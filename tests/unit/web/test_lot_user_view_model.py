@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fis_monitor.domain.models import LotUserDTO
-from fis_monitor.web.sse_encoder import LotViewModel, LotUserViewModel
+from fis_monitor.web.sse_encoder import LotUserViewModel, LotViewModel
 from tests.factories import make_lot
 
 _DEFAULT_NOW = make_lot().first_seen

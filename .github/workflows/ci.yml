@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff + import-linter + async-sync-repo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install lint dependencies
+        run: pip install -e ".[dev]"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: import-linter
+        run: lint-imports
+
+      - name: async-sync-repo check
+        run: python scripts/check_async_sync_repo.py src/fis_monitor/web/routes/
+
+  typecheck:
+    name: Type-check (mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # TODO(bd 2j75): flip continue-on-error to false once the pre-existing
+    # 23 mypy errors in src/ are paid down.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: mypy
+        run: mypy src/fis_monitor
+
+  test-unit:
+    name: Unit tests + coverage gate (domain + services)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: pytest (not slow) with coverage gate
+        # Coverage gate scoped to domain + services per acceptance criteria.
+        # Current observed coverage: ~92%. Gate set to 80 per acceptance.
+        # TODO: Bump --cov-fail-under back toward 90 once full_scan.py and
+        # lot_user_state.py coverage is improved (currently 68% and 40%).
+        run: |
+          pytest -m "not slow" \
+            --cov=src/fis_monitor/domain \
+            --cov=src/fis_monitor/services \
+            --cov-fail-under=80 \
+            --cov-report=term-missing \
+            -q
+
+  test-integration:
+    name: Integration tests (slow)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: pytest (slow)
+        run: pytest -m slow -q

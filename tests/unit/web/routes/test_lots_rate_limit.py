@@ -15,7 +15,6 @@ from fis_monitor.web.deps import get_lot_user_state_service
 from fis_monitor.web.rate_limit import RateLimiter
 from fis_monitor.web.routes.lots import router
 
-
 # ---------------------------------------------------------------------------
 # Fake service
 # ---------------------------------------------------------------------------
@@ -24,7 +23,7 @@ from fis_monitor.web.routes.lots import router
 class FakeLotUserStateService:
     """Minimal fake: set_note always succeeds."""
 
-    def set_note(self, lot_id: int, note: str | None) -> None:  # noqa: D401
+    def set_note(self, lot_id: int, note: str | None) -> None:
         pass
 
 
