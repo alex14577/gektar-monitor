@@ -11,9 +11,7 @@
        'desc':  '9 субъектов · Мурманская обл., Архангельская обл., Ненецкий АО, ЯНАО, Красноярский край (север), Якутия (север), Чукотка, Карелия (север), Коми (север)'}
   ] %}
   <button class="region-card" type="button"
-          aria-pressed="{{ 'true' if r.id in data.region_slugs else 'false' }}"
-          onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
-                   this.querySelector('input').checked = this.getAttribute('aria-pressed') === 'true';">
+          aria-pressed="{{ 'true' if r.id in data.region_slugs else 'false' }}">
     <input type="checkbox" name="regions" value="{{ r.id }}"
            {% if r.id in data.region_slugs %}checked{% endif %} hidden />
     <div class="region-card__check" aria-hidden="true">
@@ -24,3 +22,4 @@
   </button>
   {% endfor %}
 </div>
+<script defer src="/static/onboarding_step1.js"></script>
