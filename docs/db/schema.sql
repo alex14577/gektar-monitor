@@ -32,7 +32,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
@@ -41,6 +41,8 @@ PRAGMA user_version = 4;
 -- user_version bumped 3→4 (nvx2): новая таблица region_subscriptions(region_id PK,
 --   subscribed_at) + колонка lots.region_id INTEGER + индекс idx_lots_region_id_active.
 --   ADR-039: subscribed_at per-region cutoff. MigrationRunner v3→v4.
+-- user_version bumped 4→5 (svqi): колонка lots.date_registry TIMESTAMP NULL —
+--   дата постановки на учет в ЕГРН с detail-страницы. ADR-040. MigrationRunner v4→v5.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
@@ -68,6 +70,7 @@ CREATE TABLE IF NOT EXISTS lots (
     status               TEXT    NOT NULL,
     date_create          TIMESTAMP NOT NULL,
     date_update          TIMESTAMP,
+    date_registry        TIMESTAMP,                 -- ЕГРН reg. date from detail "Дата постановки на учет"; ADR-040
     lat                  REAL,
     lon                  REAL,
     has_boundaries       INTEGER CHECK (has_boundaries IN (0, 1) OR has_boundaries IS NULL),

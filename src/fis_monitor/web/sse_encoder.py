@@ -20,6 +20,7 @@ SSE line discipline (RFC 8895):
   This mirrors the same multi-line handling in the JSON encoder
   (``infra/sse/sse_stream.py::encode_sse_event``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -149,8 +150,7 @@ class LotViewModel:
         if lat is None or lon is None:
             return None
         return (
-            f"https://pkk.rosreestr.ru/#/search/{lat},{lon}/17"
-            f"?text={self._dto.cadastral_no}&type=1"
+            f"https://pkk.rosreestr.ru/#/search/{lat},{lon}/17?text={self._dto.cadastral_no}&type=1"
         )
 
     @property
@@ -178,8 +178,23 @@ class LotViewModel:
 
     @property
     def published_at_human(self) -> str:
-        """Site-side publication date — when the lot appeared on the FIS site."""
+        """FIS site publication date — DATE_CREATE, when lot was added to FIS DB (NOT EGRN)."""
         return self._dto.date_create.strftime("%d.%m.%Y %H:%M")
+
+    @property
+    def has_registry_date(self) -> bool:
+        """True when EGRN registration date has been fetched (enrichment complete)."""
+        return self._dto.date_registry is not None
+
+    @property
+    def registry_date_human(self) -> str:
+        """EGRN registration date — «Дата постановки на учет» from detail page.
+
+        Returns «—» when date_registry is not yet fetched (enrichment pending).
+        """
+        if self._dto.date_registry is None:
+            return "—"
+        return self._dto.date_registry.strftime("%d.%m.%Y")
 
     @property
     def temp(self) -> str:

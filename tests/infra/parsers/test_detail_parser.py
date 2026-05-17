@@ -42,9 +42,7 @@ def test_happy_path_returns_parsed_detail(
 # ---------------------------------------------------------------------------
 
 
-def test_lat_lon_parsed_as_float(
-    parser: SelectolaxDetailParser, html_detail_9990: str
-) -> None:
+def test_lat_lon_parsed_as_float(parser: SelectolaxDetailParser, html_detail_9990: str) -> None:
     result = parser.parse(html_detail_9990)
     assert result.lat is not None
     assert result.lon is not None
@@ -61,9 +59,7 @@ def test_lat_lon_parsed_as_float(
 # ---------------------------------------------------------------------------
 
 
-def test_has_boundaries_is_bool(
-    parser: SelectolaxDetailParser, html_detail_9990: str
-) -> None:
+def test_has_boundaries_is_bool(parser: SelectolaxDetailParser, html_detail_9990: str) -> None:
     result = parser.parse(html_detail_9990)
     assert isinstance(result.has_boundaries, bool)
     assert result.has_boundaries is True
@@ -92,13 +88,36 @@ def test_date_update_is_utc_aware_when_present(
         '<div class="request-domain__key-value">'
         "<div>"
         "<div>"
-        + chr(1044) + chr(1072) + chr(1090) + chr(1072) + " "  # Дата
-        + chr(1080) + chr(1079) + chr(1084) + chr(1077) + chr(1085)  # измен
-        + chr(1077) + chr(1085) + chr(1080) + chr(1103) + " "  # ения
-        + chr(1089) + chr(1074) + chr(1077) + chr(1076) + chr(1077)  # свед
-        + chr(1085) + chr(1080) + chr(1081) + " "  # ений
-        + chr(1074) + " "  # в
-        + chr(1045) + chr(1043) + chr(1056) + chr(1053)  # ЕГРН
+        + chr(1044)
+        + chr(1072)
+        + chr(1090)
+        + chr(1072)
+        + " "  # Дата
+        + chr(1080)
+        + chr(1079)
+        + chr(1084)
+        + chr(1077)
+        + chr(1085)  # измен
+        + chr(1077)
+        + chr(1085)
+        + chr(1080)
+        + chr(1103)
+        + " "  # ения
+        + chr(1089)
+        + chr(1074)
+        + chr(1077)
+        + chr(1076)
+        + chr(1077)  # свед
+        + chr(1085)
+        + chr(1080)
+        + chr(1081)
+        + " "  # ений
+        + chr(1074)
+        + " "  # в
+        + chr(1045)
+        + chr(1043)
+        + chr(1056)
+        + chr(1053)  # ЕГРН
         + "</div>"
         "<div>15.12.2021</div>"
         "</div>"
@@ -119,9 +138,7 @@ def test_date_update_is_utc_aware_when_present(
 # ---------------------------------------------------------------------------
 
 
-def test_parser_version_is_one(
-    parser: SelectolaxDetailParser, html_detail_9990: str
-) -> None:
+def test_parser_version_is_one(parser: SelectolaxDetailParser, html_detail_9990: str) -> None:
     result = parser.parse(html_detail_9990)
     assert result.parser_version == 1
 
@@ -142,9 +159,23 @@ def test_raw_json_contains_cadastral_no(
     key = "".join(
         chr(c)
         for c in [
-            1050, 1072, 1076, 1072, 1089, 1090, 1088, 1086, 1074, 1099, 1081,
+            1050,
+            1072,
+            1076,
+            1072,
+            1089,
+            1090,
+            1088,
+            1086,
+            1074,
+            1099,
+            1081,
             32,
-            1085, 1086, 1084, 1077, 1088,
+            1085,
+            1086,
+            1084,
+            1077,
+            1088,
         ]
     )
     assert key in result.raw_json, (
@@ -153,9 +184,7 @@ def test_raw_json_contains_cadastral_no(
     assert result.raw_json[key] == "79:06:2701002:287"
 
 
-def test_raw_json_contains_status(
-    parser: SelectolaxDetailParser, html_detail_9990: str
-) -> None:
+def test_raw_json_contains_status(parser: SelectolaxDetailParser, html_detail_9990: str) -> None:
     """Status section (h3 pattern) should be captured in raw_json."""
     result = parser.parse(html_detail_9990)
     # "Статус" in Cyrillic
@@ -163,9 +192,7 @@ def test_raw_json_contains_status(
     assert key in result.raw_json, f"'Status' key not in raw_json: {list(result.raw_json.keys())}"
 
 
-def test_raw_json_is_non_empty_dict(
-    parser: SelectolaxDetailParser, html_detail_9990: str
-) -> None:
+def test_raw_json_is_non_empty_dict(parser: SelectolaxDetailParser, html_detail_9990: str) -> None:
     result = parser.parse(html_detail_9990)
     assert isinstance(result.raw_json, dict)
     assert len(result.raw_json) >= 3
@@ -227,9 +254,21 @@ def test_has_boundaries_false_when_net(
     boundary_key = "".join(
         chr(c)
         for c in [
-            1043, 1088, 1072, 1085, 1080, 1094, 1099,  # Границы
+            1043,
+            1088,
+            1072,
+            1085,
+            1080,
+            1094,
+            1099,  # Границы
             32,  # space
-            1091, 1095, 1072, 1089, 1090, 1082, 1072,  # участка
+            1091,
+            1095,
+            1072,
+            1089,
+            1090,
+            1082,
+            1072,  # участка
         ]
     )
     html = (
@@ -250,9 +289,7 @@ def test_has_boundaries_false_when_net(
 # ---------------------------------------------------------------------------
 
 
-def test_idempotency(
-    parser: SelectolaxDetailParser, html_detail_9990: str
-) -> None:
+def test_idempotency(parser: SelectolaxDetailParser, html_detail_9990: str) -> None:
     result1 = parser.parse(html_detail_9990)
     result2 = parser.parse(html_detail_9990)
     assert result1.lat == result2.lat
@@ -302,3 +339,73 @@ def test_nested_divs_inside_value_cell_do_not_produce_duplicates(
     assert list(result.raw_json.keys()).count("Region") == 1
     # The nested-badge text must not appear as a standalone key
     assert "nested-badge" not in result.raw_json
+
+
+# ---------------------------------------------------------------------------
+# 11. date_registry — "Дата постановки на учет" (EGRN registration date)
+# ---------------------------------------------------------------------------
+
+
+def test_date_registry_from_fixture(parser: SelectolaxDetailParser, html_detail_9990: str) -> None:
+    """Fixture contains 'Дата постановки на учет': '22.04.2026' → datetime UTC."""
+    from datetime import UTC, datetime
+
+    result = parser.parse(html_detail_9990)
+    assert result.date_registry == datetime(2026, 4, 22, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "date_value",
+    [
+        "",  # absent / empty cell
+        "N/A",  # non-date text (invalid format)
+        "2026.04.22",  # wrong separator
+    ],
+    ids=["empty", "invalid_text", "wrong_format"],
+)
+def test_date_registry_none_when_missing_or_invalid(
+    parser: SelectolaxDetailParser,
+    date_value: str,
+) -> None:
+    """Empty or invalid 'Дата постановки на учет' → date_registry is None."""
+    # Build Cyrillic key inline to avoid RUF001.
+    # "Дата постановки на учет" codepoints:
+    key = "".join(
+        chr(c)
+        for c in [
+            1044,
+            1072,
+            1090,
+            1072,
+            32,  # Дата
+            1087,
+            1086,
+            1089,
+            1090,
+            1072,
+            1085,  # постан
+            1086,
+            1074,
+            1082,
+            1080,
+            32,  # овки
+            1085,
+            1072,
+            32,  # на
+            1091,
+            1095,
+            1077,
+            1090,  # учет
+        ]
+    )
+    html = (
+        "<html><body>"
+        '<div class="request-declaration__block-main">'
+        '<div class="request-domain__key-value">'
+        f"<div><div>{key}</div><div>{date_value}</div></div>"
+        "</div>"
+        "</div>"
+        "</body></html>"
+    )
+    result = parser.parse(html)
+    assert result.date_registry is None

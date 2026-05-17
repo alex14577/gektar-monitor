@@ -176,6 +176,9 @@ class EnrichmentService:
                 "lat": detail.lat,
                 "lon": detail.lon,
                 "has_boundaries": detail.has_boundaries,
+                "date_registry": (
+                    detail.date_registry if detail.date_registry is not None else lot.date_registry
+                ),
                 "date_update": (
                     detail.date_update if detail.date_update is not None else lot.date_update
                 ),

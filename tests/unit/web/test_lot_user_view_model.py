@@ -1,14 +1,17 @@
-"""Tests for LotUserViewModel.in_subscribed_subjects (Layer 3 — web/template).
+"""Tests for LotViewModel / LotUserViewModel (Layer 3 — web/template).
 
 Invariants:
 - chip shown when lot.region_id (int, macro) is in settings.regions
 - chip hidden when lot.region_id is not subscribed
 - chip hidden when lot.region_id is None (legacy row, graceful)
+- has_registry_date is True when date_registry is set, False when None
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fis_monitor.domain.models import LotUserDTO
-from fis_monitor.web.sse_encoder import LotUserViewModel
+from fis_monitor.web.sse_encoder import LotViewModel, LotUserViewModel
 from tests.factories import make_lot
 
 _DEFAULT_NOW = make_lot().first_seen
@@ -47,3 +50,18 @@ def test_in_subscribed_subjects_false_when_subscribed_regions_empty() -> None:
     dto = _make_dto(region_id=1)
     vm = LotUserViewModel(dto, subscribed_regions=frozenset())
     assert vm.in_subscribed_subjects is False
+
+
+# --- has_registry_date -------------------------------------------------------
+
+
+def test_has_registry_date_true_when_date_set() -> None:
+    lot = make_lot(date_registry=datetime(2024, 3, 15, tzinfo=UTC))
+    vm = LotViewModel(lot)
+    assert vm.has_registry_date is True
+
+
+def test_has_registry_date_false_when_none() -> None:
+    lot = make_lot(date_registry=None)
+    vm = LotViewModel(lot)
+    assert vm.has_registry_date is False

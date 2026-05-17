@@ -107,6 +107,7 @@ class Lot(BaseModel):
     status: str
     date_create: datetime
     date_update: datetime | None
+    date_registry: datetime | None = None  # ЕГРН reg. date from detail "Дата постановки на учет"
 
     # --- Coordinates ------------------------------------------------------
     lat: float | None
@@ -727,6 +728,7 @@ class ParsedDetail(BaseModel):
     lon: float | None
     has_boundaries: bool | None
     date_update: datetime | None
+    date_registry: datetime | None = None  # "Дата постановки на учет" from detail page
     raw_json: dict[str, Any]
     parser_version: StrictInt = 1
 

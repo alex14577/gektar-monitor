@@ -239,6 +239,7 @@ class TestMigrationAtomicOnMiddleFailure:
     def test_migration_atomic_on_middle_failure(self, tmp_db_path: Path) -> None:
         conn = _open_v1(tmp_db_path)
         try:
+
             def _always_fail(c: sqlite3.Connection) -> None:
                 raise RuntimeError("intentional failure mid-migration")
 
@@ -284,8 +285,9 @@ class TestDefaultMigrationRunnerFactory:
         runner = default_migration_runner()
         migrations = list(runner.list_migrations())
 
-        # v1→v2, v2→v3 (smtp_from_name, bd ljp), v3→v4 (region_subscriptions, nvx2)
-        assert len(migrations) == 3
+        # v1→v2, v2→v3 (smtp_from_name, bd ljp), v3→v4 (region_subscriptions, nvx2),
+        # v4→v5 (lots.date_registry, ADR-040)
+        assert len(migrations) == 4
         m1 = migrations[0]
         assert m1.from_version == 1
         assert m1.to_version == 2

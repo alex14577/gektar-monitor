@@ -53,8 +53,8 @@ _PAGE_SIZE_MIN = 1
 _PAGE_SIZE_MAX = 200
 
 # Age thresholds for freshness/tier computation.
-_AGE_HOT_SECS = 3_600       # < 1 hour  → hot
-_AGE_WARM_SECS = 86_400     # < 1 day   → warm
+_AGE_HOT_SECS = 3_600  # < 1 hour  → hot
+_AGE_WARM_SECS = 86_400  # < 1 day   → warm
 # ≥ 1 day → cold
 
 # Lot status whitelist (matches known values in the ``lots`` table).
@@ -106,8 +106,7 @@ class LotFilters:
             )
         if self.status is not None and self.status not in _KNOWN_STATUSES:
             raise ValueError(
-                f"Unknown lot status {self.status!r}. "
-                f"Allowed: {sorted(_KNOWN_STATUSES)}"
+                f"Unknown lot status {self.status!r}. Allowed: {sorted(_KNOWN_STATUSES)}"
             )
 
 
@@ -151,7 +150,7 @@ def _decode_cursor(cursor: str) -> int:
 
 _LOT_SELECT = (
     "id, cadastral_no, area_sqm, region, municipality, land_category, "
-    "permitted_use, ogv, status, date_create, date_update, lat, lon, "
+    "permitted_use, ogv, status, date_create, date_update, date_registry, lat, lon, "
     "has_boundaries, raw_json, parser_version, first_seen, last_seen, "
     "detail_fetched_at, enrichment_status, enrichment_retries, "
     "enrichment_last_error, last_seen_at, last_status, last_status_at, "
@@ -190,7 +189,7 @@ def _lot_to_user_dto(
 
     public_kwargs: dict[str, Any] = lot.model_dump()
     public_kwargs["age_seconds"] = age_seconds
-    public_kwargs["tier"] = "match"   # single-user MVP: every active lot matches
+    public_kwargs["tier"] = "match"  # single-user MVP: every active lot matches
     public_kwargs["freshness"] = freshness
 
     user_kwargs: dict[str, Any] = {}
@@ -277,8 +276,7 @@ class LotQueryService:
         """
         if not (_PAGE_SIZE_MIN <= page_size <= _PAGE_SIZE_MAX):
             raise ValueError(
-                f"page_size must be between {_PAGE_SIZE_MIN} and {_PAGE_SIZE_MAX}, "
-                f"got {page_size}"
+                f"page_size must be between {_PAGE_SIZE_MIN} and {_PAGE_SIZE_MAX}, got {page_size}"
             )
 
         if filters.fts_query is not None:
@@ -307,10 +305,7 @@ class LotQueryService:
         )
 
         now_ts = self._clock.now().timestamp()
-        items = tuple(
-            _lot_to_user_dto(lot, user_states.get(lot.id), now_ts=now_ts)
-            for lot in lots
-        )
+        items = tuple(_lot_to_user_dto(lot, user_states.get(lot.id), now_ts=now_ts) for lot in lots)
 
         next_cursor: str | None = None
         if has_more and lots:

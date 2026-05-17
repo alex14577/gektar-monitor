@@ -91,15 +91,11 @@ class SqliteMigrationRunner:
         """Return registered migrations, ordered by `from_version` asc."""
         return self._migrations
 
-    def __call__(
-        self, conn: sqlite3.Connection, from_version: int, to_version: int
-    ) -> None:
+    def __call__(self, conn: sqlite3.Connection, from_version: int, to_version: int) -> None:
         """Delegate to `run_pending`. Matches Callable signature in init_db."""
         self.run_pending(conn, from_version, to_version)
 
-    def run_pending(
-        self, conn: sqlite3.Connection, from_version: int, to_version: int
-    ) -> None:
+    def run_pending(self, conn: sqlite3.Connection, from_version: int, to_version: int) -> None:
         """Apply chained migrations from `from_version` → `to_version`.
 
         Algorithm:
@@ -121,9 +117,7 @@ class SqliteMigrationRunner:
         try:
             actual = conn.execute("PRAGMA user_version").fetchone()[0]
             if actual != from_version:
-                raise ConcurrentMigrationError(
-                    expected_version=from_version, actual_version=actual
-                )
+                raise ConcurrentMigrationError(expected_version=from_version, actual_version=actual)
 
             if from_version == to_version:
                 conn.commit()
@@ -140,13 +134,9 @@ class SqliteMigrationRunner:
             conn.rollback()
             raise
 
-    def _build_chain(
-        self, from_version: int, to_version: int
-    ) -> list[Migration]:
+    def _build_chain(self, from_version: int, to_version: int) -> list[Migration]:
         """Greedy chain-build. Raises `MigrationChainBroken` if no path."""
-        by_from: dict[int, Migration] = {
-            m.from_version: m for m in self._migrations
-        }
+        by_from: dict[int, Migration] = {m.from_version: m for m in self._migrations}
         chain: list[Migration] = []
         current = from_version
         # Bound the loop by registered migration count + 1 as a hard upper
@@ -158,15 +148,11 @@ class SqliteMigrationRunner:
                 return chain
             migration = by_from.get(current)
             if migration is None or migration.to_version <= current:
-                raise MigrationChainBroken(
-                    from_version=from_version, to_version=to_version
-                )
+                raise MigrationChainBroken(from_version=from_version, to_version=to_version)
             chain.append(migration)
             current = migration.to_version
         # Fell out of bound without reaching to_version.
-        raise MigrationChainBroken(
-            from_version=from_version, to_version=to_version
-        )
+        raise MigrationChainBroken(from_version=from_version, to_version=to_version)
 
 
 # ---------------------------------------------------------------------------
@@ -176,14 +162,16 @@ class SqliteMigrationRunner:
 from fis_monitor.infra.sqlite.migrations_v1_to_v2 import v1_to_v2  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v2_to_v3 import v2_to_v3  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v3_to_v4 import v3_to_v4  # noqa: E402
+from fis_monitor.infra.sqlite.migrations_v4_to_v5 import v4_to_v5  # noqa: E402
 
 MIGRATION_V1_TO_V2 = Migration(from_version=1, to_version=2, apply=v1_to_v2)
 MIGRATION_V2_TO_V3 = Migration(from_version=2, to_version=3, apply=v2_to_v3)
 MIGRATION_V3_TO_V4 = Migration(from_version=3, to_version=4, apply=v3_to_v4)
+MIGRATION_V4_TO_V5 = Migration(from_version=4, to_version=5, apply=v4_to_v5)
 
 
 def default_migration_runner() -> SqliteMigrationRunner:
-    """Factory: runner with the registered v1→v2, v2→v3, and v3→v4 migration chains.
+    """Factory: runner with registered v1→v2, v2→v3, v3→v4, and v4→v5 migration chains.
 
     Usage (composition root / init_db):
         runner = default_migration_runner()
@@ -191,8 +179,8 @@ def default_migration_runner() -> SqliteMigrationRunner:
 
     Returns:
         SqliteMigrationRunner with MIGRATION_V1_TO_V2 + MIGRATION_V2_TO_V3 +
-        MIGRATION_V3_TO_V4 registered.
+        MIGRATION_V3_TO_V4 + MIGRATION_V4_TO_V5 registered.
     """
     return SqliteMigrationRunner(
-        migrations=[MIGRATION_V1_TO_V2, MIGRATION_V2_TO_V3, MIGRATION_V3_TO_V4]
+        migrations=[MIGRATION_V1_TO_V2, MIGRATION_V2_TO_V3, MIGRATION_V3_TO_V4, MIGRATION_V4_TO_V5]
     )

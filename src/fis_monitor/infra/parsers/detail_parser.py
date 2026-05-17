@@ -14,7 +14,8 @@ Typed fields:
   lat            DMS string -> decimal float (Shirata/Lat)
   lon            DMS string -> decimal float (Dolgota/Lon)
   has_boundaries "Est" -> True, "Net" -> False, absent -> None
-  date_update    DD.MM.YYYY -> datetime UTC
+  date_registry  DD.MM.YYYY -> datetime UTC  ("Дата постановки на учет" — ЕГРН reg. date)
+  date_update    DD.MM.YYYY -> datetime UTC  ("Дата изменения сведений в ЕГРН")
 
 raw_json stores all extracted key-value pairs for forward-compat.
 
@@ -110,11 +111,7 @@ def _extract_kv_pairs(container: Node) -> dict[str, str]:
         # so `pair_div.parent == container` is unreliable across wrapper instances.)
         if pair_div.tag != "div":
             continue
-        direct_divs = [
-            c
-            for c in pair_div.iter(include_text=False)
-            if c.tag == "div"
-        ]
+        direct_divs = [c for c in pair_div.iter(include_text=False) if c.tag == "div"]
         if len(direct_divs) >= 2:
             label = direct_divs[0].text(strip=True)
             value = direct_divs[1].text(strip=True)
@@ -140,10 +137,7 @@ def _extract_all_kv(tree: HTMLParser) -> dict[str, str]:
         combined.update(pairs)
 
     # Pattern 2: h3 label + single-value kv block (sections like "Status")
-    selector = (
-        ".request-declaration__block-footer, "
-        ".request-declaration__block-left__item--left"
-    )
+    selector = ".request-declaration__block-footer, .request-declaration__block-left__item--left"
     for block in tree.css(selector):
         h3 = block.css_first("h3.request-declaration__title")
         if h3 is None:
@@ -155,17 +149,9 @@ def _extract_all_kv(tree: HTMLParser) -> dict[str, str]:
         if kv is None:
             continue
         # Single-value pattern: top-level div contains one child div with the value
-        top_divs = [
-            c
-            for c in kv.iter(include_text=False)
-            if c.tag == "div"
-        ]
+        top_divs = [c for c in kv.iter(include_text=False) if c.tag == "div"]
         for top_div in top_divs:
-            inner_divs = [
-                c
-                for c in top_div.iter(include_text=False)
-                if c.tag == "div"
-            ]
+            inner_divs = [c for c in top_div.iter(include_text=False) if c.tag == "div"]
             if len(inner_divs) == 1:
                 value = inner_divs[0].text(strip=True)
                 if value and label not in combined:
@@ -217,10 +203,7 @@ class SelectolaxDetailParser:
         lon = _dms_to_decimal(lon_raw) if lon_raw else None
 
         # has_boundaries: "Granitsy uchastka"
-        boundaries_key = (
-            "Границы "
-            "участка"
-        )
+        boundaries_key = "Границы участка"
         boundaries_raw = all_kv.get(boundaries_key, "")
         yes_val = "Есть"  # "Est'"
         no_val = "Нет"  # "Net"
@@ -231,12 +214,13 @@ class SelectolaxDetailParser:
         else:
             has_boundaries = None
 
+        # date_registry: "Data postanovki na uchet" (EGRN registration date)
+        date_registry_key = "Дата постановки на учет"
+        date_registry_raw = all_kv.get(date_registry_key, "")
+        date_registry = _parse_date(date_registry_raw) if date_registry_raw else None
+
         # date_update: "Data izmeneniya svedeniy v EGRN"
-        date_update_key = (
-            "Дата изменен"
-            "ия сведений "
-            "в ЕГРН"
-        )
+        date_update_key = "Дата изменения сведений в ЕГРН"
         date_update_raw = all_kv.get(date_update_key, "")
         date_update = _parse_date(date_update_raw) if date_update_raw else None
 
@@ -247,6 +231,7 @@ class SelectolaxDetailParser:
             lat=lat,
             lon=lon,
             has_boundaries=has_boundaries,
+            date_registry=date_registry,
             date_update=date_update,
             raw_json=raw_json,
             parser_version=self.parser_version,

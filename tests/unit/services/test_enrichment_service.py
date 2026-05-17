@@ -24,6 +24,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -432,3 +433,61 @@ def test_no_executor_fallback_still_works() -> None:
 
     assert len(results) == 2
     assert all(r.enrichment_status == "done" for r in results)
+
+
+# ---------------------------------------------------------------------------
+# date_registry propagation (svqi — EGRN registration date)
+# ---------------------------------------------------------------------------
+
+_EGRN_DATE = datetime(2026, 4, 22, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "detail_date_registry, lot_date_registry, expected",
+    [
+        # detail has date → copy it regardless of lot's current value
+        (_EGRN_DATE, None, _EGRN_DATE),
+        (_EGRN_DATE, datetime(2025, 1, 1, tzinfo=UTC), _EGRN_DATE),
+        # detail has None → preserve existing lot value (do not overwrite)
+        (None, _EGRN_DATE, _EGRN_DATE),
+        # detail has None, lot also None → stays None
+        (None, None, None),
+    ],
+    ids=["detail_set_lot_none", "detail_overrides_lot", "preserve_existing", "both_none"],
+)
+def test_enrich_one_date_registry_propagation(
+    detail_date_registry: datetime | None,
+    lot_date_registry: datetime | None,
+    expected: datetime | None,
+) -> None:
+    """_enrich_one copies date_registry from ParsedDetail; preserves lot value if detail None."""
+    lot = make_lot(id=9001, enrichment_status="pending", date_registry=lot_date_registry)
+
+    detail = ParsedDetail(
+        lat=55.0,
+        lon=37.0,
+        has_boundaries=True,
+        date_update=None,
+        date_registry=detail_date_registry,
+        raw_json={},
+        parser_version=1,
+    )
+    parser = FakeDetailParser(detail=detail)
+    url = _DEFAULT_BUILDER.lot_detail_url(lot_id=lot.id)
+    http = FakeHttpClient()
+    http.configure_url(
+        url,
+        HttpResponse(
+            status=200,
+            text=_make_html(lot.id),
+            headers={},
+            final_url=url,
+        ),
+    )
+    svc = EnrichmentService(http=http, parser=parser)
+    results = svc.enrich_lots([lot], max_workers=1)
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.enrichment_status == "done"
+    assert result.date_registry == expected

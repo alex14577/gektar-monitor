@@ -38,6 +38,7 @@ from fis_monitor.infra.sqlite.connection import ConnectionProvider
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _iso(dt: datetime | None) -> str | None:
     """Serialise a datetime to ISO-8601 string for storage, or None."""
     if dt is None:
@@ -69,6 +70,7 @@ def row_to_lot(row: sqlite3.Row | tuple) -> Lot:
         status,
         date_create_raw,
         date_update_raw,
+        date_registry_raw,
         lat,
         lon,
         has_boundaries_raw,
@@ -110,6 +112,7 @@ def row_to_lot(row: sqlite3.Row | tuple) -> Lot:
         status=status,
         date_create=_parse_dt(date_create_raw),  # type: ignore[arg-type]
         date_update=_parse_dt(date_update_raw),
+        date_registry=_parse_dt(date_registry_raw),
         lat=lat,
         lon=lon,
         has_boundaries=has_boundaries,
@@ -130,7 +133,7 @@ def row_to_lot(row: sqlite3.Row | tuple) -> Lot:
 
 _LOT_SELECT = (
     "id, cadastral_no, area_sqm, region, municipality, land_category, "
-    "permitted_use, ogv, status, date_create, date_update, lat, lon, "
+    "permitted_use, ogv, status, date_create, date_update, date_registry, lat, lon, "
     "has_boundaries, raw_json, parser_version, first_seen, last_seen, "
     "detail_fetched_at, enrichment_status, enrichment_retries, "
     "enrichment_last_error, last_seen_at, last_status, last_status_at, "
@@ -142,6 +145,7 @@ _LOT_SELECT = (
 # ---------------------------------------------------------------------------
 # R-tree sync (private, called only inside upsert tx)
 # ---------------------------------------------------------------------------
+
 
 def _bool_to_int(value: bool | None) -> int | None:
     """Convert bool → 0/1 for SQLite INTEGER columns, or None."""
@@ -196,8 +200,7 @@ def _sync_geo(
     if not old_has and new_has:
         # Case 2 — INSERT new point (minLat=maxLat=lat, minLon=maxLon=lon).
         conn.execute(
-            "INSERT INTO lots_rtree(id, min_lat, max_lat, min_lon, max_lon)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO lots_rtree(id, min_lat, max_lat, min_lon, max_lon) VALUES (?, ?, ?, ?, ?)",
             (lot_id, new_lat, new_lat, new_lon, new_lon),
         )
         return
@@ -223,6 +226,7 @@ def _sync_geo(
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
+
 
 class SqliteLotRepository:
     """SQLite-backed ``LotRepository``.
@@ -296,14 +300,14 @@ class SqliteLotRepository:
                     "INSERT INTO lots("
                     "  id, cadastral_no, area_sqm, region, municipality,"
                     "  land_category, permitted_use, ogv, status,"
-                    "  date_create, date_update, lat, lon, has_boundaries,"
+                    "  date_create, date_update, date_registry, lat, lon, has_boundaries,"
                     "  raw_json, parser_version, first_seen, last_seen,"
                     "  detail_fetched_at, enrichment_status, enrichment_retries,"
                     "  last_seen_at, last_status, last_status_at,"
                     "  is_active, inactive_reason, inactive_since, inactive_confirmed_at,"
                     "  region_id"
                     ") VALUES ("
-                    "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                    "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
                     "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
                     ")",
                     (
@@ -318,6 +322,7 @@ class SqliteLotRepository:
                         lot.status,
                         _iso(lot.date_create),
                         _iso(lot.date_update),
+                        _iso(lot.date_registry),
                         lot.lat,
                         lot.lon,
                         _bool_to_int(lot.has_boundaries),
@@ -346,7 +351,7 @@ class SqliteLotRepository:
                     "  cadastral_no = ?, area_sqm = ?, region = ?,"
                     "  municipality = ?, land_category = ?, permitted_use = ?,"
                     "  ogv = ?, status = ?, date_create = ?, date_update = ?,"
-                    "  lat = ?, lon = ?, has_boundaries = ?, raw_json = ?,"
+                    "  date_registry = ?, lat = ?, lon = ?, has_boundaries = ?, raw_json = ?,"
                     "  parser_version = ?, first_seen = ?, last_seen = ?,"
                     "  detail_fetched_at = ?, enrichment_status = ?,"
                     "  last_seen_at = ?, is_active = ?,"
@@ -364,6 +369,7 @@ class SqliteLotRepository:
                         lot.status,
                         _iso(lot.date_create),
                         _iso(lot.date_update),
+                        _iso(lot.date_registry),
                         lot.lat,
                         lot.lon,
                         _bool_to_int(lot.has_boundaries),
@@ -490,8 +496,7 @@ class SqliteLotRepository:
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
-                f"UPDATE lots SET last_seen = ?, last_seen_at = ?"
-                f" WHERE id IN ({placeholders})",
+                f"UPDATE lots SET last_seen = ?, last_seen_at = ? WHERE id IN ({placeholders})",
                 (at_iso, at_iso, *lot_ids),
             )
             conn.commit()

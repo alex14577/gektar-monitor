@@ -23,8 +23,9 @@ class Lot(BaseModel):
     permitted_use: str | None        # ВРИ
     ogv: str | None
     status: str                      # «Свободен», «Зарезервирован», ...
-    date_create: datetime
-    date_update: datetime | None
+    date_create: datetime            # DATE_CREATE из списка /cabinet/free-lot (ФИС DB, НЕ ЕГРН)
+    date_update: datetime | None     # «Дата изменения сведений в ЕГРН» с detail-страницы
+    date_registry: datetime | None   # «Дата постановки на учет» с detail-страницы (ЕГРН). NULL до обогащения. ADR-040
 
     # Координаты (для R-tree)
     lat: float | None
