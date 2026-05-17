@@ -5,7 +5,10 @@
 # health endpoints, prints the addresses, and stays foreground (wait).
 # Ctrl+C / SIGTERM triggers graceful shutdown of both processes.
 #
-# Idempotent: a previous run's PIDs are killed before relaunch.
+# Idempotent: a previous run's PIDs are killed before relaunch. If the
+# PID file was deleted but the process is still alive (orphan after a
+# crash), pkill -f fallback finishes the cleanup so the port-check below
+# doesn't fail with a misleading "port in use" message — bd f5a9.
 # Must be run from the project root (where pyproject.toml lives).
 
 set -euo pipefail
@@ -75,6 +78,12 @@ done
 mkdir -p "$STACK_DIR" "$DATA_DIR"
 kill_if_running "$FIS_PID_FILE"
 kill_if_running "$FAKE_PID_FILE"
+# Orphan-process fallback (bd f5a9): if a previous run crashed and the
+# PID file was removed by hand, kill_if_running is a no-op. Match by
+# command-line so the port-check below sees a clean slate. Both pkill
+# calls tolerate "no matches" (rc=1) via `|| true`.
+pkill -f fis-monitor 2>/dev/null || true
+pkill -f fake_torgi 2>/dev/null || true
 rm -f "$DATA_DIR/app.lock"
 
 # ── Auth bypass mode ─────────────────────────────────────────────────
