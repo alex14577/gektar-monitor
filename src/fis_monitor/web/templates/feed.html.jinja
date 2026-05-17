@@ -23,11 +23,6 @@
   </div>
   <script defer src="/static/feed.js"></script>
 
-  {# ------- Health widget ------- #}
-  <div class="health" role="region" aria-label="Здоровье мониторинга">
-    <span>Всего лотов в базе: <b>{{ '{:,}'.format(health.total_lots).replace(',', '\u00A0') }}</b></span>
-  </div>
-
   {# ------- Session-warning banner (10 min before expiry) ------- #}
   {% if session.expires_soon %}
     <div class="banner banner--warn" role="status" aria-live="polite">

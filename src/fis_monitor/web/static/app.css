@@ -494,18 +494,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .banner__title { font-weight: 600; }
 .banner__icon { width: 22px; height: 22px; flex: none; }
 
-/* ---------- health widget ---------- */
-.health {
-  display: flex; flex-wrap: wrap; gap: 14px 24px;
-  padding: 10px 14px;
-  background: var(--surface-2);
-  border-radius: var(--r-sm);
-  margin: 8px 0 18px;
-  font-size: 0.8125rem;
-  color: var(--ink-2);
-}
-.health b { color: var(--ink); font-weight: 600; }
-
 /* ---------- modal ---------- */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 70;
