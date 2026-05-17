@@ -19,17 +19,17 @@
   <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
 
-  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}" />
+  <link rel="stylesheet" href="/static/app.css" />
   <style>
     {# user-controlled font size from Settings (14/16/18) #}
     :root { --fs-base: {{ settings.font_size_px | default(16) }}px; }
   </style>
 
-  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', path='/favicon.svg') }}" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
 
   {# HTMX + SSE extension — vendored locally (supply-chain mitigation ADR-029). #}
-  <script defer src="{{ url_for('static', path='/vendor/htmx-1.9.12/htmx.min.js') }}"></script>
-  <script defer src="{{ url_for('static', path='/vendor/htmx-1.9.12/ext/sse.js') }}"></script>
+  <script defer src="/static/vendor/htmx-1.9.12/htmx.min.js"></script>
+  <script defer src="/static/vendor/htmx-1.9.12/ext/sse.js"></script>
 </head>
 <body>
 
@@ -133,7 +133,7 @@
 
   {% endif %}
 
-  <script defer src="{{ url_for('static', path='/app.js') }}"></script>
-  <script defer src="{{ url_for('static', path='/auth.js') }}"></script>
+  <script defer src="/static/app.js"></script>
+  <script defer src="/static/auth.js"></script>
 </body>
 </html>

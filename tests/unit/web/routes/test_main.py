@@ -555,3 +555,19 @@ def test_health_widget_shows_only_total_lots() -> None:
     assert "Последний успешный цикл" not in health_html
     assert "Последний новый" not in health_html
     assert "Вы за лентой" not in health_html
+
+
+def test_get_root_with_spoofed_host_does_not_reflect_in_static_urls() -> None:
+    """ADR-011 addendum (bd 9u7): static URLs are relative, not Host-derived.
+
+    url_for('static', ...) used to produce absolute URLs incorporating the
+    untrusted Host header.  After the fix, base.html.jinja uses root-relative
+    literals (/static/...) so a spoofed Host never leaks into the response.
+    """
+    app, _, _ = _make_app()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/", headers={"Host": "evil.com"})
+    assert resp.status_code == 200
+    assert "evil.com" not in resp.text
+    # Verify root-relative static refs are present (regression guard)
+    assert 'href="/static/' in resp.text or 'src="/static/' in resp.text

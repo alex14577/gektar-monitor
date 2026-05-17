@@ -8,8 +8,6 @@ Verifies:
 """
 from __future__ import annotations
 
-import re
-
 from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
 
 _VENDOR_DIR = STATIC_DIR / "vendor" / "htmx-1.9.12"
@@ -62,13 +60,22 @@ def test_base_template_loads_htmx_from_vendor() -> None:
     )
 
 
-def test_base_template_vendor_scripts_use_url_for() -> None:
-    """Vendor script tags must use Jinja2 url_for(), not bare paths."""
+def test_base_template_vendor_scripts_use_root_relative_paths() -> None:
+    """Vendor script tags must use root-relative paths, not url_for() (ADR-011 addendum, bd 9u7).
+
+    url_for() constructed absolute URLs from the untrusted Host header, enabling
+    Host-reflection into static-asset src attributes.  Root-relative literals
+    resolve against the browser origin and carry no host component.
+    """
     content = _BASE_TEMPLATE.read_text(encoding="utf-8")
-    # Both vendor paths should appear inside url_for(...) calls.
-    assert re.search(r"url_for\([^)]*vendor/htmx-1\.9\.12/htmx\.min\.js", content), (
-        "htmx.min.js vendor reference should use url_for()"
+    # Vendor paths appear as root-relative literals, not url_for() calls.
+    assert 'src="/static/vendor/htmx-1.9.12/htmx.min.js"' in content, (
+        "htmx.min.js must use root-relative /static/... path, not url_for()"
     )
-    assert re.search(r"url_for\([^)]*vendor/htmx-1\.9\.12/ext/sse\.js", content), (
-        "ext/sse.js vendor reference should use url_for()"
+    assert 'src="/static/vendor/htmx-1.9.12/ext/sse.js"' in content, (
+        "ext/sse.js must use root-relative /static/... path, not url_for()"
+    )
+    # Guard: no url_for('static', ...) calls remain in the template.
+    assert "url_for('static'" not in content, (
+        "base.html.jinja still contains url_for('static', ...) — Host-reflection vector"
     )

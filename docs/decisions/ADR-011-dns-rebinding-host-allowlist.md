@@ -18,3 +18,28 @@
 **Consequences.** Защита от DNS-rebinding на уровне приложения. EventSource (SSE) всегда шлёт same-origin Origin — не ломается. CSRF + Host allow-list = двойной контур. Все mismatch-ответы — 421; нет неоднозначности «когда 403, когда 421».
 
 См. также: [[decisions-log]], [[architecture/01-container-diagram]], [[web/authentication]].
+
+## Addendum — Reflected absolute URLs in GET responses (2026-05-17, bd 9u7)
+
+**Problem.** Starlette's `url_for()` constructs absolute URLs from the request's
+untrusted `Host` header. The safe-method bypass in this ADR intentionally lets
+GET requests through without Host validation; a spoofed `Host: evil.com` therefore
+reflected into static-asset `src`/`href` attributes
+(`http://evil.com/static/auth.js`). Loopback-only deployment limits exposure,
+but a compromised local process can still craft the header.
+
+**Resolution.** All `url_for('static', path=...)` calls in `base.html.jinja`
+replaced with root-relative path literals (`/static/...`). Relative paths
+resolve against the browser's current origin and carry no host component, so
+the reflection vector disappears at the source. No middleware change required.
+
+**Rejected alternatives.**
+- *Extend Host validation to GET* — breaks legitimate reverse-proxy and
+  health-check scenarios; a scope change requiring its own ADR.
+- *Document as known limitation* — defers the risk without eliminating it;
+  Variant B costs nothing and closes the gap.
+
+**Residual surface.** `url_for()` in route-level Python (redirects' `Location`
+headers) still pulls from the request — but the target names there
+(`onboarding_step`, `login_page`, ...) are server-controlled, not
+user-controlled values, so no reflection occurs.
