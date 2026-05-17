@@ -17,7 +17,7 @@ created: 2026-05-15
 
 | Endpoint | Парсер / потребитель |
 |---|---|
-| `GET /cabinet/free-lot?region=N` | `SelectolaxListParser` — `tr[data-key]`, 14+ `td[data-col-seq]` |
+| `GET /cabinet/free-lot?region=N&page=K&per-page=M` | `SelectolaxListParser` — `tr[data-key]`, 14+ `td[data-col-seq]`. Поддерживает пагинацию: `page` (1-based) + `per-page` (slice). `.table-paginate__info` всегда показывает полный total (как на real-сайте) — парсерский `total_count` стабилен. Когда `page` за пределами — пустой `<tbody>` (стоп-сигнал для `PaginatedListFetcher.iterate()`). |
 | `GET /cabinet/free-lot-view?id=N` | `SelectolaxDetailParser` — `.request-declaration__block-main` |
 | `GET /admin` | Admin UI (HTML, PRG-форма) |
 | `POST /admin/lots` | Добавить лот, редирект на `/admin` |

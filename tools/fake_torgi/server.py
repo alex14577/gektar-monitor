@@ -27,7 +27,7 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 import uvicorn
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -156,16 +156,39 @@ def _today_str() -> str:
 
 
 @app.get("/cabinet/free-lot", response_class=HTMLResponse)
-async def lot_list(request: Request, region: int = 1) -> HTMLResponse:
+async def lot_list(
+    request: Request,
+    region: int = 1,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=200, alias="per-page"),
+) -> HTMLResponse:
     """Return list-page HTML matching SelectolaxListParser expectations.
 
-    Parser checks: tbody present, tr[data-key], 14+ td[data-col-seq].
+    Parser checks: tbody present, tr[data-key], 14+ td[data-col-seq],
+    ``.table-paginate__info`` with text «Найдено записей: N из N».
+
+    Pagination semantics mirror the real torgi.gov.ru: ``page`` 1-based,
+    ``per-page`` slice size; ``.table-paginate__info`` always shows the
+    full total (not the current slice) so the parser-side ``total_count``
+    stays consistent across pages. When ``page`` is past the last one the
+    response has an empty ``<tbody>`` — that is the stop signal for
+    ``PaginatedListFetcher.iterate()`` (real site behaves the same).
     """
-    lots = _load_lots()
+    all_lots = _load_lots()
+    total = len(all_lots)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_lots = all_lots[start:end]
     return templates.TemplateResponse(
         request,
         "list.html",
-        {"lots": lots, "region": region},
+        {
+            "lots": page_lots,
+            "total": total,
+            "region": region,
+            "page": page,
+            "per_page": per_page,
+        },
     )
 
 

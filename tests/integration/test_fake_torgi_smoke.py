@@ -353,6 +353,114 @@ async def test_cabinet_bypass_disabled_when_env_falsy(
 
 
 @pytest.mark.asyncio
+async def test_list_pagination_page_2_returns_empty_when_lots_fit_on_page_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """page=2 must produce an empty tbody when all lots fit on page 1.
+
+    This is the stop signal PaginatedListFetcher.iterate() looks for —
+    without it, backfill walks pages indefinitely against fake_torgi (the
+    bug behind gektar_monitor-ygp8).
+    """
+    from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
+
+    lots_path = tmp_path / "lots.json"
+    lots_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": i,
+                    "cadastral_no": f"01:01:0000000:{i:03d}",
+                    "area_sqm": 1000 + i,
+                    "region": "Республика Адыгея",
+                    "municipality": "тест",
+                    "land_category": "Земли сельскохозяйственного назначения",
+                    "permitted_use": "тест",
+                    "ogv": "тест",
+                    "date_create": "01.01.2026",
+                    "date_update": "",
+                    "status": "Свободен",
+                }
+                for i in range(1, 9)
+            ]
+        )
+    )
+    _patch_lots(monkeypatch, lots_path)
+    async with _make_authed_client() as c:
+        resp = await c.get(
+            "/cabinet/free-lot", params={"region": 1, "page": 2, "per-page": 20}
+        )
+    assert resp.status_code == 200
+    parsed = SelectolaxListParser().parse(resp.text)
+    assert parsed.rows == []
+    # total_count is the catalogue size — same on every page (real-site behaviour).
+    assert parsed.total_count == 8
+
+
+@pytest.mark.asyncio
+async def test_list_pagination_slices_lots_per_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """per-page=3 splits 8 lots across 3 pages (3 + 3 + 2)."""
+    from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
+
+    lots_path = tmp_path / "lots.json"
+    lots_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": i,
+                    "cadastral_no": f"01:01:0000000:{i:03d}",
+                    "area_sqm": 1000 + i,
+                    "region": "Республика Адыгея",
+                    "municipality": "тест",
+                    "land_category": "Земли сельскохозяйственного назначения",
+                    "permitted_use": "тест",
+                    "ogv": "тест",
+                    "date_create": "01.01.2026",
+                    "date_update": "",
+                    "status": "Свободен",
+                }
+                for i in range(1, 9)
+            ]
+        )
+    )
+    _patch_lots(monkeypatch, lots_path)
+    parser = SelectolaxListParser()
+    async with _make_authed_client() as c:
+        page1 = parser.parse(
+            (
+                await c.get(
+                    "/cabinet/free-lot",
+                    params={"region": 1, "page": 1, "per-page": 3},
+                )
+            ).text
+        )
+        page3 = parser.parse(
+            (
+                await c.get(
+                    "/cabinet/free-lot",
+                    params={"region": 1, "page": 3, "per-page": 3},
+                )
+            ).text
+        )
+        page4 = parser.parse(
+            (
+                await c.get(
+                    "/cabinet/free-lot",
+                    params={"region": 1, "page": 4, "per-page": 3},
+                )
+            ).text
+        )
+    assert len(page1.rows) == 3
+    assert len(page3.rows) == 2  # 7th and 8th lots
+    assert page4.rows == []  # past the end → stop signal
+    assert page1.total_count == 8
+    assert page3.total_count == 8
+    assert page4.total_count == 8
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "redirect_uri",
     [
