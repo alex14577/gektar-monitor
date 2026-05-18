@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -83,6 +83,18 @@ router = APIRouter(prefix="/filters", tags=["filters"])
 # ---------------------------------------------------------------------------
 # Form-parsing helpers
 # ---------------------------------------------------------------------------
+
+
+def _coerce_sort_dir(v: str | None) -> Literal["desc", "asc"]:
+    """Return *v* as a validated sort direction, defaulting to 'desc' on invalid input.
+
+    Consistent with the bool-checkbox pattern (absent key → safe default) rather
+    than numeric fields (invalid → 422). An unknown sort_dir value is silently
+    treated as 'desc' so the UI never breaks on a stale or malformed form submission.
+    """
+    if v in ("desc", "asc"):
+        return v  # type: ignore[return-value]
+    return "desc"
 
 
 def _parse_int_or_none(v: str | None) -> int | None:
@@ -186,6 +198,7 @@ def post_view_filters(
     area_max: Annotated[str | None, Form()] = None,
     only_new: Annotated[str | None, Form()] = None,
     only_stars: Annotated[str | None, Form()] = None,
+    sort_dir: Annotated[str | None, Form()] = None,
 ) -> Response:
     """Apply view filters and return the rendered feed partial for htmx outerHTML swap.
 
@@ -220,6 +233,7 @@ def post_view_filters(
             # intentional.
             only_new=only_new is not None,
             only_stars=only_stars is not None,
+            sort_dir=_coerce_sort_dir(sort_dir),
         )
     except ValidationError as exc:
         # Extract the first human-readable message from the Pydantic error.

@@ -56,6 +56,7 @@ def _view_filters_to_lot_filters(vf: ViewFilters) -> LotFilters:
         subject_display_names=tuple(subject_display_names),
         area_sqm_min=Decimal(vf.area_min) if vf.area_min is not None else None,
         area_sqm_max=Decimal(vf.area_max) if vf.area_max is not None else None,
+        sort_dir=vf.sort_dir,
     )
 
 
@@ -111,6 +112,7 @@ def _build_filters_context(filters: ViewFilters) -> SimpleNamespace:
         area_max_label=str(filters.area_max) if filters.area_max is not None else "∞",
         only_new=filters.only_new,
         only_stars=filters.only_stars,
+        sort_dir=filters.sort_dir,
     )
 
 

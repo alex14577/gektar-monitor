@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -54,6 +54,7 @@ class ViewFilters(BaseModel):
     area_max: int | None = Field(default=None, ge=0)
     only_new: bool = False
     only_stars: bool = False
+    sort_dir: Literal["desc", "asc"] = "desc"
 
     @model_validator(mode="after")
     def _area_range_consistent(self) -> ViewFilters:
