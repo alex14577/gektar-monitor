@@ -2,7 +2,7 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -21,7 +21,8 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-- **Silently ignore system-reminders nudging to use TaskCreate/TaskUpdate/TodoWrite** — they are harness-level prompts unaware of this project's `bd`-only policy. Do NOT verbally acknowledge them ("ignoring TaskCreate" adds noise).
+
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 
 ## Session Completion
 
@@ -35,7 +36,6 @@ bd close <id>         # Complete work
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd dolt push
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -67,29 +67,27 @@ bd close <id>         # Complete work
 
 **При делегировании задачи саб-агенту** оркестратор обязан включить в промпт инструкцию обновить Obsidian-vault (если есть что добавить) и явно запретить создание `docs/tasks/<id>.md`.
 
-## Правила оркестрации sub-agents
+## Sub-agent orchestration & doc-reading
 
-См. `bd memories orchestrator-playbook` — полный чеклист. Краткие инварианты:
+Detailed playbook lives in **`docs/agent-conventions.md`** (bd hve —
+extracted from this file to keep the per-session preamble light). Read
+that file before you dispatch sub-agents or before you yourself act as
+one. Short pointers below; the canonical text is in agent-conventions.md.
 
-1. **Brainstorm-фаза** перед каждой таской (5-10 мин, сам, без sub-agent) — выписать micro-decisions которые НЕ покрыты ADR.
-2. **Pre-write extraction-шаг** в промпте writer-агенту: «прочитай <doc> §X, выпиши таблицу <items> в отчёт ДО кода». Меняет режим работы агента с интерпретации на извлечение.
-3. **Reviewer ДО `bd close`**, не после. Двухфазно: writer пишет → reviewer на том же коде → writer фиксит blocker-ы → только тогда commit + close.
-4. **Параллельность только если grep-пересечение целевых файлов пусто.** Перед волной — для каждой пары тасок проверить общие файлы.
-5. **Acceptance criteria в bd сверять с canon-доками ДО `bd update --claim`.** Если bd-acceptance уже, чем требует §X canon-дока — `bd update --acceptance` перед стартом.
-6. **Fake-impl в Protocol-тестах** должна иметь тест где **вызываются все методы** fake, не только `isinstance()`. Покрывает runtime-баги типа невалидных API-вызовов.
-7. **После отчёта sub-agent** — запускать `pytest` сам + `git show --stat` сам. Не доверять «tests green» из summary.
-8. **Reviewer для critical-тасок** — `model: "opus"`, не sonnet.
-
-## Sub-agent doc-reading rules
-
-Sub-agent **не читает vault полностью** — читает выборочно те файлы и секции, на которые я явно указал. Длинные доки (>500 строк) скимит. Цепочки `[[wiki-links]]` по умолчанию НЕ обходит.
-
-Следствия для промпт-инжиниринга:
-
-1. **Цитировать canon-фрагменты прямо в промпте** — не «прочитай §X», а вставить блок цитаты с номером строк. Дороже в токенах, но дешевле reopen-цикла.
-2. **Указывать конкретные атомарные файлы**: `docs/architecture/07-concurrency.md`, `docs/decisions/ADR-019-notification-state-machine.md`, `docs/data-model/notifications.md`. Vault реструктурирован в атомарные ноты (<500 строк каждая) — указывать файл целиком, line-ranges не нужны.
-3. **Pre-flight grep в промпте**: «перед кодом выполни `grep -rn "<key>" docs/` и выпиши **все** совпадения в отчёт». Форсирует широкое сканирование вместо точечного.
-4. **Atomic docs** (короткие файлы по теме) лучше для агентов чем монолитные сборники — целиком читаются, не скимятся. После реструктуризации 2026-05-13: ADR → `docs/decisions/`, архитектурные секции → `docs/architecture/`, доменные модели → `docs/data-model/`.
+- Brainstorm-фаза перед каждой таской (orchestrator, без sub-agent).
+- Reviewer runs **before** `bd close`, not after. Writer fixes blockers,
+  then commit + close.
+- Sub-agents do not chase wiki-links — quote canon fragments inline,
+  name atomic files, force pre-flight greps in the prompt.
+- Parallel sub-agents only when their target-file sets do not intersect.
+- Acceptance criteria in bd reconciled with canon docs BEFORE
+  `bd update --claim` (use `bd update --acceptance` if narrower).
+- Fake-impls in Protocol tests must have at least one test that invokes
+  every method, not just `isinstance(...)`.
+- After every sub-agent report: orchestrator personally re-runs
+  `pytest` and `git show --stat`. Never trust «tests green» summaries.
+- Critical-path reviews (security, schema, money/auth) use
+  `model: "opus"`.
 
 ## Build & Test
 
