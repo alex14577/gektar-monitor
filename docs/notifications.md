@@ -2,6 +2,20 @@
 
 > Решения зафиксированы в [[decisions-log]]. Эта заметка — текущая архитектура.
 
+## Браузерные уведомления — активация
+
+**Требуется user gesture.** Browsers enforce Permissions Policy: `Notification.requestPermission()` may only be called from a user-initiated event. Auto-requesting on page load is silently denied.
+
+**Реализация (app.js):** одноразовый `click`-listener на `document.body` вешается при загрузке страницы только если `Notification.permission === 'default'`. На первый клик вызывает `requestPermission()`. Если ответ `'granted'` — показывает toast «Уведомления включены». При следующих загрузках страницы permission уже `'granted'`/`'denied'` — listener не создаётся.
+
+**Wiring SSE → уведомление:** htmx-sse extension (ADR-029) публикует `htmx:sseMessage` на `document.body` после каждого sse-swap. Обработчик `lot.new` читает `feed.firstElementChild` (только что вставленный `<article>`) и берёт `data-title` / `data-area` для тела уведомления. Существующая htmx-вставка в `#feed` при этом не затрагивается.
+
+**Контракт шаблона:** `_lot_poster.html.jinja` обязан присутствовать на корневом `<article>`:
+- `data-title="<region>[, <district>]"`
+- `data-area="<area_ha>"`
+
+Изменения в этих атрибутах требуют синхронного обновления `app.js`. См. [[decisions/ADR-049-browser-notification-activation|ADR-049]].
+
 ## Что в MVP
 
 | Канал | Статус | Параметры |

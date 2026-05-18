@@ -9,6 +9,8 @@
          data-temp="{{ lot.temp }}"
          data-seen="{{ 'true' if lot.is_seen else 'false' }}"
          data-status="{{ lot.status | default('active') }}"
+         data-title="{{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %}"
+         data-area="{{ lot.area_ha }}"
          {% if lot.event == 'gone' %}data-event="gone"{% endif %}
          tabindex="0"
          aria-labelledby="lot-{{ lot.id }}-title">

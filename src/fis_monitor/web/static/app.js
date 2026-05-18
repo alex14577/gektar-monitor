@@ -284,26 +284,101 @@
     // (new Audio(url)).play().catch(()=>{});
     console.debug('[notify] tier', tier);
   }
+  // _deniedToastShown prevents re-showing the denied-notification toast on every lot event.
+  let _deniedToastShown = false;
   function maybeBrowserNotify(title, body) {
     if (!('Notification' in window)) return;
+    if (Notification.permission === 'denied') {
+      // TODO(bd:DND-INTEGRATION): respect server DND state when implemented
+      if (!_deniedToastShown && !localStorage.getItem('fis_notif_denied_toast')) {
+        toast('Уведомления заблокированы — разрешите в настройках браузера', { timeout: 4000 });
+        localStorage.setItem('fis_notif_denied_toast', '1');
+        _deniedToastShown = true;
+      }
+      return;
+    }
     if (Notification.permission !== 'granted') return;
-    try { new Notification(title, { body, icon: '/static/icons/icon-192.png' }); }
+    try { new Notification(title, { body, icon: '/static/icons/icon-192.png', tag: 'fis-monitor-lot' }); }
     catch {}
   }
 
+  // onLotNew accepts an HTMLElement (the <article> node inserted by htmx sse-swap,
+  // carrying data-title and data-area attributes per ADR-049 stable contract),
+  // or null/undefined for a sound-only fallback when the node is unavailable.
+  // Plain-object signature is NOT supported — use data-* attributes.
   function onLotNew(lot) {
+    const tier   = 1;
+    const region = lot ? (lot.dataset?.title || '') : '';
+    const area   = lot ? (lot.dataset?.area  || '') : '';
     // 1. play sound by tier
-    playNotificationSound(lot.tier || 1);
+    playNotificationSound(tier);
     // 2. browser notification
-    maybeBrowserNotify('Новый лот', `${lot.region}, ${lot.area}`);
+    const body = [region, area ? `${area} га` : ''].filter(Boolean).join(', ');
+    maybeBrowserNotify('Новый лот', body);
     // 3. aria-live polite
-    announce(`Новый лот: ${lot.region}, ${lot.area} гектара.`);
+    announce(`Новый лот: ${region}${area ? ', ' + area + ' гектара' : ''}.`);
     // 4. DOM prepend (HTMX will normally do this server-side via sse-swap)
     // const html = renderLotCard(lot);
     // feed.insertAdjacentHTML('afterbegin', html);
     // 5. start escalation timer
     escalationStart();
   }
+  // ---------- SSE wiring via htmx:sseMessage ----------
+  // htmx-sse extension fires a synthetic "htmx:sseMessage" on document.body
+  // for every incoming SSE event AFTER performing its own sse-swap.
+  // We intercept "lot.new" to drive sound + browser notification + aria-live.
+  // The htmx DOM insertion has already happened at this point, so we look up
+  // the freshly prepended <article> in #feed to read its data-* attributes.
+  //
+  // Contract — e.detail.type invariant (vendored htmx-sse extension, line 154-155):
+  //   swap(child, event.data); api.triggerEvent(elt, "htmx:sseMessage", event);
+  //   `event` is the native MessageEvent; its `.type` is the SSE event name
+  //   (e.g. "lot.new"). Do NOT rely on e.detail.data for structured data —
+  //   parse data-* attributes from the already-swapped DOM element instead.
+  document.body.addEventListener('htmx:sseMessage', (e) => {
+    const type = e.detail && e.detail.type;
+    if (type === 'lot.new') {
+      // Locate the article that htmx just inserted (it is the first child of
+      // #feed because sse-swap prepends to the feed container).
+      const feed = document.getElementById('feed');
+      const node = feed ? feed.firstElementChild : null;
+      if (node && node.classList.contains('lot')) {
+        onLotNew(node);
+      } else {
+        // Fallback: fire with null so sound still plays; node may have been
+        // swapped before this listener ran or #feed is absent.
+        if (!feed) console.warn('[sseMessage] #feed not found — DOM structure may have changed');
+        onLotNew(null);
+      }
+    }
+  });
+
+  // ---------- Notification permission — one-shot on first user gesture ----------
+  // Browsers require a user gesture before Notification.requestPermission()
+  // can be called (Permissions Policy). We attach a listener on the first
+  // qualifying click (not DND-preset buttons — those are unrelated gestures).
+  // We show a brief preview toast first so the user knows why the system
+  // dialog is about to appear. On 'granted' a confirmation toast follows.
+  // On 'denied' the denied-path in maybeBrowserNotify handles UX.
+  // We use manual removeEventListener (not { once: true }) so we can skip
+  // ineligible clicks while keeping the listener alive for the next one.
+  if ('Notification' in window && Notification.permission === 'default') {
+    document.body.addEventListener('click', function _reqPermission(e) {
+      // Skip DND-preset buttons — they are not a meaningful "I want notifications" gesture.
+      if (e.target.closest('[data-action="dnd-preset"]')) return;
+      document.body.removeEventListener('click', _reqPermission);
+      toast('Сейчас попросим разрешение на уведомления о новых лотах', { timeout: 1800 });
+      Notification.requestPermission().then((result) => {
+        if (result === 'granted') {
+          toast('Уведомления включены');
+        } else if (result === 'denied') {
+          // Handled on next lot event by maybeBrowserNotify denied-path.
+          // Nothing more to do here — browser stores the decision persistently.
+        }
+      }).catch(() => {});
+    });
+  }
+
   function onLotStatusChange(diff) {
     playNotificationSound(3);
     announce(`Лот ушёл: ${diff.region}.`, false);
