@@ -952,6 +952,43 @@ class SseCycleDone(BaseModel):
     duration_ms: StrictInt
 
 
+class SseStatus(BaseModel):
+    """Normal event: header-status widget refresh (bd 47uh).
+
+    Carries the user-facing fields of the ``#header-status`` widget so the
+    UI can replace the rendered partial without page reload:
+
+    - ``state``: traffic-light for the monitor — active / warning / error /
+      paused. Drives the dot colour and the screen-reader label.
+    - ``interval_minutes``: configured polling interval; the client-side
+      ``data-countdown`` JS uses it to tick down between SSE updates.
+    - ``next_cycle_mmss``: best-effort "MM:SS until next poll" rendered on
+      the server. Empty when not yet known (first render).
+    - ``last_new_human``: relative-time string for the most-recent lot
+      (``"5 мин назад"``); "—" when the database is empty.
+    - ``expires_at_hhmm``: session-expiry clock for the warning state.
+
+    Published from ``MonitorCycleService._publish_cycle_done`` alongside
+    ``SseCycleDone`` so a single cycle yields both terminal signals on
+    the SSE stream. Rendered by ``web/sse_encoder._encode_status`` into
+    the ``partials/_header_status.html.jinja`` fragment.
+
+    No PII: counters and small enum/text fields only.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["normal"]] = "normal"
+
+    event: Literal["status"] = "status"
+    timestamp: datetime
+    state: Literal["active", "warning", "error", "paused"]
+    interval_minutes: StrictInt
+    next_cycle_mmss: str = ""
+    last_new_human: str = "—"
+    expires_at_hhmm: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Conversion helpers — public domain functions
 # ---------------------------------------------------------------------------
@@ -1072,4 +1109,5 @@ type SseEvent = (
     | SseLotNew
     | SseLotStatus
     | SseCycleDone
+    | SseStatus
 )

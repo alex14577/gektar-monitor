@@ -23,6 +23,7 @@ from fis_monitor.domain.models import (
     ParsedListPage,
     ParsedListRow,
     Settings,
+    SseCycleDone,
     SseCycleError,
     SseLotNew,
     TrackedField,
@@ -192,6 +193,13 @@ class FakeLotRepository:
 
     def needing_enrichment(self, limit: int) -> list[int]:
         return []
+
+    def count_active(self, region_id: int | None = None) -> int:
+        return 0
+
+    def latest_new_first_seen(self) -> datetime | None:
+        """bd 47uh — header-status status publish probes this; None = empty."""
+        return None
 
 
 class FakeCyclesRepository:
@@ -381,6 +389,21 @@ class TestRunCycleHappyPath:
         assert result.status == "ok"
         assert result.new_lots == 3
         assert result.lots_fetched == 3
+
+        # bd 47uh: SseStatus must be published after SseCycleDone so the
+        # header-status widget refreshes alongside the terminal cycle signal.
+        from fis_monitor.domain.models import SseStatus
+
+        events = list(bus.published)
+        cycle_done_indices = [
+            i for i, e in enumerate(events) if isinstance(e, SseCycleDone)
+        ]
+        status_indices = [i for i, e in enumerate(events) if isinstance(e, SseStatus)]
+        assert cycle_done_indices, "SseCycleDone must be published"
+        assert status_indices, "SseStatus must be published"
+        assert status_indices[0] > cycle_done_indices[0], (
+            "SseStatus must follow SseCycleDone in publish order"
+        )
 
 
 class TestRunCycleExistingLot:

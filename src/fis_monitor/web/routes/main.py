@@ -57,6 +57,7 @@ from fis_monitor.web.deps import (
     get_view_filters_service,
 )
 from fis_monitor.web.feed_context import build_feed_context
+from fis_monitor.web.monitor_vm import build_monitor_vm
 
 router = APIRouter(prefix="", tags=["main"])
 
@@ -83,19 +84,6 @@ def _build_session_context(status: SessionStatus) -> SimpleNamespace:
     )
 
 
-def _build_monitor_context(settings: Settings) -> SimpleNamespace:
-    """Build MVP monitor context stub.
-
-    interval_minutes is the only field sourced from real Settings.
-    next_cycle_mmss, last_new_human, expires_at_hhmm — real data in future bd.
-    """
-    return SimpleNamespace(
-        state="active",
-        interval_minutes=settings.interval_minutes,
-        next_cycle_mmss="—",
-        last_new_human="—",
-        expires_at_hhmm="",
-    )
 
 
 def _build_dnd_context(dnd_svc: DndService, now: datetime) -> SimpleNamespace:
@@ -240,8 +228,13 @@ def feed_page(
     ctx = {
         "request": request,
         "settings": settings,
-        "session": _build_session_context(raw_status),
-        "monitor": _build_monitor_context(settings),
+        "session": (session_ctx := _build_session_context(raw_status)),
+        "monitor": build_monitor_vm(
+            settings=settings,
+            session=session_ctx,
+            lot_repo=lot_repo,
+            now=now,
+        ),
         # MVP-stub: lot-feed query — separate bd
         "last_cycle": SimpleNamespace(
             error=False,

@@ -23,9 +23,16 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from fis_monitor.domain.interfaces import NotificationsRepository
+from fis_monitor.domain.interfaces import Clock, LotRepository, NotificationsRepository
 from fis_monitor.domain.models import NotificationRecord, Settings
-from fis_monitor.web.deps import get_config_source, get_notifications_repo, get_templates
+from fis_monitor.web.deps import (
+    get_clock,
+    get_config_source,
+    get_lot_repo,
+    get_notifications_repo,
+    get_templates,
+)
+from fis_monitor.web.monitor_vm import build_monitor_vm
 
 # ---------------------------------------------------------------------------
 # Router
@@ -86,6 +93,8 @@ def notifications_page(
     repo: NotificationsRepository = Depends(get_notifications_repo),
     config_source: object = Depends(get_config_source),
     templates: Jinja2Templates = Depends(get_templates),
+    lot_repo: LotRepository = Depends(get_lot_repo),
+    clock: Clock = Depends(get_clock),
 ) -> HTMLResponse:
     """Render the notifications history page."""
     settings: Settings = config_source.current()  # type: ignore[attr-defined]
@@ -110,13 +119,14 @@ def notifications_page(
             # Stubs required by base.html.jinja header/partial rendering.
             "settings": settings,
             "dnd": SimpleNamespace(active=False, until_hhmm=""),
-            "session": SimpleNamespace(expired=False),
-            "monitor": SimpleNamespace(
-                state="active",
-                expires_at_hhmm="",
-                interval_minutes=settings.interval_minutes,
-                next_cycle_mmss="—",
-                last_new_human="—",
+            "session": (_session_ctx := SimpleNamespace(
+                expired=False, expires_soon=False, expires_at_hhmm="",
+            )),
+            "monitor": build_monitor_vm(
+                settings=settings,
+                session=_session_ctx,
+                lot_repo=lot_repo,
+                now=clock.now(),
             ),
         },
     )

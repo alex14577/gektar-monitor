@@ -63,6 +63,7 @@ from fis_monitor.domain.models import (
     SseCycleDone,
     SseCycleError,
     SseSessionExpired,
+    SseStatus,
 )
 from fis_monitor.domain.models import (
     lot_to_public_dto as _lot_to_public_dto,
@@ -73,6 +74,7 @@ from fis_monitor.domain.models import (
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
+from fis_monitor.services.humanize import humanize_relative_age as _humanize_relative_age
 
 if TYPE_CHECKING:
     from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
@@ -679,6 +681,11 @@ class MonitorCycleService:
                 duration_ms=duration_ms,
             )
         )
+        # bd 47uh: header-status refresh — keeps the "Последний новый" chip
+        # and the countdown live without a page reload. Best-effort:
+        # last_new_human is rendered server-side; the encoder maps
+        # SseStatus → partials/_header_status.html.jinja for the UI.
+        self._publish_status(result)
         logger.info(
             "monitor_cycle.cycle.done.published",
             extra={
@@ -690,6 +697,45 @@ class MonitorCycleService:
                 "duration_ms": duration_ms,
             },
         )
+
+    def _publish_status(self, result: CycleResult) -> None:
+        """Publish ``SseStatus`` for the header-status widget (bd 47uh).
+
+        Reads ``MAX(first_seen)`` from the repo for the "Последний новый"
+        chip and the current ``interval_minutes`` for the countdown text.
+        State is ``"error"`` on a failed cycle, otherwise ``"active"``;
+        session-aware states (``warning``/``paused``) are driven by other
+        events (``SseSessionExpired``) — this event covers the cycle path.
+
+        Errors in repo or settings access are logged and swallowed: the
+        widget refresh is best-effort and must not break the consumer loop.
+        """
+        try:
+            now = self._clock.now()
+            settings = self._config_source.current()
+            last_new = self._lot_repo.latest_new_first_seen()
+            last_new_human = "—" if last_new is None else _humanize_relative_age(
+                now - last_new
+            )
+            interval = int(settings.interval_minutes)
+            next_cycle_mmss = f"{interval}:00" if interval > 0 else ""
+            state = "error" if result.status == "error" else "active"
+            self._event_bus.publish(
+                SseStatus(
+                    timestamp=now,
+                    state=state,
+                    interval_minutes=interval,
+                    next_cycle_mmss=next_cycle_mmss,
+                    last_new_human=last_new_human,
+                    expires_at_hhmm="",
+                )
+            )
+        except Exception:
+            logger.warning(
+                "monitor_cycle.status.publish_failed",
+                exc_info=True,
+                extra={"cycle_id": result.id},
+            )
 
     def _close_with_upstream_error(
         self,

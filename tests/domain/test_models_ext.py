@@ -485,6 +485,8 @@ def test_sse_event_union_members():
     # PEP 695 `type X = ...` produces a lazy `TypeAliasType`; unwrap via
     # `__value__` to inspect the underlying union.
     members = set(get_args(SseEvent.__value__))
+    from fis_monitor.domain.models import SseStatus  # bd 47uh
+
     assert members == {
         SseCycleError,
         SseSmtpFailed,
@@ -492,6 +494,7 @@ def test_sse_event_union_members():
         SseLotNew,
         SseLotStatus,
         SseCycleDone,
+        SseStatus,
     }
 
 
@@ -667,8 +670,12 @@ def test_priority_classvar_partition():
     """Critical: cycle/smtp/session.  Normal: lot.new / lot.status.
     Guards against accidental priority change during refactor.
     """
+    from fis_monitor.domain.models import SseStatus  # bd 47uh
+
     assert SseCycleError.priority == "critical"
     assert SseSmtpFailed.priority == "critical"
     assert SseSessionExpired.priority == "critical"
     assert SseLotNew.priority == "normal"
     assert SseLotStatus.priority == "normal"
+    assert SseCycleDone.priority == "normal"
+    assert SseStatus.priority == "normal"

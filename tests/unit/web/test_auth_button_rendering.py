@@ -112,6 +112,9 @@ def _make_app(
         def count_active(self) -> int:
             return 0
 
+        def latest_new_first_seen(self) -> datetime | None:
+            return None  # bd 47uh: empty DB → header chip stays "—"
+
     class _StubLotQuery:
         def search(self, filters: object, *, page_size: int = 50, cursor: object = None) -> object:
             from fis_monitor.services.lot_query import Page

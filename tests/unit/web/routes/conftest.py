@@ -66,6 +66,10 @@ class FakeLotRepo:
         self.count_active_calls += 1
         return self._active_count
 
+    def latest_new_first_seen(self) -> Any:
+        """bd 47uh: header-status VM probes this. None = empty DB → "—"."""
+        return None
+
     def get(self, lot_id: int) -> Any:
         raise NotImplementedError
 

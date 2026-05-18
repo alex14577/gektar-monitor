@@ -47,3 +47,12 @@ class FakeLotRepository:
     def count_active(self, region_id: int | None = None) -> int:
         self.count_active_calls.append(region_id)
         return self._count_active_value
+
+    def latest_new_first_seen(self) -> datetime | None:
+        """Return the largest ``first_seen`` across stored lots, or ``None``.
+
+        bd 47uh — mirrors the real repo's MAX(first_seen) query.
+        """
+        if not self._lots:
+            return None
+        return max(lot.first_seen for lot in self._lots.values())

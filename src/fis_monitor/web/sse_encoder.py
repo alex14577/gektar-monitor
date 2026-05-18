@@ -36,6 +36,7 @@ from fis_monitor.domain.models import (
     SseCycleDone,
     SseEvent,
     SseLotNew,
+    SseStatus,
 )
 from fis_monitor.infra.sse.sse_stream import encode_sse_event
 
@@ -334,6 +335,8 @@ def make_html_sse_encoder(env: Environment) -> Callable[[SseEvent], bytes]:
     def _encode(event: SseEvent) -> bytes:
         if isinstance(event, SseCycleDone):
             return _encode_cycle_done(env, event)
+        if isinstance(event, SseStatus):
+            return _encode_status(env, event)
 
         if not isinstance(event, SseLotNew):
             return encode_sse_event(event)
@@ -361,6 +364,20 @@ def make_html_sse_encoder(env: Environment) -> Callable[[SseEvent], bytes]:
 
 
 _CYCLE_DONE_TEMPLATE = "partials/_cycle_done.html.jinja"
+_HEADER_STATUS_TEMPLATE = "partials/_header_status.html.jinja"
+
+
+def _encode_status(env: Environment, event: SseStatus) -> bytes:
+    """Render ``SseStatus`` → HTML for the ``#header-status`` widget (bd 47uh).
+
+    The partial expects a ``monitor`` namespace with the same field shape
+    as the initial-render VM produced by ``web/monitor_vm.build_monitor_vm``;
+    SseStatus carries that shape directly so we pass the event through.
+    """
+    template = env.get_template(_HEADER_STATUS_TEMPLATE)
+    html: str = template.render(monitor=event)
+    data_lines = "\n".join(f"data: {line}" for line in html.split("\n"))
+    return f"event: {event.event}\n{data_lines}\n\n".encode()
 
 
 def _encode_cycle_done(env: Environment, event: SseCycleDone) -> bytes:

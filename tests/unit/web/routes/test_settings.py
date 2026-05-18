@@ -119,6 +119,23 @@ def _make_app(
     # get_templates is now a dependency of GET /settings (content-negotiation).
     # Override with a sentinel that should never be called for JSON requests.
     app.dependency_overrides[get_templates] = lambda: None
+    # bd 47uh: GET /settings now also depends on lot_repo + clock for the
+    # header-status VM. Provide minimal fakes (HTML branch ignores when
+    # the route hits the JSON path).
+    from datetime import UTC, datetime
+
+    from fis_monitor.web.deps import get_clock, get_lot_repo
+    from tests.fakes.lot_repository import FakeLotRepository
+
+    class _FixedClock:
+        def now(self):
+            return datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC)
+
+        def monotonic(self):
+            return 0.0
+
+    app.dependency_overrides[get_lot_repo] = lambda: FakeLotRepository()
+    app.dependency_overrides[get_clock] = lambda: _FixedClock()
     return app, fc, fs, ft
 
 

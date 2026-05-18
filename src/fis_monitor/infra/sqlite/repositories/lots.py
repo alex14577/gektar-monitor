@@ -550,6 +550,23 @@ class SqliteLotRepository:
     # count_active
     # ------------------------------------------------------------------
 
+    def latest_new_first_seen(self) -> datetime | None:
+        """Return MAX(first_seen) across all lots, UTC-aware; None if empty.
+
+        bd 47uh — backs the "Последний новый" chip in the header status widget.
+        Single read-only SELECT, no transaction needed.
+        """
+        conn = self._conn_provider.get()
+        cur = conn.execute("SELECT MAX(first_seen) FROM lots")
+        row = cur.fetchone()
+        cur.close()
+        if row is None or row[0] is None:
+            return None
+        parsed = datetime.fromisoformat(str(row[0]))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
+
     def count_active(self, region_id: int | None = None) -> int:
         """Return the number of active lots.
 

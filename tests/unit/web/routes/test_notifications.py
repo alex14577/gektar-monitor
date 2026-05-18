@@ -137,6 +137,21 @@ def _make_html_app(
     app.dependency_overrides[get_notifications_repo] = lambda: fake
     app.dependency_overrides[get_config_source] = lambda: _FakeConfigSource()
     app.dependency_overrides[get_templates] = lambda: templates
+    # bd 47uh
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    from fis_monitor.web.deps import get_clock, get_lot_repo
+    from tests.fakes.lot_repository import FakeLotRepository
+
+    class _C:
+        def now(self):
+            return _dt(2026, 5, 18, tzinfo=UTC)
+        def monotonic(self):
+            return 0.0
+
+    app.dependency_overrides[get_lot_repo] = lambda: FakeLotRepository()
+    app.dependency_overrides[get_clock] = lambda: _C()
     return app, fake
 
 

@@ -340,6 +340,16 @@ class LotRepository(Protocol):
         """
         ...
 
+    def latest_new_first_seen(self) -> datetime | None:
+        """Return the most-recent ``first_seen`` across all lots, or ``None``
+        when the table is empty (bd 47uh).
+
+        Used by the header-status widget to render the
+        ``"Последний новый: 5 мин назад"`` chip. Single ``SELECT MAX`` —
+        read-only, no transaction. ``datetime`` is returned UTC-aware.
+        """
+        ...
+
 
 class RegionSubscriptionRepository(Protocol):
     """Stores the timestamp when a region was first subscribed (ADR-039).

@@ -74,6 +74,21 @@ def _make_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_settings_service] = lambda: FakeSettingsService()
     app.dependency_overrides[get_smtp_test] = lambda: FakeSmtpTestService()
     app.dependency_overrides[get_templates] = lambda: templates
+    # bd 47uh: header-status VM deps
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    from fis_monitor.web.deps import get_clock, get_lot_repo
+    from tests.fakes.lot_repository import FakeLotRepository
+
+    class _C:
+        def now(self):
+            return _dt(2026, 5, 18, tzinfo=UTC)
+        def monotonic(self):
+            return 0.0
+
+    app.dependency_overrides[get_lot_repo] = lambda: FakeLotRepository()
+    app.dependency_overrides[get_clock] = lambda: _C()
     return app
 
 
