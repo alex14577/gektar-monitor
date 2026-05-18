@@ -54,11 +54,13 @@ Addendum ADR-031 вводил UX-инвариант «≥1 subject required» д
 Notify-scope разделяет каналы: email применяет `rf_subjects` через decorator
 `RfSubjectFilteredEmailNotifier`; browser-канал получает ВСЕ лоты, чтобы открытая
 вкладка получала live-обновления независимо от текущего notify-фильтра. View-scope
-(cookie `view_filters`) применяется client-side для отображения. Это закрывает баг,
-при котором лот из непод­пи­сан­но­го региона не появлялся live в UI без refresh, хотя
-рендерился на GET /. До правки gate стоял в `monitor_cycle._run_cycle_inner` перед
-`NotifierDispatcher.dispatch` — он фильтровал оба канала. После правки gate перенесён
-в email-decorator, dispatcher вызывается безусловно.
+(cookie `view_filters`) применяется **server-side per-connection** через predicate
+`make_sse_view_filter(vf)` инжектированный в `SseStreamer.stream(event_filter=...)`.
+Это закрывает баг, при котором лот из непод­пи­сан­но­го региона не появлялся live
+в UI без refresh, хотя рендерился на GET /. До правки gate стоял в
+`monitor_cycle._run_cycle_inner` перед `NotifierDispatcher.dispatch` — он фильтровал
+оба канала. После правки gate перенесён в email-decorator, dispatcher вызывается
+безусловно. Детали реализации SSE view-filter propagation: [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]].
 
 ---
 

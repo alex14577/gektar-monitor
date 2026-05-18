@@ -159,15 +159,20 @@ _FAKE_KNOWN_SSE_EVENTS: frozenset[str] = frozenset(
 class _DriftTrackingStreamer:
     """Fake SseStreamer that records sse.schema_drift log records.
 
-    Drift = an event whose discriminator is not in ``_KNOWN_SSE_EVENTS``.
+    Drift = an event whose discriminator is not in ``_FAKE_KNOWN_SSE_EVENTS``.
     Known events are yielded as minimal SSE frames.
+
+    ``stream()`` accepts the ``event_filter`` kwarg introduced by ADR-052
+    (SseStreamer.stream signature update) so that the existing endpoint wiring
+    works without TypeError.  The fake ignores the filter — filtering behaviour
+    is tested in ``test_events_filter.py`` via a real ``SseStreamer``.
     """
 
     def __init__(self, events: list[SseEvent]) -> None:
         self._events = events
         self.drift_logged: list[str] = []
 
-    async def stream(self) -> AsyncIterator[bytes]:
+    async def stream(self, *, event_filter: Any = None) -> AsyncIterator[bytes]:
         for event in self._events:
             event_type = getattr(event, "event", type(event).__name__)
             if event_type not in _FAKE_KNOWN_SSE_EVENTS:
@@ -338,7 +343,7 @@ class TestDIOverrides:
         called: list[bool] = []
 
         class _TrackingStreamer(_DriftTrackingStreamer):
-            async def stream(self) -> AsyncIterator[bytes]:
+            async def stream(self, *, event_filter: Any = None) -> AsyncIterator[bytes]:
                 called.append(True)
                 return
                 yield  # make it an async generator

@@ -385,26 +385,26 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .lot[data-event="gone"] .lot__age { color: var(--muted); }
 
 /* ============== POSTER variant (hot / warm) ============== */
-.lot--poster { padding: 18px 20px 18px 28px; cursor: pointer; }
+.lot--poster { padding: 14px 20px 14px 28px; cursor: pointer; }
 .lot--poster :is(a, button, input, textarea, select, label, [data-copy]) { cursor: auto; }
-.lot--poster .lot__row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
+.lot--poster .lot__row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
 .lot--poster .lot__chips { display: flex; gap: 6px; flex-wrap: wrap; }
 
-.lot--poster .lot__title { margin: 0 0 4px; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
-.lot--poster .lot__meta  { color: var(--ink-2); font-size: 0.9375rem; margin: 0 0 2px; }
+.lot--poster .lot__title { margin: 0 0 2px; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.lot--poster .lot__meta  { color: var(--ink-2); font-size: 0.9375rem; margin: 0 0 1px; }
 .lot--poster .lot__vri   { color: var(--muted); font-size: 0.8125rem; margin: 0; }
 .lot--poster .lot__cad   {
   display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
   font-family: var(--font-mono); font-size: 0.875rem;
   background: var(--code-bg); padding: 4px 8px; border-radius: var(--r-sm);
   color: var(--ink);
 }
-.lot--poster .lot__ogv     { color: var(--muted); font-size: 0.8125rem; margin-top: 6px; }
+.lot--poster .lot__ogv     { color: var(--muted); font-size: 0.8125rem; margin-top: 4px; }
 .lot--poster .lot__appeared { color: var(--muted); font-size: 0.8125rem; }
 
 .lot--poster .lot__cta {
-  display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center;
+  display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center;
 }
 
 /* star button */

@@ -2,6 +2,19 @@
 
 См. [[web/api-reference]] → SSE Events и `web/sse.py`. Все payload-ы для `text/event-stream` — это HTML-фрагменты; ниже — структура данных, из которой Jinja их рендерит.
 
+## Per-connection view-filter (ADR-052)
+
+`lot.new` events are filtered **per-connection** based on the subscriber's
+`view_filters` cookie, captured once at SSE connection time. The predicate
+`make_sse_view_filter(vf: ViewFilters)` is injected into `SseStreamer.stream(event_filter=...)`
+by the `GET /events` route handler. Events that do not satisfy the predicate are
+silently suppressed — never encoded or yielded. Non-`lot.new` events always pass
+through. Cookie changes while connected require an F5 (new EventSource connection).
+
+See [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] for full semantics.
+
+---
+
 ## SSE event payloads
 
 ```python

@@ -133,8 +133,20 @@ class SseStreamer:
         """
         self._event_encoder = encoder
 
-    async def stream(self) -> AsyncIterator[bytes]:
+    async def stream(
+        self,
+        *,
+        event_filter: Callable[[SseEvent], bool] | None = None,
+    ) -> AsyncIterator[bytes]:
         """Async generator producing SSE-encoded bytes.
+
+        Args:
+            event_filter: Optional per-connection predicate.  When provided,
+                each event is passed through ``event_filter(event)`` before
+                encoding; events for which the predicate returns ``False`` are
+                silently suppressed (not yielded).  ``None`` means pass-through
+                (all events forwarded).  See ADR-052 and
+                ``services/sse_view_filter.make_sse_view_filter``.
 
         Usage in FastAPI::
 
@@ -182,6 +194,20 @@ class SseStreamer:
                     yield _encode_ping()
                 else:
                     for event in events:
+                        # Apply per-connection view-filter predicate (ADR-052).
+                        # Per ADR-003 (error-strategy): predicate failure must not
+                        # crash the stream; fail-open (pass event through) + warn.
+                        if event_filter is not None:
+                            try:
+                                if not event_filter(event):
+                                    continue  # suppressed by predicate
+                            except Exception:
+                                logger.warning(
+                                    "sse.event_filter.error",
+                                    exc_info=True,
+                                    extra={"client_id": client_id},
+                                )
+                                # fail-open: yield event unfiltered
                         encoded = self._event_encoder(event)
                         if not encoded:
                             continue  # dropped by schema-drift guard

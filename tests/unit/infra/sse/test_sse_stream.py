@@ -233,6 +233,46 @@ async def test_stream_yields_event():
 
 
 # ===========================================================================
+# 3b. event_filter exception → fail-open (ADR-003, ADR-052)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_stream_event_filter_exception_fails_open(caplog):
+    """Predicate raising must NOT crash the stream; event is yielded unfiltered + WARNING."""
+    bus = ThreadEventBus()
+    event = make_lot_new(lot_id=11)
+    streamer, executor = make_streamer(bus, ping_interval=0.1)
+
+    def broken_filter(_: object) -> bool:
+        raise RuntimeError("boom")
+
+    received: bytes | None = None
+
+    async def publish_after():
+        await asyncio.sleep(0.03)
+        bus.publish(event)
+
+    async def consume():
+        nonlocal received
+        try:
+            async with asyncio.timeout(1.0):
+                async for chunk in streamer.stream(event_filter=broken_filter):
+                    if b"lot.new" in chunk:
+                        received = chunk
+                        break
+        except TimeoutError:
+            pass
+
+    with caplog.at_level("WARNING"):
+        await asyncio.gather(consume(), publish_after())
+    executor.shutdown(wait=False)
+
+    assert received is not None, "stream must fail-open and yield event when predicate raises"
+    assert any("sse.event_filter.error" in rec.message for rec in caplog.records)
+
+
+# ===========================================================================
 # 4. Force-unsubscribe closes stream
 # ===========================================================================
 
