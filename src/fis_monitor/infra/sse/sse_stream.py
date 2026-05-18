@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 import logging
+import threading
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, get_args, get_type_hints
@@ -94,6 +95,9 @@ class SseStreamer:
         )
         self._client_counter = itertools.count(1)
         self._active_subscribers: int = 0
+        # Guards _active_subscribers read-modify-write. Required for no-GIL
+        # runtimes (PyPy / free-threaded CPython) where inc/dec is not atomic.
+        self._subscribers_lock = threading.Lock()
 
     def bind_executor(self, executor: ThreadPoolExecutor) -> None:
         """Bind the executor pool (called in lifespan, ADR-014 late-binding pattern).
@@ -165,10 +169,12 @@ class SseStreamer:
         sse_executor = self._sse_executor
 
         client_id = next(self._client_counter)
-        self._active_subscribers += 1
+        with self._subscribers_lock:
+            self._active_subscribers += 1
+            total_subscribers = self._active_subscribers
         logger.debug(
             "sse.subscribe",
-            extra={"client_id": client_id, "total_subscribers": self._active_subscribers},
+            extra={"client_id": client_id, "total_subscribers": total_subscribers},
         )
         subscription: EventSubscription[SseEvent] = self._event_bus.subscribe()
         try:
@@ -213,7 +219,8 @@ class SseStreamer:
                             continue  # dropped by schema-drift guard
                         yield encoded
         finally:
-            self._active_subscribers -= 1
+            with self._subscribers_lock:
+                self._active_subscribers -= 1
             logger.debug(
                 "sse.unsubscribe",
                 extra={"client_id": client_id, "reason": "disconnect"},
