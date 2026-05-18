@@ -40,7 +40,12 @@ from fis_monitor.domain.models import (
 )
 
 if TYPE_CHECKING:
-    from fis_monitor.domain.interfaces import ConfigSource, EventBus, LotRepository
+    from fis_monitor.domain.interfaces import (
+        ConfigSource,
+        EventBus,
+        LotRepository,
+        PaginatedListFetcherProto,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -114,19 +119,6 @@ class MonitorCycleHandle(Protocol):
 # ---------------------------------------------------------------------------
 
 
-class _PaginatedListFetcherProto(Protocol):
-    def iterate(
-        self,
-        region: int,
-        stop_event: threading.Event,
-        *,
-        sleep_between_pages: float,
-        per_page: int | None = None,
-        max_pages: int | None = None,
-        page_callback: object = None,
-    ) -> object: ...  # returns Iterator[ParsedListRow]
-
-
 # ---------------------------------------------------------------------------
 # BackfillService
 # ---------------------------------------------------------------------------
@@ -144,7 +136,7 @@ class BackfillService:
     def __init__(
         self,
         *,
-        fetcher: _PaginatedListFetcherProto,
+        fetcher: PaginatedListFetcherProto,
         lot_repo: LotRepository,
         config_source: ConfigSource,
         monitor_cycle: MonitorCycleHandle,
@@ -283,6 +275,9 @@ class BackfillService:
                     },
                 )
                 return False
+
+            # delta is int here: site_total is not None (guarded above)
+            assert delta is not None
 
             if delta < 0:
                 logger.info(
@@ -514,7 +509,7 @@ class BackfillService:
         cancelled = False
 
         try:
-            for row in self._fetcher.iterate(  # type: ignore[union-attr]
+            for row in self._fetcher.iterate(
                 region,
                 stop,
                 sleep_between_pages=self._sleep_between_pages,

@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator
 from typing import Protocol
 
 from fis_monitor.domain.errors import ParseBugError, UpstreamError
+from fis_monitor.domain.interfaces import HttpClient
 from fis_monitor.domain.models import ParsedListPage, ParsedListRow
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
@@ -33,10 +34,6 @@ from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 logger = logging.getLogger(__name__)
 
 _PAGE_LIMIT = 1000
-
-
-class _HttpClient(Protocol):
-    def get(self, url: str, *, params: object = None, headers: object = None, timeout: float | None = None) -> object: ...  # noqa: E501
 
 
 class _ListParser(Protocol):
@@ -60,7 +57,7 @@ class PaginatedListFetcher:
     def __init__(
         self,
         *,
-        http: _HttpClient,
+        http: HttpClient,
         list_parser: _ListParser,
         url_builder: TorgiUrlBuilder,
     ) -> None:
@@ -153,7 +150,7 @@ class PaginatedListFetcher:
                 return
 
             try:
-                parsed_page = self._list_parser.parse(response.text)  # type: ignore[union-attr]
+                parsed_page = self._list_parser.parse(response.text)
                 rows = parsed_page.rows
             except ParseBugError:
                 logger.warning(

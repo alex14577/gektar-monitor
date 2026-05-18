@@ -36,7 +36,7 @@ import queue
 import threading
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import ValidationError
 
@@ -740,7 +740,7 @@ class MonitorCycleService:
             )
             last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
             interval = int(settings.interval_minutes)
-            state = "error" if result.status == "error" else "active"
+            state: Literal["active", "error"] = "error" if result.status == "error" else "active"
             self._event_bus.publish(
                 SseStatus(
                     timestamp=now,

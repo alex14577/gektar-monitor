@@ -421,6 +421,7 @@ class SmtpEmailNotifier:
 
         ctx = ssl.create_default_context()
         ctx.check_hostname = True
+        assert smtp.sock is not None
         smtp.sock = ctx.wrap_socket(
             smtp.sock, server_hostname=endpoint.original_host
         )

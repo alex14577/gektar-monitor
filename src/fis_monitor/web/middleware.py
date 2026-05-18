@@ -141,7 +141,7 @@ class CspMiddleware:
                 headers: list[tuple[bytes, bytes]] = list(message.get("headers", []))
                 headers.append((b"content-security-policy", self._policy_bytes))
                 message = {**message, "headers": headers}
-            await send(message)
+            await send(message)  # type: ignore[arg-type]
 
         await self._app(scope, receive, send_with_csp)
 

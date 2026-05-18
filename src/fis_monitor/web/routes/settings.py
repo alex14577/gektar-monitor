@@ -25,7 +25,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, SecretStr
 
 from fis_monitor.domain.errors import SmtpHostPolicyError
 from fis_monitor.domain.interfaces import Clock, LotRepository
@@ -291,7 +291,7 @@ def post_smtp(
     try:
         creds = SmtpCredentials(
             smtp_user=body.smtp_user,
-            smtp_password=body.smtp_password,
+            smtp_password=SecretStr(body.smtp_password),
             smtp_host=body.smtp_host,
             smtp_port=body.smtp_port,
             use_default=body.use_default,

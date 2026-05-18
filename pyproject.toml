@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fis-monitor"
-version = "0.1.8"
+version = "0.1.9"
 description = "Мониторинг свободных гектаров на сайте Дальневосточного гектара"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -80,6 +80,13 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 # (е, с, В, Х, К, ...).  Globally ignore the family rather than littering the
 # codebase with per-line noqa directives.
 ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = "urllib3.*"
+ignore_missing_imports = true
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's Depends/Query/Path/Body/Header/Cookie/File/Form are idiomatic in

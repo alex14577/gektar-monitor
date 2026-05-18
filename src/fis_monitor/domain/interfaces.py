@@ -31,6 +31,7 @@ Subscription handles (follow-up z9d):
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import (
@@ -53,6 +54,7 @@ from fis_monitor.domain.models import (
     OnboardingState,
     ParsedDetail,
     ParsedListPage,
+    ParsedListRow,
     ProviderSuggestion,
     ResolvedSmtpEndpoint,
     Settings,
@@ -92,6 +94,7 @@ __all__ = [
     "MigrationRunner",
     "NotificationsRepository",
     "Notifier",
+    "PaginatedListFetcherProto",
     "RegionSubscriptionRepository",
     "SettingsRepository",
     "SmtpCredentialsRepository",
@@ -250,6 +253,10 @@ class ConfigSource(Protocol):
         SHA-256 content-hash dedup handles self-write correctly: a new hash
         triggers a reload; an identical hash is a silent no-op.
         """
+        ...
+
+    def stop(self) -> None:
+        """Stop the config watchdog observer and release resources."""
         ...
 
 
@@ -559,11 +566,11 @@ class CookieStore(Protocol):
     Implementation: ``infra/http/cookie_bridge.py::RequestsCookieStore``.
     """
 
-    def store(self, cookies: list[dict[str, object]]) -> None:
+    def store(self, cookies: Sequence[Mapping[str, object]]) -> None:
         """Load Playwright cookie dicts into the underlying cookie store.
 
         Args:
-            cookies: List of Playwright cookie dicts with keys:
+            cookies: Sequence of Playwright cookie dicts with keys:
                 ``name``, ``value``, ``domain``, ``path``, ``expires``
                 (float, -1 if session), ``httpOnly``, ``secure``, ``sameSite``.
         """
@@ -586,6 +593,27 @@ class HttpClient(Protocol):
         headers: Mapping[str, str] | None = None,
         timeout: float | None = None,
     ) -> HttpResponse: ...
+
+
+class PaginatedListFetcherProto(Protocol):
+    """Paginated iterator over a region's lot-list pages.
+
+    Structural seam so BackfillService and FullScanService can be tested with
+    fake implementations without importing the concrete class. Distinct from
+    the concrete ``services.paginated_list_fetcher.PaginatedListFetcher`` —
+    the ``Proto`` suffix prevents name-shadowing in consumers that import both.
+    """
+
+    def iterate(
+        self,
+        region: int,
+        stop_event: threading.Event,
+        *,
+        sleep_between_pages: float = ...,
+        per_page: int | None = ...,
+        max_pages: int | None = ...,
+        page_callback: Callable[[int, int], None] | None = ...,
+    ) -> Iterator[ParsedListRow]: ...
 
 
 class ListParser(Protocol):

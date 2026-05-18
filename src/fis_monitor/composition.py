@@ -29,12 +29,14 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import requests
 
 from fis_monitor.container import Container, Infra, Services
-from fis_monitor.domain.models import Settings, SseLoginSucceeded, SseStatus
+from fis_monitor.domain.models import SessionStatus, Settings, SseLoginSucceeded, SseStatus
 from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.config_source import WatchdogConfigSource
 from fis_monitor.infra.http.client import RequestsHttpClient
@@ -116,7 +118,7 @@ def make_login_success_callback(
     onboarding: object,
     backfill: object,
     supervisor_cell: list[object],
-) -> object:
+) -> Callable[[object], None]:
     """Return the ``on_login_success`` callback wired to the provided dependencies.
 
     All parameters are typed as ``object`` at the signature level so that fake
@@ -136,21 +138,27 @@ def make_login_success_callback(
         A callable ``(_outcome: object) -> None`` suitable for
         ``LoginService(on_login_success=...)``.
     """
+    from fis_monitor.domain.interfaces import Clock, ConfigSource, EventBus, LotRepository
     from fis_monitor.domain.models import OnboardingState  # local — avoid circular
 
     def _callback(_outcome: object) -> None:
         _log.debug("on_login_success.callback.fired", extra={"trigger": "headed_login_success"})
 
+        _clock = cast(Clock, clock)
+        _config = cast(ConfigSource, config_source)
+        _bus = cast(EventBus, event_bus)
+        _repo = cast(LotRepository, lot_repo)
+
         # Publish UI-recovery events FIRST, unconditionally on any successful
         # headed login (independent of onboarding/regions/supervisor guards
         # below — those gate the backfill, not the auth-chip refresh).
         try:
-            now = clock.now()  # type: ignore[union-attr]
-            settings_for_status = config_source.current()  # type: ignore[union-attr]
-            last_new = lot_repo.latest_new_first_seen()  # type: ignore[union-attr]
+            now = _clock.now()
+            settings_for_status = _config.current()
+            last_new = _repo.latest_new_first_seen()
             last_new_human = "—" if last_new is None else _humanize_relative_age(now - last_new)
             last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
-            event_bus.publish(  # type: ignore[union-attr]
+            _bus.publish(
                 SseStatus(
                     timestamp=now,
                     state="active",
@@ -160,7 +168,7 @@ def make_login_success_callback(
                     expires_at_hhmm="",
                 )
             )
-            event_bus.publish(SseLoginSucceeded(timestamp=now))  # type: ignore[union-attr]
+            _bus.publish(SseLoginSucceeded(timestamp=now))
             # Evict the login.succeeded normal-replay slot so future SSE
             # reconnects do not re-deliver the OOB-wipe fragment and overwrite
             # a fresh cycle.done result written after this login.
@@ -173,14 +181,15 @@ def make_login_success_callback(
                 exc_info=True,
             )
 
-        onboarding_state = onboarding.current()  # type: ignore[union-attr]
+        _onboarding = cast(Any, onboarding)
+        onboarding_state = _onboarding.current()
         if onboarding_state != OnboardingState.COMPLETED:
             _log.debug(
                 "on_login_success: onboarding not completed (state=%s) — skip backfill",
                 onboarding_state,
             )
             return
-        current_settings = config_source.current()  # type: ignore[union-attr]
+        current_settings = _config.current()
         if not current_settings.regions:
             _log.debug("on_login_success: regions empty — skip backfill")
             return
@@ -189,7 +198,8 @@ def make_login_success_callback(
             _log.warning("on_login_success: supervisor not yet bound — backfill NOT started")
             return
         _log.info("on_login_success: guards passed → auto-backfill scheduled")
-        sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
+        _backfill = cast(Any, backfill)
+        cast(Any, sup).start("backfill-auto", lambda stop: _backfill.start(stop))
 
     return _callback
 
@@ -241,7 +251,7 @@ class _NotImplementedAutostartManager:
 class _NotImplementedSessionProbe:
     """Stub for SessionProbe until a4t.8 lands (HttpSessionProbe)."""
 
-    def check(self) -> object:
+    def check(self) -> SessionStatus:
         raise NotImplementedError("_NotImplementedSessionProbe.check() deferred to a4t.8")
 
 
@@ -559,11 +569,13 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         """Reset idempotency flag on any successful login or refresh."""
         session_expired_email_svc.on_login_or_refresh_success()
 
+    from fis_monitor.domain.models import LoginOutcome as _LoginOutcome
+
     login = LoginService(
         login_session=login_session,
         clock=clock,
-        on_login_success=_trigger_backfill_on_login,
-        on_any_success=_reset_session_expired_flag,
+        on_login_success=cast(Callable[[_LoginOutcome], None], _trigger_backfill_on_login),
+        on_any_success=cast(Callable[[_LoginOutcome], None], _reset_session_expired_flag),
     )
     # Expose the supervisor cell so app.py lifespan can fill it after building
     # the supervisor. Stored on the login service instance for easy access.

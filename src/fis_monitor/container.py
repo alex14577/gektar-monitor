@@ -53,6 +53,7 @@ from fis_monitor.infra.sqlite.connection import (
 if TYPE_CHECKING:
     from typing import Protocol
 
+    from fis_monitor.domain.models import SessionStatus
     from fis_monitor.infra.sse.sse_stream import SseStreamer
     from fis_monitor.services.backfill import BackfillService
     from fis_monitor.services.catchup_dismiss import CatchupDismissService
@@ -76,7 +77,7 @@ if TYPE_CHECKING:
     # Protocol signature: check() -> SessionStatus
     class SessionProbe(Protocol):  # type: ignore[no-redef]
         """Quick probe to detect session expiry (infra-internal)."""
-        def check(self) -> object: ...
+        def check(self) -> SessionStatus: ...
 
 
 @dataclass(frozen=True, repr=False)

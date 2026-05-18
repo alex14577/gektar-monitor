@@ -28,6 +28,7 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    NoReturn,
 )
 
 from pydantic import (
@@ -270,7 +271,7 @@ class SmtpCredentials(BaseModel):
     def __reduce__(self) -> object:  # type: ignore[override]
         raise TypeError(self._PICKLE_MSG)
 
-    def __getstate__(self) -> object:
+    def __getstate__(self) -> NoReturn:
         raise TypeError(self._PICKLE_MSG)
 
     def __setstate__(self, state: object) -> None:
@@ -952,7 +953,7 @@ class SseCycleDone(BaseModel):
     event: Literal["cycle.done"] = "cycle.done"
     timestamp: datetime
     cycle_id: StrictInt
-    status: Literal["ok", "error"]
+    status: Literal["ok", "error", "aborted"]
     lots_fetched: StrictInt
     new_lots: StrictInt
     duration_ms: StrictInt

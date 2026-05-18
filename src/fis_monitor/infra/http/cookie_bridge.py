@@ -26,7 +26,7 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Mapping, Sequence
 
 import requests
 import requests.cookies
@@ -50,7 +50,7 @@ class RequestsCookieStore:
     def __init__(self, session: requests.Session) -> None:
         self._session = session
 
-    def store(self, cookies: list[dict[str, Any]]) -> None:
+    def store(self, cookies: Sequence[Mapping[str, object]]) -> None:
         """Load Playwright cookie dicts into the session cookie jar.
 
         Each dict is converted via ``requests.cookies.create_cookie`` and
@@ -58,7 +58,7 @@ class RequestsCookieStore:
         are overwritten.
 
         Args:
-            cookies: List of Playwright cookie dicts.  Expected keys:
+            cookies: Sequence of Playwright cookie dicts.  Expected keys:
                 ``name`` (str), ``value`` (str), ``domain`` (str),
                 ``path`` (str), ``expires`` (float, -1 for session cookies),
                 ``httpOnly`` (bool), ``secure`` (bool), ``sameSite`` (str).
@@ -81,7 +81,7 @@ class RequestsCookieStore:
             # requests.cookies.create_cookie expects int | None; None = session.
             raw_expires = raw.get("expires", -1)
             try:
-                expires_float = float(raw_expires)  # type: ignore[arg-type]
+                expires_float = float(raw_expires)  # type: ignore[arg-type]  # object narrowed at runtime
             except (TypeError, ValueError):
                 expires_float = -1.0
             expires: int | None = int(expires_float) if expires_float > 0 else None

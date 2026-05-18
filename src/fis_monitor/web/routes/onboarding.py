@@ -27,13 +27,15 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, EmailStr, TypeAdapter, ValidationError
+from pydantic import BaseModel, EmailStr, SecretStr, TypeAdapter, ValidationError
+from starlette.datastructures import UploadFile
 
 from fis_monitor.domain.errors import InvalidTransitionError, SmtpHostPolicyError
 from fis_monitor.domain.interfaces import ConfigSource
@@ -59,6 +61,16 @@ _log = logging.getLogger(__name__)
 # Module-level TypeAdapter for EmailStr validation (pydantic v2 public API,
 # replaces deprecated EmailStr._validate — see 0vn reviewer M2).
 _EMAIL_VALIDATOR: TypeAdapter[EmailStr] = TypeAdapter(EmailStr)
+
+
+def _form_str(form: Mapping[str, UploadFile | str], key: str) -> str:
+    v = form.get(key)
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    raise TypeError(f"expected str for form field {key!r}, got {type(v).__name__}")
+
 
 # ---------------------------------------------------------------------------
 # Router
@@ -534,7 +546,7 @@ def _handle_step2_next(
     try:
         creds = SmtpCredentials(
             smtp_user=smtp_login,
-            smtp_password=smtp_pass,
+            smtp_password=SecretStr(str(smtp_pass)),
             smtp_host=smtp_host,
             smtp_port=smtp_port,
             from_name=smtp_from_name,
@@ -765,11 +777,11 @@ async def post_onboarding_smtp_test(
         )
 
     form = await request.form()
-    smtp_host = (form.get("smtp_host") or "").strip()
-    smtp_login = (form.get("smtp_login") or "").strip()
-    smtp_pass = form.get("smtp_pass") or ""
+    smtp_host = _form_str(form, "smtp_host").strip()
+    smtp_login = _form_str(form, "smtp_login").strip()
+    smtp_pass = _form_str(form, "smtp_pass")
     try:
-        smtp_port = int(form.get("smtp_port") or 0)
+        smtp_port = int(_form_str(form, "smtp_port") or 0)
     except (ValueError, TypeError):
         smtp_port = 0
 
@@ -789,7 +801,7 @@ async def post_onboarding_smtp_test(
     try:
         creds = SmtpCredentials(
             smtp_user=smtp_login,
-            smtp_password=smtp_pass,
+            smtp_password=SecretStr(smtp_pass),
             smtp_host=smtp_host,
             smtp_port=smtp_port,
         )
