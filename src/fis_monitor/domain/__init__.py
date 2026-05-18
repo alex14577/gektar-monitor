@@ -52,6 +52,7 @@ from fis_monitor.domain.models import (
     SseCycleDone,
     SseCycleError,
     SseEvent,
+    SseLoginSucceeded,
     SseLotNew,
     SseLotStatus,
     SsePayloadSchema,
@@ -92,6 +93,7 @@ __all__ = [  # noqa: RUF022 — grouped by responsibility, NOT alphabetical
     "SseLotNew",
     "SseLotStatus",
     "SseCycleDone",
+    "SseLoginSucceeded",
     # Settings tree
     "Settings",
     "FiltersConfig",

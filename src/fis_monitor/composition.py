@@ -34,7 +34,7 @@ from pathlib import Path
 import requests
 
 from fis_monitor.container import Container, Infra, Services
-from fis_monitor.domain.models import Settings
+from fis_monitor.domain.models import Settings, SseLoginSucceeded, SseStatus
 from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.config_source import WatchdogConfigSource
 from fis_monitor.infra.http.client import RequestsHttpClient
@@ -76,6 +76,7 @@ from fis_monitor.services.dnd import DndService
 from fis_monitor.services.enrichment import EnrichmentService
 from fis_monitor.services.filter_matcher import RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
+from fis_monitor.services.humanize import humanize_relative_age as _humanize_relative_age
 from fis_monitor.services.login import LoginService
 from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.lot_user_state import LotUserStateService
@@ -93,6 +94,98 @@ from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 
 _log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# make_login_success_callback — testable factory (fplb)
+#
+# Extracted from build_container so the callback can be tested in isolation
+# (Layer 2 unit test, all deps faked) without instantiating the full DI graph.
+# The factory takes explicit dependency parameters instead of relying on the
+# enclosing build_container closure — SRP: the callback logic is decoupled from
+# the wiring logic. build_container creates it by passing its own local objects.
+# ---------------------------------------------------------------------------
+
+
+def make_login_success_callback(
+    *,
+    clock: object,
+    config_source: object,
+    lot_repo: object,
+    event_bus: object,
+    onboarding: object,
+    backfill: object,
+    supervisor_cell: list[object],
+) -> object:
+    """Return the ``on_login_success`` callback wired to the provided dependencies.
+
+    All parameters are typed as ``object`` at the signature level so that fake
+    implementations in tests do not need to satisfy ``@runtime_checkable``
+    Protocol checks.  The actual call sites pass real Protocol-conformant objects.
+
+    Args:
+        clock: ``Clock`` Protocol — provides ``now() -> datetime``.
+        config_source: ``ConfigSource`` Protocol — ``current() -> Settings``.
+        lot_repo: ``LotRepository`` Protocol — ``latest_new_first_seen() -> datetime | None``.
+        event_bus: ``EventBus`` Protocol — ``publish(SseEvent) -> None``.
+        onboarding: ``OnboardingService`` — ``current() -> OnboardingState``.
+        backfill: ``BackfillService`` — ``start(stop) -> None``.
+        supervisor_cell: mutable one-element list holding the supervisor ref (or None).
+
+    Returns:
+        A callable ``(_outcome: object) -> None`` suitable for
+        ``LoginService(on_login_success=...)``.
+    """
+    from fis_monitor.domain.models import OnboardingState  # local — avoid circular
+
+    def _callback(_outcome: object) -> None:
+        _log.debug("on_login_success.callback.fired", extra={"trigger": "headed_login_success"})
+
+        # Publish UI-recovery events FIRST, unconditionally on any successful
+        # headed login (independent of onboarding/regions/supervisor guards
+        # below — those gate the backfill, not the auth-chip refresh).
+        now = clock.now()  # type: ignore[union-attr]
+        try:
+            settings_for_status = config_source.current()  # type: ignore[union-attr]
+            last_new = lot_repo.latest_new_first_seen()  # type: ignore[union-attr]
+            last_new_human = "—" if last_new is None else _humanize_relative_age(now - last_new)
+            last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
+            event_bus.publish(  # type: ignore[union-attr]
+                SseStatus(
+                    timestamp=now,
+                    state="active",
+                    interval_minutes=int(settings_for_status.interval_minutes),
+                    last_new_human=last_new_human,
+                    last_new_at_hhmm=last_new_at_hhmm,
+                    expires_at_hhmm="",
+                )
+            )
+            event_bus.publish(SseLoginSucceeded(timestamp=now))  # type: ignore[union-attr]
+        except Exception:
+            _log.warning(
+                "on_login_success.ui_recovery_publish_failed",
+                exc_info=True,
+            )
+
+        onboarding_state = onboarding.current()  # type: ignore[union-attr]
+        if onboarding_state != OnboardingState.COMPLETED:
+            _log.debug(
+                "on_login_success: onboarding not completed (state=%s) — skip backfill",
+                onboarding_state,
+            )
+            return
+        current_settings = config_source.current()  # type: ignore[union-attr]
+        if not current_settings.regions:
+            _log.debug("on_login_success: regions empty — skip backfill")
+            return
+        sup = supervisor_cell[0]
+        if sup is None:
+            _log.warning("on_login_success: supervisor not yet bound — backfill NOT started")
+            return
+        _log.info("on_login_success: guards passed → auto-backfill scheduled")
+        sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
+
+    return _callback
 
 
 # ---------------------------------------------------------------------------
@@ -432,29 +525,16 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     # ---------------------------------------------------------------------------
     _supervisor_cell: list[object] = [None]  # mutable cell; filled by app.py lifespan
 
-    def _trigger_backfill_on_login(_outcome: object) -> None:
-        # Primary trigger: fire on every successful headed login.
-        # BackfillService.start() is single-flight — concurrent delta-check race is safe.
-        _log.debug("on_login_success.callback.fired", extra={"trigger": "headed_login_success"})
-        onboarding_state = onboarding.current()
-        from fis_monitor.domain.models import OnboardingState  # local to avoid circular
-
-        if onboarding_state != OnboardingState.COMPLETED:
-            _log.debug(
-                "on_login_success: onboarding not completed (state=%s) — skip backfill",
-                onboarding_state,
-            )
-            return
-        current_settings = config_source.current()
-        if not current_settings.regions:
-            _log.debug("on_login_success: regions empty — skip backfill")
-            return
-        sup = _supervisor_cell[0]
-        if sup is None:
-            _log.warning("on_login_success: supervisor not yet bound — backfill NOT started")
-            return
-        _log.info("on_login_success: guards passed → auto-backfill scheduled")
-        sup.start("backfill-auto", lambda stop: backfill.start(stop))  # type: ignore[union-attr]
+    # Delegate to the extracted factory (makes the callback testable in isolation).
+    _trigger_backfill_on_login = make_login_success_callback(
+        clock=clock,
+        config_source=config_source,
+        lot_repo=lot_repo,
+        event_bus=event_bus,
+        onboarding=onboarding,
+        backfill=backfill,
+        supervisor_cell=_supervisor_cell,
+    )
 
     # Build SessionExpiredEmailService before login so the reset callback can
     # capture it via closure without circular reference.

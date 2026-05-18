@@ -248,6 +248,7 @@ SSE-стрим live-обновлений для браузера. Media type: `t
 | `lot.status` | Лот изменил статус или пропал | HTML-фрагмент с `hx-swap-oob` |
 | `status` | Состояние системы (сессия, следующий цикл, DND) | HTML-фрагмент `_header_status.html.jinja` |
 | `session.expired` | ЕСИА-сессия истекла | HTML-фрагмент с `hx-swap-oob`, снимающий `hidden` с `#session-expired-modal` |
+| `login.succeeded` | Headed-login завершён успехом; UI сбрасывает stale auth-chip и cycle-error | HTML-фрагмент с `hx-swap-oob` для `#cycle-result` (очищает ошибку предыдущего цикла) и `#session-expired-modal` (скрывает модалку) |
 
 Неизвестные типы событий молча дропаются внутри `SseStreamer` (schema-drift protection, `sse.schema_drift` в лог).
 

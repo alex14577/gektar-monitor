@@ -62,6 +62,7 @@
 - [[decisions/ADR-048-header-countdown-absolute-next-fire-at|ADR-048]] — Header countdown: `SseStatus.next_fire_at` (absolute UTC) as client-side timer SSOT; `data-next-check-at` attribute; JS computes remaining via `Date.parse` each tick (swap-safe, bd r82m)
 - [[decisions/ADR-049-browser-notification-activation|ADR-049]] — Browser notification activation: one-shot body-click listener for `requestPermission()`; `htmx:sseMessage` wiring for `lot.new`; `data-title`/`data-area` contract on `_lot_poster` `<article>` (bd sv97)
 - [[decisions/ADR-050-status-indicator-supersedes-countdown|ADR-050]] — Pulse-dot replaces countdown: `SseCycleStarted` event + `.check-status[data-state]` toggle; `next_fire_at`/`next_cycle_mmss` removed from `SseStatus`; supersedes ADR-048 (bd hiq3)
+- [[decisions/ADR-051-login-succeeded-sse-event|ADR-051]] — `login.succeeded` SSE event for post-login UI recovery: clears stale auth-chip and cycle-error without waiting for next cycle; `make_login_success_callback` factory extracted for testability (bd fplb)
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

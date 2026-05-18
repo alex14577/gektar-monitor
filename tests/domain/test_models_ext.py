@@ -487,6 +487,7 @@ def test_sse_event_union_members():
     members = set(get_args(SseEvent.__value__))
     from fis_monitor.domain.models import (
         SseCycleStarted,  # hiq3
+        SseLoginSucceeded,  # fplb
         SseStatus,  # bd 47uh
     )
 
@@ -499,6 +500,7 @@ def test_sse_event_union_members():
         SseCycleDone,
         SseCycleStarted,
         SseStatus,
+        SseLoginSucceeded,
     }
 
 

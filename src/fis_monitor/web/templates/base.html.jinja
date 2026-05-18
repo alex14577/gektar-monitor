@@ -87,6 +87,17 @@
             hx-swap="innerHTML"
             hidden
             aria-hidden="true"></span>
+      {#-
+        SSE listener: headed-login succeeded — clears stale auth-chip and
+        cycle-error state left over from the pre-login cycle. OOB-only: the
+        main swap target of this listener is empty; all clearing is done via
+        hx-swap-oob in the login.succeeded fragment (fplb).
+      -#}
+      <span id="login-succeeded-listener"
+            sse-swap="login.succeeded"
+            hx-swap="none"
+            hidden
+            aria-hidden="true"></span>
 
       <span class="header-divider" aria-hidden="true"></span>
 

@@ -1021,6 +1021,31 @@ class SseStatus(BaseModel):
     expires_at_hhmm: str = ""
 
 
+class SseLoginSucceeded(BaseModel):
+    """Normal event: headed-login succeeded, UI must drop stale auth/error state.
+
+    Published from the ``on_login_success`` callback in the composition root
+    (NOT from LoginService — DI/low-coupling: LoginService owns no EventBus
+    dependency). Pairs with a fresh ``SseStatus(state="active")`` also
+    published from the same callback so:
+
+    - ``#header-status`` receives the active-state fragment via existing
+      ``sse-swap="status"`` listener.
+    - ``#cycle-result`` is cleared by the encoded fragment for this event,
+      which uses ``hx-swap-oob`` to overwrite the host container even though
+      the dedicated listener uses ``sse-swap="login.succeeded"``.
+
+    No PII: timestamp only.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["normal"]] = "normal"
+
+    event: Literal["login.succeeded"] = "login.succeeded"
+    timestamp: datetime
+
+
 # ---------------------------------------------------------------------------
 # Conversion helpers — public domain functions
 # ---------------------------------------------------------------------------
@@ -1143,4 +1168,5 @@ type SseEvent = (
     | SseCycleDone
     | SseCycleStarted
     | SseStatus
+    | SseLoginSucceeded
 )

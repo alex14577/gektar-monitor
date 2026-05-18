@@ -1,0 +1,14 @@
+{#-
+  login.succeeded SSE fragment — published by composition-root on_login_success.
+
+  Purpose: drop stale UI state left over from the pre-login cycle.
+  Consumed by #login-succeeded-listener (sse-swap="login.succeeded").
+  Uses hx-swap-oob to additionally clear #cycle-result + close the
+  session-expired modal in one shot, since these containers are owned
+  by other listeners and we don't want to entangle them.
+-#}
+<span id="cycle-result" class="cycle-result-host"
+      role="status" aria-live="polite" aria-atomic="true"
+      hx-swap-oob="outerHTML"></span>
+<div id="session-expired-modal" class="modal-backdrop"
+     hx-swap-oob="outerHTML" hidden></div>

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fis_monitor.domain.models import Lot, LotPublicDTO, SseLotNew, SseStatus
+from fis_monitor.domain.models import Lot, LotPublicDTO, SseLoginSucceeded, SseLotNew, SseStatus
 from fis_monitor.web.sse_encoder import LotViewModel, _SseLotNewViewModel, make_html_sse_encoder
 from fis_monitor.web.templates import build_templates
 
@@ -110,5 +110,46 @@ class TestSseStatusTooltip:
 
         assert "(14:23)" in payload, (
             f"Expected '(14:23)' in SSE-rendered header-status HTML for SseStatus.\n"
+            f"Got payload:\n{payload}"
+        )
+
+
+class TestSseLoginSucceededEncoder:
+    """SseLoginSucceeded encoder contract (fplb).
+
+    Invariants:
+    - Encoded frame starts with 'event: login.succeeded'.
+    - Fragment includes hx-swap-oob (OOB mechanism for clearing stale state).
+    - Fragment contains '#cycle-result' span (drops stale cycle-error message).
+    """
+
+    def test_encode_login_succeeded_renders_fragment(self) -> None:
+        """Encoder returns a valid SSE frame for SseLoginSucceeded events."""
+        templates = build_templates()
+        encoder = make_html_sse_encoder(templates.env)
+
+        event = SseLoginSucceeded(timestamp=_TS)
+        payload = encoder(event).decode()
+
+        assert payload.startswith("event: login.succeeded\n"), (
+            f"Expected SSE frame to start with 'event: login.succeeded\\n'.\n"
+            f"Got payload:\n{payload}"
+        )
+        assert payload.endswith("\n\n"), "SSE frame must end with double newline"
+
+    def test_encode_login_succeeded_includes_oob_hint(self) -> None:
+        """Encoded fragment must include hx-swap-oob to clear stale containers."""
+        templates = build_templates()
+        encoder = make_html_sse_encoder(templates.env)
+
+        event = SseLoginSucceeded(timestamp=_TS)
+        payload = encoder(event).decode()
+
+        assert "hx-swap-oob" in payload, (
+            f"Expected 'hx-swap-oob' in login.succeeded SSE fragment.\n"
+            f"Got payload:\n{payload}"
+        )
+        assert "cycle-result" in payload, (
+            f"Expected '#cycle-result' target in login.succeeded fragment.\n"
             f"Got payload:\n{payload}"
         )

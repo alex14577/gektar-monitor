@@ -35,6 +35,7 @@ from fis_monitor.domain.models import (
     LotUserDTO,
     SseCycleDone,
     SseEvent,
+    SseLoginSucceeded,
     SseLotNew,
     SseStatus,
 )
@@ -373,6 +374,8 @@ def make_html_sse_encoder(env: Environment) -> Callable[[SseEvent], bytes]:
             return _encode_cycle_done(env, event)
         if isinstance(event, SseStatus):
             return _encode_status(env, event)
+        if isinstance(event, SseLoginSucceeded):
+            return _encode_login_succeeded(env, event)
 
         if not isinstance(event, SseLotNew):
             return encode_sse_event(event)
@@ -424,6 +427,25 @@ def _encode_cycle_done(env: Environment, event: SseCycleDone) -> bytes:
     used for ``lot.new`` poster rendering above.
     """
     template = env.get_template(_CYCLE_DONE_TEMPLATE)
+    html: str = template.render(event=event)
+    data_lines = "\n".join(f"data: {line}" for line in html.split("\n"))
+    return f"event: {event.event}\n{data_lines}\n\n".encode()
+
+
+_LOGIN_SUCCEEDED_TEMPLATE = "partials/_login_succeeded.html.jinja"
+
+
+def _encode_login_succeeded(env: Environment, event: SseLoginSucceeded) -> bytes:
+    """Render an ``SseLoginSucceeded`` to an HTML SSE chunk.
+
+    The fragment uses ``hx-swap-oob`` to clear ``#cycle-result`` (drops the
+    stale «Проверка завершена с ошибкой» fragment from the pre-login cycle)
+    and to hide ``#session-expired-modal`` if present.
+
+    Targeted by ``#login-succeeded-listener`` (``sse-swap="login.succeeded"``)
+    in ``base.html.jinja``.
+    """
+    template = env.get_template(_LOGIN_SUCCEEDED_TEMPLATE)
     html: str = template.render(event=event)
     data_lines = "\n".join(f"data: {line}" for line in html.split("\n"))
     return f"event: {event.event}\n{data_lines}\n\n".encode()
