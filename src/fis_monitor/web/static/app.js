@@ -185,21 +185,25 @@
   });
 
   // ---------- header countdown ----------
-  (function () {
+  // Re-resolves the element on every tick: #header-status is replaced by
+  // sse-swap="status", so a once-captured node reference would become
+  // detached and the visible span would freeze on the server-rendered value.
+  setInterval(() => {
     const el = $('[data-countdown]');
     if (!el) return;
     const intervalMin = Number(el.dataset.countdown);
     if (!Number.isFinite(intervalMin) || intervalMin <= 0) return;
-    let remaining = intervalMin * 60;
-    const tick = () => {
-      remaining -= 1;
-      if (remaining <= 0) remaining = intervalMin * 60;
-      const m = Math.floor(remaining / 60);
-      const s = remaining % 60;
-      el.textContent = `${m}:${pad2(s)}`;
-    };
-    setInterval(tick, 1000);
-  })();
+    let remaining = Number(el.dataset.remaining);
+    if (!Number.isFinite(remaining) || remaining <= 0) {
+      remaining = intervalMin * 60;
+    }
+    remaining -= 1;
+    if (remaining <= 0) remaining = intervalMin * 60;
+    el.dataset.remaining = String(remaining);
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    el.textContent = `${m}:${pad2(s)}`;
+  }, 1000);
 
   // ---------- DND ----------
   document.addEventListener('click', (e) => {
