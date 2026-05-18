@@ -56,6 +56,10 @@
         Открыть ↗
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
       </a>
+      <button class="btn btn--sm" type="button"
+              data-copy="{{ lot.cadastral_no }} · {{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %} · {{ lot.area_ha | replace('.', ',') }} га">
+        📋 Скопировать всё для заявки
+      </button>
     </div>
   </div>
 
@@ -68,17 +72,13 @@
       </dl>
       {% endif %}
     </div>
+    {% if lot.url_pkk %}
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
-      <button class="btn btn--sm" type="button"
-              data-copy="{{ lot.cadastral_no }} · {{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %} · {{ lot.area_ha | replace('.', ',') }} га">
-        📋 Скопировать всё для заявки
-      </button>
-      {% if lot.url_pkk %}
-        <a class="btn btn--sm" href="{{ lot.url_pkk }}" target="_blank" rel="noopener">
-          На карту ПКК Росреестра ↗
-        </a>
-      {% endif %}
+      <a class="btn btn--sm" href="{{ lot.url_pkk }}" target="_blank" rel="noopener">
+        На карту ПКК Росреестра ↗
+      </a>
     </div>
+    {% endif %}
 
   </div>
 </article>
