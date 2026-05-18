@@ -421,7 +421,7 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .copy:hover { background: var(--surface-2); color: var(--ink); }
 
 /* details — hidden by default, revealed via JS toggle; always expanded in poster variant */
-.lot__details { display: none; padding: 0 16px; }
+.lot__details { display: none; padding: 8px 16px 0; }
 .lot--poster .lot__details { display: block; }
 .lot[data-open="true"] .lot__details { display: block; }
 .lot__details-row { display: flex; gap: 24px; flex-wrap: wrap; }
