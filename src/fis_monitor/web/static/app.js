@@ -548,40 +548,22 @@
   })();
 
   // ---------- 5. Escalation progress indicator ----------
-  // When escalationStart() runs, we publish a small data-attr on <body>
-  // so a header chip can render a countdown. The chip itself is HTML.
+  // bd-bi7i: текстовый чип «Громче через …» убран из шаблона
+  // (_header_status.html.jinja) — пользователю формулировка непонятна. CSS-флаг
+  // body.dataset.escalating оставлен: им можно стилизовать индикатор без слов
+  // (например, пульсирующая точка), если решим вернуть визуал.
   const _origEscStart = escalationStart;
   const _origEscStop  = escalationStop;
-  let escTickTimer = null;
-  // override in-place
   // eslint-disable-next-line no-func-assign
   escalationStart = function () {
     if (escState) return;
     _origEscStart.apply(this, arguments);
-    const startedAt = Date.now();
     document.body.dataset.escalating = 'true';
-    escTickTimer = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-      const chip = document.getElementById('escalation-chip');
-      if (!chip) return;
-      // tier transitions: 60s and 180s
-      let next, label;
-      if (elapsed < 60)   { next = 60  - elapsed; label = 'Громче через'; }
-      else if (elapsed < 180) { next = 180 - elapsed; label = 'Title-pulse через'; }
-      else                { next = 0; label = 'Эскалация активна'; }
-      chip.hidden = false;
-      chip.querySelector('[data-role="esc-label"]').textContent = label;
-      chip.querySelector('[data-role="esc-time"]').textContent =
-        next > 0 ? `0:${String(next).padStart(2,'0')}` : '—';
-    }, 1000);
   };
   // eslint-disable-next-line no-func-assign
   escalationStop = function () {
     _origEscStop.apply(this, arguments);
-    clearInterval(escTickTimer);
     delete document.body.dataset.escalating;
-    const chip = document.getElementById('escalation-chip');
-    if (chip) chip.hidden = true;
   };
 
   // ---------- 6. Since-arrived counter ----------

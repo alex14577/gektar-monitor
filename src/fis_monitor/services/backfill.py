@@ -549,11 +549,17 @@ class BackfillService:
                     continue
 
                 try:
-                    self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
+                    upsert_result = self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
                     lots_upserted_per_page[current_page_num] = (
                         lots_upserted_per_page.get(current_page_num, 0) + 1
                     )
-                    if not stop.is_set():
+                    # bd-bi7i: публикуем SseLotNew ТОЛЬКО для действительно новых
+                    # лотов, как в monitor_cycle.py:597. Раньше backfill дёргал
+                    # SSE на каждый upsert — фронт получал «новый лот» на
+                    # исторические записи и запускал звуковую эскалацию
+                    # (escalationStart → чип «Громче через …»). Семантически
+                    # backfill — это исторический догон, не real-time событие.
+                    if upsert_result.was_new and not stop.is_set():
                         try:
                             lot_dto = _lot_to_public_dto(lot)
                             self._event_bus.publish(

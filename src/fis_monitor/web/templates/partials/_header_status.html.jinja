@@ -27,8 +27,7 @@
 <span style="font-size: 0.8125rem; color: var(--ink-2);">
   Последний новый: <b>{{ monitor.last_new_human }}</b>
 </span>
-<span id="escalation-chip" class="esc-chip" hidden role="status" aria-live="polite">
-  <span class="esc-chip__dot" aria-hidden="true"></span>
-  <span data-role="esc-label">Громче через</span>
-  <span data-role="esc-time" class="mono">0:60</span>
-</span>
+{# bd-bi7i: чип «Громче через ...» убран из UI — пользователю смысл непонятен,
+   плюс он триггерился на backfilled-лотах (исторический догон). После
+   backfill-фильтра по was_new сам факт эскалации стал семантически корректным,
+   но текстовое UI оставили скрытым до согласования формулировки. #}

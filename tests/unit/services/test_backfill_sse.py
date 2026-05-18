@@ -1,10 +1,13 @@
 """Unit tests for BackfillService SSE publishing (gektar_monitor-w8dr).
 
 Invariants tested:
-  5. BackfillService publishes SseLotNew for each upserted lot.
+  5. BackfillService publishes SseLotNew ONLY for lots with was_new=True
+     (bd-bi7i: backfill — это исторический догон, дубль не должен дёргать
+     real-time эскалацию на фронте).
   6. Backfill does NOT call email Notifier at any point (no dispatcher/notifier dep).
   7. EventBus publish exception → backfill does not raise, logs warning, continues.
   8. Cancelled backfill (stop.is_set() True at publish time) → SseLotNew NOT published.
+  9. Duplicate lot (was_new=False) → no SseLotNew published.
 """
 
 from __future__ import annotations
@@ -74,12 +77,17 @@ class FakePaginatedListFetcher:
 
 
 class FakeLotRepository:
-    def __init__(self) -> None:
+    def __init__(self, *, was_new_per_lot: dict[int, bool] | None = None) -> None:
         self.upsert_calls: list[int] = []
+        # Mapping lot.id → was_new флаг. По умолчанию все upsert-ы считаются новыми
+        # (исторически поведение фейка). Тесты на дедупликацию могут передать
+        # явный словарь, чтобы эмулировать «лот уже есть в БД».
+        self._was_new = was_new_per_lot or {}
 
     def upsert(self, lot: Any, *, tracked: Any) -> LotUpsertResult:
         self.upsert_calls.append(lot.id)
-        return LotUpsertResult(was_new=True, changes=[])
+        was_new = self._was_new.get(lot.id, True)
+        return LotUpsertResult(was_new=was_new, changes=[])
 
     def get(self, lot_id: int) -> None:
         return None
@@ -179,8 +187,8 @@ def _run_sync(svc: BackfillService, regions: list[int] | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_backfill_publishes_sse_lot_new_for_each_lot():
-    """Invariant 5: SseLotNew published for each upserted lot."""
+def test_backfill_publishes_sse_lot_new_only_for_new_lots():
+    """Invariant 5: SseLotNew published only for lots with was_new=True (bd-bi7i)."""
     rows = [_make_row(1), _make_row(2), _make_row(3)]
     svc, lot_repo, bus = _make_service(rows)
 
@@ -191,6 +199,26 @@ def test_backfill_publishes_sse_lot_new_for_each_lot():
     assert all(isinstance(e, SseLotNew) for e in bus.published)
     lot_ids = {e.lot.id for e in bus.published}  # type: ignore[union-attr]
     assert lot_ids == {1, 2, 3}
+
+
+def test_backfill_skips_sse_for_duplicate_lots():
+    """Invariant 9 (bd-bi7i): backfill upserts duplicate (was_new=False) → no SseLotNew.
+
+    Раньше backfill публиковал SseLotNew безусловно — фронт получал «новый лот»
+    на исторические записи и запускал escalationStart() (звук + чип «Громче
+    через ...»). Теперь публикация фильтруется по upsert_result.was_new, как в
+    monitor_cycle.py:597.
+    """
+    rows = [_make_row(1), _make_row(2), _make_row(3)]
+    # Лот 2 — уже в БД (дубль из истории); лоты 1 и 3 — действительно новые.
+    lot_repo = FakeLotRepository(was_new_per_lot={1: True, 2: False, 3: True})
+    svc, lot_repo, bus = _make_service(rows, lot_repo=lot_repo)
+
+    _run_sync(svc)
+
+    assert len(lot_repo.upsert_calls) == 3, "все три лота upsert-нуты"
+    published_ids = {e.lot.id for e in bus.published}  # type: ignore[union-attr]
+    assert published_ids == {1, 3}, "SSE только для was_new=True лотов"
 
 
 def test_backfill_does_not_depend_on_email_notifier():
