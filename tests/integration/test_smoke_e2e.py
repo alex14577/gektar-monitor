@@ -110,6 +110,9 @@ class _FakeLogin:
     def cancel_active_job(self) -> None:
         pass
 
+    def mark_browser_unavailable(self) -> None:
+        pass
+
 
 class _FakeNotifierDispatcher:
     """Satisfies NotifierDispatcher duck-type used in lifespan.

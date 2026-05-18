@@ -47,6 +47,7 @@ class FixedClock:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def repo(tmp_db: ConnectionProvider) -> SqliteRegionSubscriptionRepository:
     return SqliteRegionSubscriptionRepository(conn_provider=tmp_db)
@@ -60,6 +61,7 @@ def lot_repo(tmp_db: ConnectionProvider) -> SqliteLotRepository:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _insert_lot_with_region_id(
     tmp_db: ConnectionProvider,
@@ -95,6 +97,7 @@ def _insert_lot_with_region_id(
 # Tests: RegionSubscriptionRepository
 # ---------------------------------------------------------------------------
 
+
 class TestSetIfAbsent:
     def test_first_insert_returns_true(self, repo: SqliteRegionSubscriptionRepository) -> None:
         result = repo.set_if_absent(region_id=1, subscribed_at=_SUBSCRIBED_AT)
@@ -102,9 +105,7 @@ class TestSetIfAbsent:
 
     def test_repeat_insert_returns_false(self, repo: SqliteRegionSubscriptionRepository) -> None:
         repo.set_if_absent(region_id=1, subscribed_at=_SUBSCRIBED_AT)
-        result = repo.set_if_absent(
-            region_id=1, subscribed_at=_SUBSCRIBED_AT + timedelta(hours=1)
-        )
+        result = repo.set_if_absent(region_id=1, subscribed_at=_SUBSCRIBED_AT + timedelta(hours=1))
         assert result is False
 
     def test_idempotent_does_not_overwrite(self, repo: SqliteRegionSubscriptionRepository) -> None:
@@ -114,9 +115,7 @@ class TestSetIfAbsent:
         stored = repo.get_subscribed_at(region_id=1)
         assert stored == _SUBSCRIBED_AT
 
-    def test_different_regions_independent(
-        self, repo: SqliteRegionSubscriptionRepository
-    ) -> None:
+    def test_different_regions_independent(self, repo: SqliteRegionSubscriptionRepository) -> None:
         t1 = _SUBSCRIBED_AT
         t2 = _SUBSCRIBED_AT + timedelta(days=1)
         assert repo.set_if_absent(region_id=1, subscribed_at=t1) is True
@@ -126,21 +125,15 @@ class TestSetIfAbsent:
 
 
 class TestGetSubscribedAt:
-    def test_returns_none_when_absent(
-        self, repo: SqliteRegionSubscriptionRepository
-    ) -> None:
+    def test_returns_none_when_absent(self, repo: SqliteRegionSubscriptionRepository) -> None:
         assert repo.get_subscribed_at(region_id=99) is None
 
-    def test_returns_stored_timestamp(
-        self, repo: SqliteRegionSubscriptionRepository
-    ) -> None:
+    def test_returns_stored_timestamp(self, repo: SqliteRegionSubscriptionRepository) -> None:
         repo.set_if_absent(region_id=1, subscribed_at=_SUBSCRIBED_AT)
         result = repo.get_subscribed_at(region_id=1)
         assert result == _SUBSCRIBED_AT
 
-    def test_utc_tzinfo_preserved(
-        self, repo: SqliteRegionSubscriptionRepository
-    ) -> None:
+    def test_utc_tzinfo_preserved(self, repo: SqliteRegionSubscriptionRepository) -> None:
         repo.set_if_absent(region_id=1, subscribed_at=_SUBSCRIBED_AT)
         result = repo.get_subscribed_at(region_id=1)
         assert result is not None
@@ -158,14 +151,10 @@ class TestDelete:
         repo.delete(region_id=1)
         repo.delete(region_id=1)  # must not raise
 
-    def test_delete_nonexistent_is_noop(
-        self, repo: SqliteRegionSubscriptionRepository
-    ) -> None:
+    def test_delete_nonexistent_is_noop(self, repo: SqliteRegionSubscriptionRepository) -> None:
         repo.delete(region_id=99)  # must not raise
 
-    def test_after_delete_can_reinsert(
-        self, repo: SqliteRegionSubscriptionRepository
-    ) -> None:
+    def test_after_delete_can_reinsert(self, repo: SqliteRegionSubscriptionRepository) -> None:
         repo.set_if_absent(region_id=1, subscribed_at=_SUBSCRIBED_AT)
         repo.delete(region_id=1)
         new_time = _SUBSCRIBED_AT + timedelta(days=1)
@@ -177,18 +166,15 @@ class TestDelete:
 # Tests: LotRepository.count_active(region_id=...)
 # ---------------------------------------------------------------------------
 
+
 class TestCountActiveWithRegionId:
-    def test_count_active_no_filter_global(
-        self, tmp_db: ConnectionProvider
-    ) -> None:
+    def test_count_active_no_filter_global(self, tmp_db: ConnectionProvider) -> None:
         _insert_lot_with_region_id(tmp_db, 1, region_id=1)
         _insert_lot_with_region_id(tmp_db, 2, region_id=2)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
         assert lot_repo.count_active() == 2
 
-    def test_count_active_filters_by_region(
-        self, tmp_db: ConnectionProvider
-    ) -> None:
+    def test_count_active_filters_by_region(self, tmp_db: ConnectionProvider) -> None:
         _insert_lot_with_region_id(tmp_db, 1, region_id=1)
         _insert_lot_with_region_id(tmp_db, 2, region_id=1)
         _insert_lot_with_region_id(tmp_db, 3, region_id=2)
@@ -196,25 +182,19 @@ class TestCountActiveWithRegionId:
         assert lot_repo.count_active(region_id=1) == 2
         assert lot_repo.count_active(region_id=2) == 1
 
-    def test_count_active_region_none_equals_global(
-        self, tmp_db: ConnectionProvider
-    ) -> None:
+    def test_count_active_region_none_equals_global(self, tmp_db: ConnectionProvider) -> None:
         _insert_lot_with_region_id(tmp_db, 1, region_id=1)
         _insert_lot_with_region_id(tmp_db, 2, region_id=2)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
         assert lot_repo.count_active(region_id=None) == lot_repo.count_active()
 
-    def test_count_active_excludes_inactive(
-        self, tmp_db: ConnectionProvider
-    ) -> None:
+    def test_count_active_excludes_inactive(self, tmp_db: ConnectionProvider) -> None:
         _insert_lot_with_region_id(tmp_db, 1, region_id=1, is_active=True)
         _insert_lot_with_region_id(tmp_db, 2, region_id=1, is_active=False)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
         assert lot_repo.count_active(region_id=1) == 1
 
-    def test_count_active_unknown_region_returns_zero(
-        self, tmp_db: ConnectionProvider
-    ) -> None:
+    def test_count_active_unknown_region_returns_zero(self, tmp_db: ConnectionProvider) -> None:
         _insert_lot_with_region_id(tmp_db, 1, region_id=1)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
         assert lot_repo.count_active(region_id=99) == 0
@@ -224,6 +204,7 @@ class TestCountActiveWithRegionId:
 # Tests: Migration data integrity (v3→v4 backfill)
 # ---------------------------------------------------------------------------
 
+
 class TestMigrationDataIntegrity:
     """Verify that the v3→v4 migration correctly backfills region_id from
     the existing lots.region text column using the domain catalog."""
@@ -232,16 +213,21 @@ class TestMigrationDataIntegrity:
         """Insert lots with known RF subject names, run migration, verify region_id."""
         # Build a v3 DB (without region_id column and region_subscriptions table).
         # We do this by creating a fresh DB with the v3 schema.
-        v3_schema = schema_sql.replace(
-            "PRAGMA user_version = 4",
-            "PRAGMA user_version = 3",
-        ).replace(
-            "    region_id            INTEGER,"
-            "                    -- macro-region FK (1=ДФО, 2=Арктика); ADR-039\n",
-            "",
-        ).replace(
-            "CREATE INDEX IF NOT EXISTS idx_lots_region_id_active ON lots(region_id, is_active);\n",
-            "",
+        v3_schema = (
+            schema_sql.replace(
+                "PRAGMA user_version = 5",
+                "PRAGMA user_version = 3",
+            )
+            .replace(
+                "    region_id            INTEGER,"
+                "                    -- macro-region FK (1=ДФО, 2=Арктика); ADR-039\n",
+                "",
+            )
+            .replace(
+                "CREATE INDEX IF NOT EXISTS idx_lots_region_id_active"
+                " ON lots(region_id, is_active);\n",
+                "",
+            )
         )
         # Also remove region_subscriptions table from v3 schema
         rs_block_start = v3_schema.find("-- Per-region subscription timestamps")
@@ -289,18 +275,14 @@ class TestMigrationDataIntegrity:
             # Verify backfill results.
             rows = {
                 row[0]: row[1]
-                for row in conn.execute(
-                    "SELECT id, region_id FROM lots ORDER BY id"
-                ).fetchall()
+                for row in conn.execute("SELECT id, region_id FROM lots ORDER BY id").fetchall()
             }
             assert rows[1] == 1, "Республика Бурятия should map to ДФО (1)"
             assert rows[2] == 2, "Республика Карелия should map to Арктика (2)"
             assert rows[3] is None, "Unknown region should remain NULL"
 
             # Verify region_subscriptions table exists and is empty.
-            count = conn.execute(
-                "SELECT COUNT(*) FROM region_subscriptions"
-            ).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM region_subscriptions").fetchone()[0]
             assert count == 0
 
         finally:
