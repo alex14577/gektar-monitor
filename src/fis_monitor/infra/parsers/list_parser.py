@@ -33,6 +33,7 @@ from selectolax.parser import HTMLParser, Node
 
 from fis_monitor.domain.errors import ParseBugError, SessionExpiredError
 from fis_monitor.domain.models import ParsedListPage, ParsedListRow
+from fis_monitor.infra.normalize import normalize_vri as _normalize_vri
 
 # Hard cap protecting against pathological HTML; FIS lists rarely exceed 100 per page.
 _MAX_ROWS_PER_PAGE: Final[int] = 10_000
@@ -235,8 +236,8 @@ class SelectolaxListParser:
             # col 7: land_category
             land_category = _text_or_none(tds[7])
 
-            # col 8: permitted_use
-            permitted_use = _text_or_none(tds[8])
+            # col 8: permitted_use (normalised — abbreviations stay uppercase, rest title-cased)
+            permitted_use = _normalize_vri(_text_or_none(tds[8]))
 
             # col 9: ogv -- prefer title attribute (full name), fall back to text
             ogv_title = tds[9].attributes.get("title", "")

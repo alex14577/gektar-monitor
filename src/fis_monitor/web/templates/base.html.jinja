@@ -45,14 +45,19 @@
      hx-target later (e.g. POST /filters/view replacing #feed). #}
   <div id="sse-root" hx-ext="sse" sse-connect="/events">
 
-  {# ============== Sticky header ============== #}
+  {# ============== Sticky header — three zones (hiq3) ============== #}
   <header class="header" role="banner">
     <div class="header__inner">
-    <a class="brand" href="/" aria-label="Монитор гектара — на главную">
-      <span class="brand__mark" aria-hidden="true">М</span>
-      <span>Монитор&nbsp;гектара</span>
-    </a>
 
+    {# Left zone: brand + status indicator #}
+    <div class="header__left">
+      <a class="brand" href="/" aria-label="Монитор гектара — на главную">
+        <span class="brand__mark" aria-hidden="true">М</span>
+        <span>Монитор&nbsp;гектара</span>
+      </a>
+    </div>
+
+    {# Center zone: SSE-driven status widget #}
     {# SSE-driven status: server pushes <span hx-swap-oob> updates.
        sse-connect lives on #sse-root above (bjw4). #}
     <div id="header-status" class="header__center"
@@ -61,22 +66,14 @@
       {% include "partials/_header_status.html.jinja" %}
     </div>
 
+    {# Right zone: last-check metric → divider → icon buttons → «Проверить сейчас» #}
     <div class="header__right">
-      <button class="btn btn--sm" type="button"
-              hx-post="/cycle/run"
-              hx-target="#cycle-result"
-              hx-swap="innerHTML"
-              hx-indicator="#cycle-spinner"
-              hx-disabled-elt="this">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
-        Проверить сейчас
-      </button>
+      <span id="cycle-result" class="cycle-result-host" role="status" aria-live="polite" aria-atomic="true"></span>
       <span id="cycle-spinner" class="htmx-indicator spinner-dots" aria-hidden="true">
         <span class="spinner-dots__dot"></span>
         <span class="spinner-dots__dot"></span>
         <span class="spinner-dots__dot"></span>
       </span>
-      <span id="cycle-result" class="cycle-result-host" role="status" aria-live="polite" aria-atomic="true"></span>
       {#-
         SSE listener: terminal cycle-completion signal. Replaces the static
         "Идёт проверка" spinner that POST /cycle/run injects into #cycle-result.
@@ -91,10 +88,17 @@
             hidden
             aria-hidden="true"></span>
 
+      <span class="header-divider" aria-hidden="true"></span>
+
+      {# DND icon button (32×32) #}
       <div style="position:relative;">
-        <button class="btn btn--sm btn--ghost" type="button"
-                data-toggle-menu="dnd-menu" aria-haspopup="true" aria-expanded="false">
-          {% if dnd.active %}🌙 До {{ dnd.until_hhmm }}{% else %}🌙 Не беспокоить{% endif %}
+        <button class="btn btn--sm btn--ghost btn--icon" type="button"
+                data-toggle-menu="dnd-menu"
+                aria-haspopup="true" aria-expanded="false"
+                title="{% if dnd.active %}Не беспокоить до {{ dnd.until_hhmm }}{% else %}Не беспокоить{% endif %}"
+                aria-label="{% if dnd.active %}Не беспокоить до {{ dnd.until_hhmm }}{% else %}Не беспокоить{% endif %}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          {% if dnd.active %}<span class="header-dnd-badge" aria-hidden="true"></span>{% endif %}
         </button>
         <div id="dnd-menu" data-menu hidden
              style="position:absolute; right:0; top: calc(100% + 6px); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; min-width: 200px; z-index: 40;">
@@ -109,14 +113,32 @@
         </div>
       </div>
 
-      <a class="btn btn--sm btn--ghost" href="/notifications" aria-label="Уведомления">
+      {# Notifications icon button (32×32) #}
+      <a class="btn btn--sm btn--ghost btn--icon" href="/notifications"
+         title="Уведомления" aria-label="Уведомления">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
       </a>
-      <a class="btn btn--sm btn--ghost btn--icon" href="/settings" aria-label="Настройки">
+
+      {# Settings icon button (32×32) #}
+      <a class="btn btn--sm btn--ghost btn--icon" href="/settings"
+         title="Настройки" aria-label="Настройки">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
       </a>
+
+      <button class="btn btn--sm" type="button"
+              hx-post="/cycle/run"
+              hx-target="#cycle-result"
+              hx-swap="innerHTML"
+              hx-indicator="#cycle-spinner"
+              hx-disabled-elt="this"
+              title="Запустить проверку сейчас" aria-label="Проверить сейчас">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+        Проверить сейчас
+      </button>
+
       {% block header_extras %}{% endblock %}
     </div>
+
     </div>
   </header>
 

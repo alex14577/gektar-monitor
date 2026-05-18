@@ -724,3 +724,103 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
   display: none;
 }
 
+/* =====================================================================
+   hiq3 additions (ADR-050)
+   ===================================================================== */
+
+/* ---------- header-divider ---------- */
+/* Vertical separator between header zones (CSS class, NOT inline style). */
+.header-divider {
+  width: 1px; height: 20px;
+  background: var(--color-border, var(--line));
+  margin: 0 12px;
+  display: inline-block;
+  vertical-align: middle;
+  flex: none;
+}
+
+/* ---------- .header__left ---------- */
+.header__left { display: flex; align-items: center; }
+
+/* ---------- pulse-dot / check-status (replaces countdown) ---------- */
+/* data-state: idle (default) | checking */
+.check-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.8125rem; color: var(--ink-2);
+}
+.check-dot {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--muted);
+  transition: background var(--t);
+}
+.check-status[data-state="checking"] .check-dot {
+  background: var(--accent);
+  animation: pulseDot 1.2s ease-in-out infinite;
+}
+.check-status[data-state="idle"] .check-label::before { content: "Жду"; }
+.check-status[data-state="checking"] .check-label::before { content: "Проверяю"; }
+/* Hides the hardcoded text inside .check-label when CSS is active */
+.check-label { font-size: 0; }
+.check-label::before { font-size: 0.8125rem; }
+
+/* ---------- lot-card--new (was_new accent) ---------- */
+/* Use inset box-shadow so the accent overlays the ::before freshness strip
+   without shifting layout (border-left would conflict with ::before at left:0). */
+:root { --new-accent: #e67e22; }
+.lot.lot-card--new { box-shadow: inset 3px 0 0 var(--new-accent); }
+
+/* ---------- lot content grid (poster variant: 1fr auto) ---------- */
+.lot--poster .lot__content-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+  margin-top: 8px;
+}
+.lot--poster .lot__actions-col {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+}
+
+/* ---------- ОГВ without uppercase ---------- */
+/* Only remove text-transform; keep the rest of lot__ogv as-is */
+.lot__ogv { text-transform: none; }
+
+/* ---------- filter-bar ---------- */
+.filter-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 0 12px;
+  font-size: 0.875rem;
+}
+.filter-bar__left { display: flex; align-items: center; gap: 6px; }
+.filter-bar__right { margin-left: auto; }
+.filter-bar__label { color: var(--muted); font-size: 0.8125rem; }
+.filter-bar__select {
+  padding: 4px 8px; font-size: 0.8125rem;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--ink);
+  cursor: pointer;
+}
+.filter-bar__select:hover { border-color: var(--line-strong); }
+.filter-bar__count { color: var(--ink-2); font-size: 0.8125rem; }
+
+/* ---------- C3 onboarding filter hint ---------- */
+.filter-hint {
+  font-size: 0.8125rem; color: var(--muted);
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  padding: 6px 10px;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+/* ---------- responsive ≤720px (lot cards) ---------- */
+@media (max-width: 720px) {
+  .lot--poster .lot__content-grid {
+    grid-template-columns: 1fr;
+  }
+  .lot--poster .lot__actions-col {
+    flex-direction: row; align-items: center;
+  }
+}
+

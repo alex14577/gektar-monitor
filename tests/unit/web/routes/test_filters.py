@@ -24,7 +24,6 @@ from urllib.parse import unquote
 
 import pytest
 from fastapi import FastAPI
-from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
 from fis_monitor.domain.models import LotUserDTO, Settings
@@ -38,7 +37,7 @@ from fis_monitor.web.deps import (
     get_view_filters_service,
 )
 from fis_monitor.web.routes.filters import router
-from fis_monitor.web.templates import TEMPLATES_DIR
+from fis_monitor.web.templates import TEMPLATES_DIR, build_templates
 from tests.factories import make_lot
 from tests.unit.web.routes.conftest import FakeConfigSource, FakeLotQueryService, FakeLotRepo
 
@@ -69,7 +68,7 @@ def _build_app(
     lot_repo: FakeLotRepo | None = None,
 ) -> FastAPI:
     """Build a minimal FastAPI app with the filters router and real templates."""
-    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates = build_templates()
     used_svc = svc or ViewFiltersService()
     used_cs = config_source or FakeConfigSource()
     used_lot_query = lot_query or FakeLotQueryService()

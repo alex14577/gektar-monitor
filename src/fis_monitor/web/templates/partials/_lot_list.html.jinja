@@ -4,7 +4,7 @@
    адаптирует layout, но дополнительная разметка деталей опциональна:
    её можно подгрузить лениво через hx-get="/lots/{{id}}/details".
    ======================================================================== #}
-<article class="lot lot--list"
+<article class="lot lot--list {% if lot.was_new %}lot-card--new{% endif %}"
          id="lot-{{ lot.id }}"
          data-lot-id="{{ lot.id }}"
          data-temp="{{ lot.temp }}"

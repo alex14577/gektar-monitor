@@ -1,6 +1,8 @@
 {# ========================================================================
    _sidebar_filters.html.jinja — view-фильтры (НЕ сохраняются в config.json)
    POST в /filters/view возвращает обновлённую ленту через hx-swap.
+
+   hiq3: C3 onboarding-hint при пустых subjects; M6 «Очистить» только при filters_active.
    ======================================================================== #}
 <form id="filters"
       hx-post="/filters/view"
@@ -13,12 +15,20 @@
     {% set oob = false %}
     {% include "partials/_filter_trigger.html.jinja" %}
     <div id="filter-subjects-menu" data-menu role="dialog" aria-label="Фильтр по субъектам" tabindex="-1" hidden></div>
+
+    {# C3: onboarding-hint — показывать только когда subjects не выбраны #}
+    {% if not filters.subjects %}
+    <p class="filter-hint">Выберите субъекты, чтобы видеть приоритетные лоты (чип «подписан»)</p>
+    {% endif %}
   </div>
 
+  {# M6: «Очистить фильтры» — показывать только при активных фильтрах #}
+  {% if filters_active %}
   <div class="sidebar__group">
     <button class="btn btn--ghost btn--sm btn--full" type="button"
             hx-post="/filters/clear" hx-target="#feed" hx-swap="outerHTML">
       Очистить фильтры
     </button>
   </div>
+  {% endif %}
 </form>

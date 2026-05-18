@@ -95,6 +95,7 @@ class LotFilters:
     area_sqm_max: Decimal | None = None
     status: str | None = None
     fts_query: str | None = None
+    sort_dir: Literal["desc", "asc"] = "desc"
 
     def __post_init__(self) -> None:
         if self.regions and self.subject_display_names:
@@ -107,6 +108,10 @@ class LotFilters:
         if self.status is not None and self.status not in _KNOWN_STATUSES:
             raise ValueError(
                 f"Unknown lot status {self.status!r}. Allowed: {sorted(_KNOWN_STATUSES)}"
+            )
+        if self.sort_dir not in ("desc", "asc"):
+            raise ValueError(
+                f"sort_dir must be 'desc' or 'asc', got {self.sort_dir!r}"
             )
 
 
@@ -366,7 +371,11 @@ class LotQueryService:
             params.append(last_id)
 
         where = " AND ".join(conditions)
-        sql = f"SELECT {_LOT_SELECT} FROM lots WHERE {where} ORDER BY id ASC LIMIT ?"
+        order_dir = filters.sort_dir.upper()  # "DESC" or "ASC"
+        sql = (
+            f"SELECT {_LOT_SELECT} FROM lots WHERE {where} "
+            f"ORDER BY first_seen {order_dir}, id {order_dir} LIMIT ?"
+        )
         params.append(limit)
 
         return sql, params

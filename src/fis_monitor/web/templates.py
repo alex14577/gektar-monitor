@@ -14,6 +14,8 @@ from pathlib import Path
 from fastapi.templating import Jinja2Templates
 from jinja2 import select_autoescape
 
+from fis_monitor.web.filters import format_date_ru
+
 TEMPLATES_DIR: Path = Path(__file__).parent / "templates"
 STATIC_DIR: Path = Path(__file__).parent / "static"
 
@@ -26,10 +28,15 @@ def build_templates() -> Jinja2Templates:
     `html`/`htm`/`xml`). Without explicit configuration `{{ user_input }}`
     in our templates is rendered raw — XSS-class vulnerability (Security F-01).
     Explicit enabled_extensions list closes the gap.
+
+    Custom filters (hiq3):
+    - ``dateformat``: formats a ``date`` / ``datetime`` as «D месяца YYYY»
+      in Russian (no babel, no locale.setlocale — ADR-026 bundle budget).
     """
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.autoescape = select_autoescape(
         enabled_extensions=("html", "htm", "xml", "jinja", "html.jinja"),
         default_for_string=True,
     )
+    templates.env.filters["dateformat"] = format_date_ru
     return templates

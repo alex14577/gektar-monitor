@@ -1,25 +1,28 @@
-"""Unit tests for SseStatus.next_fire_at publish invariant (bd r82m).
+"""Unit tests for SseCycleStarted publish invariant (hiq3, ADR-050).
 
 Layer 2 (Application services) — pure unit tests with FakeClock and
 FakeEventBus per docs/architecture/09-test-strategy.md.
 
-Root-cause (bd r82m): ``_publish_status`` published ``next_cycle_mmss="{interval}:00"``
-unconditionally after every cycle — a static string reset to the full interval on
-every swap/reconnect, so the visible countdown appeared frozen. Fix: publish the
-absolute UTC ``next_fire_at = clock.now() + timedelta(minutes=interval)`` in the
-``SseStatus`` payload so the JS can compute the real remaining time on every tick.
+Context: Replaces the countdown (bd r82m, ADR-048) tests now that ADR-050
+supersedes ADR-048. The countdown fields (next_fire_at, next_cycle_mmss)
+are removed from SseStatus. The pulse-dot pattern uses SseCycleStarted /
+SseCycleDone binary signals.
 
 Covered invariants:
-- ``SseStatus.next_fire_at`` is ``clock.now() + interval_minutes`` after a cycle.
-- ``SseStatus.next_fire_at`` is ``None`` when ``interval_minutes == 0`` (continuous mode).
-- ``SseStatus.next_fire_at_iso`` renders as ``Z``-suffixed UTC ISO-8601 string.
+- ``SseCycleStarted`` is published at the start of ``run_cycle``.
+- It carries ``cycle_id`` matching the opened cycle.
+- It is published before any ``SseCycleDone`` event.
+- On error paths (upstream error), ``SseCycleStarted`` is still published.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from fis_monitor.domain.models import Settings, SseStatus
+import pytest
+
+from fis_monitor.domain.errors import UpstreamError
+from fis_monitor.domain.models import SseCycleDone, SseCycleStarted
 from tests.unit.services.test_monitor_cycle import (
     _REGION,
     FakeClock,
@@ -34,96 +37,91 @@ from tests.unit.services.test_monitor_cycle import (
 _NOW = datetime(2026, 5, 18, 10, 0, 0, tzinfo=UTC)
 
 
-def _status_events(published: list) -> list[SseStatus]:
-    return [e for e in published if isinstance(e, SseStatus)]
+def _started_events(published: list) -> list[SseCycleStarted]:
+    return [e for e in published if isinstance(e, SseCycleStarted)]
 
 
-class TestPublishStatusNextFireAt:
-    """_publish_status publishes SseStatus with correct next_fire_at."""
+def _done_events(published: list) -> list[SseCycleDone]:
+    return [e for e in published if isinstance(e, SseCycleDone)]
 
-    def test_next_fire_at_equals_now_plus_interval(self) -> None:
-        """next_fire_at must equal clock.now() + interval_minutes."""
-        from tests.unit.services.test_monitor_cycle import FakeConfigSource
 
-        interval = 5
-        clock = FakeClock(fixed=_NOW)
-        config = FakeConfigSource()
-        config._settings = Settings(interval_minutes=interval)
+class TestPublishCycleStarted:
+    """run_cycle publishes SseCycleStarted before SseCycleDone."""
 
+    def test_cycle_started_published_on_happy_path(self) -> None:
+        """SseCycleStarted must be published on every successful cycle."""
         svc, _, _, _, _, _, _, bus, _ = _make_service(
             list_parser=FakeListParser(rows=[_make_parsed_row(1)]),
             enrichment=FakeEnrichmentService(lots=[_make_lot(1)]),
             lot_repo=FakeLotRepository(was_new_for={1}),
-            clock=clock,
-            config_source=config,
+            clock=FakeClock(fixed=_NOW),
         )
 
         svc.run_cycle(_REGION)
 
-        statuses = _status_events(bus.published)
-        assert statuses, "SseStatus must be published"
-        evt = statuses[0]
-        expected = _NOW + timedelta(minutes=interval)
-        assert evt.next_fire_at == expected, (
-            f"expected next_fire_at={expected!r}, got {evt.next_fire_at!r}"
-        )
+        started = _started_events(bus.published)
+        assert started, "SseCycleStarted must be published on happy path"
+        assert started[0].timestamp == _NOW
 
-    def test_next_fire_at_none_when_interval_zero(self) -> None:
-        """interval_minutes=0 (continuous mode) → next_fire_at must be None."""
-        from tests.unit.services.test_monitor_cycle import FakeConfigSource
-
-        clock = FakeClock(fixed=_NOW)
-        config = FakeConfigSource()
-        config._settings = Settings(interval_minutes=0)
-
+    def test_cycle_started_before_done(self) -> None:
+        """SseCycleStarted must be published before any SseCycleDone."""
         svc, _, _, _, _, _, _, bus, _ = _make_service(
             list_parser=FakeListParser(rows=[_make_parsed_row(1)]),
             enrichment=FakeEnrichmentService(lots=[_make_lot(1)]),
             lot_repo=FakeLotRepository(was_new_for={1}),
-            clock=clock,
-            config_source=config,
+            clock=FakeClock(fixed=_NOW),
         )
 
         svc.run_cycle(_REGION)
 
-        statuses = _status_events(bus.published)
-        assert statuses, "SseStatus must be published"
-        assert statuses[0].next_fire_at is None
+        started = _started_events(bus.published)
+        done = _done_events(bus.published)
+        assert started, "SseCycleStarted must be in published events"
+        assert done, "SseCycleDone must be in published events"
 
-
-class TestSseStatusNextFireAtIso:
-    """SseStatus.next_fire_at_iso produces correct ISO-8601 UTC format."""
-
-    def test_iso_format_has_z_suffix(self) -> None:
-        """Z-suffix ensures Date.parse() in all browsers treats value as UTC."""
-        ts = datetime(2026, 5, 18, 10, 30, 0, tzinfo=UTC)
-        evt = SseStatus(
-            timestamp=_NOW,
-            state="active",
-            interval_minutes=5,
-            next_fire_at=ts,
+        # Both events have the same timestamp from FakeClock — so check
+        # positional ordering in bus.published list instead
+        first_started_idx = bus.published.index(started[0])
+        first_done_idx = bus.published.index(done[0])
+        assert first_started_idx < first_done_idx, (
+            "SseCycleStarted must appear before SseCycleDone in the event stream"
         )
-        assert evt.next_fire_at_iso == "2026-05-18T10:30:00Z"
 
-    def test_iso_empty_when_none(self) -> None:
-        evt = SseStatus(
-            timestamp=_NOW,
-            state="active",
-            interval_minutes=0,
-            next_fire_at=None,
+    def test_cycle_started_has_cycle_id(self) -> None:
+        """SseCycleStarted.cycle_id must be a non-zero integer (assigned by cycles repo)."""
+        svc, _, _, _, _, _, _, bus, _ = _make_service(
+            list_parser=FakeListParser(rows=[_make_parsed_row(1)]),
+            enrichment=FakeEnrichmentService(lots=[_make_lot(1)]),
+            lot_repo=FakeLotRepository(was_new_for={1}),
+            clock=FakeClock(fixed=_NOW),
         )
-        assert evt.next_fire_at_iso == ""
 
-    def test_iso_utc_no_microseconds(self) -> None:
-        """Microseconds must be stripped — Date.parse edge-case in some older browsers."""
-        ts = datetime(2026, 5, 18, 10, 30, 45, 123456, tzinfo=UTC)
-        evt = SseStatus(
-            timestamp=_NOW,
-            state="active",
-            interval_minutes=5,
-            next_fire_at=ts,
+        svc.run_cycle(_REGION)
+
+        started = _started_events(bus.published)
+        assert started[0].cycle_id > 0
+
+
+class TestSseCycleStartedOnErrorPath:
+    """On error paths, SseCycleStarted is still published before the cycle terminates."""
+
+    def test_cycle_started_published_before_upstream_error(self) -> None:
+        """SseCycleStarted is published before UpstreamError propagates out of run_cycle.
+
+        Invariant: pulse-dot enters «checking» state on every run, even when the
+        parser raises UpstreamError.  run_cycle re-raises domain errors that escape
+        _run_cycle_inner; the supervisor (run_forever) handles the backoff.
+        """
+        svc, _, _, _, _, _, _, bus, _ = _make_service(
+            list_parser=FakeListParser(raises=UpstreamError("timeout", category="timeout")),
+            clock=FakeClock(fixed=_NOW),
         )
-        # Must not contain microseconds or fractional seconds.
-        iso = evt.next_fire_at_iso
-        assert "." not in iso
-        assert iso.endswith("Z")
+
+        with pytest.raises(UpstreamError):
+            svc.run_cycle(_REGION)
+
+        started = _started_events(bus.published)
+        assert started, (
+            "SseCycleStarted must be published on upstream error path so the "
+            "pulse-dot enters 'checking' state before the cycle fails"
+        )

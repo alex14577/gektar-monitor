@@ -605,8 +605,10 @@ class TestHtmlSseEncoding:
             chunks = list(resp.iter_bytes(chunk_size=4096))
 
         payload = b"".join(chunks).decode()
-        assert "14.03.2026 09:05" in payload, (
-            "Poster must render lot.date_create as published_at_human in .lot__appeared span"
+        # hiq3: date now rendered via dateformat filter → "14 марта 2026" (no time, no babel)
+        assert "14 марта 2026" in payload, (
+            "Poster must render lot.date_create as Russian date"
+            " via dateformat filter in .lot__appeared span"
         )
         assert "chip--new" not in payload, "NEW chip must be absent from poster"
         assert 'data-action="star"' not in payload, "Star button must be absent from poster"

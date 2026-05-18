@@ -184,6 +184,16 @@ class LotViewModel:
         return self._dto.first_seen.strftime("%d.%m.%Y %H:%M")
 
     @property
+    def date_create(self):  # type: ignore[return]
+        """FIS site publication date as datetime — for the ``dateformat`` Jinja2 filter (hiq3)."""
+        return self._dto.date_create
+
+    @property
+    def date_registry(self):  # type: ignore[return]
+        """EGRN registration date as datetime | None — for ``dateformat`` Jinja2 filter (hiq3)."""
+        return self._dto.date_registry
+
+    @property
     def published_at_human(self) -> str:
         """FIS site publication date — DATE_CREATE, when lot was added to FIS DB (NOT EGRN)."""
         return self._dto.date_create.strftime("%d.%m.%Y %H:%M")
@@ -258,6 +268,27 @@ class LotViewModel:
     def note(self) -> str | None:
         return None
 
+    @property
+    def was_new(self) -> bool:
+        """hiq3: always False for SSE fan-out path; LotUserViewModel overrides from DTO."""
+        return False
+
+
+class _SseLotNewViewModel(LotViewModel):
+    """``LotViewModel`` variant for ``SseLotNew`` events.
+
+    Overrides ``was_new`` to ``True`` because ``lot.new`` semantically means
+    first-seen: the encoder already knows the event type, so the override lives
+    here rather than widening the domain DTO contract.
+    """
+
+    __slots__ = ()
+
+    @property
+    def was_new(self) -> bool:
+        """Always True: a lot.new event is, by definition, first-seen."""
+        return True
+
 
 class LotUserViewModel(LotViewModel):
     """``LotViewModel`` variant that surfaces per-user state from a ``LotUserDTO``.
@@ -300,6 +331,11 @@ class LotUserViewModel(LotViewModel):
     @property
     def note(self) -> str | None:
         return self._user_dto.note
+
+    @property
+    def was_new(self) -> bool:
+        """hiq3: surface was_new from LotUserDTO for the accent border-left CSS class."""
+        return self._user_dto.was_new
 
 
 def _decimal_to_dms(degrees: float, pos_suffix: str, neg_suffix: str) -> str:
@@ -353,7 +389,7 @@ def make_html_sse_encoder(env: Environment) -> Callable[[SseEvent], bytes]:
             return encode_sse_event(event)
 
         template = env.get_template(template_name)
-        vm = LotViewModel(event.lot)
+        vm = _SseLotNewViewModel(event.lot)
         html: str = template.render(lot=vm, session=_SSE_SESSION_CTX)
 
         # RFC 8895 §9.2.5: split on newlines so each line starts with "data:".

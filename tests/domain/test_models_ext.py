@@ -485,7 +485,10 @@ def test_sse_event_union_members():
     # PEP 695 `type X = ...` produces a lazy `TypeAliasType`; unwrap via
     # `__value__` to inspect the underlying union.
     members = set(get_args(SseEvent.__value__))
-    from fis_monitor.domain.models import SseStatus  # bd 47uh
+    from fis_monitor.domain.models import (
+        SseCycleStarted,  # hiq3
+        SseStatus,  # bd 47uh
+    )
 
     assert members == {
         SseCycleError,
@@ -494,6 +497,7 @@ def test_sse_event_union_members():
         SseLotNew,
         SseLotStatus,
         SseCycleDone,
+        SseCycleStarted,
         SseStatus,
     }
 

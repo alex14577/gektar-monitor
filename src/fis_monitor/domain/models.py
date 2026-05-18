@@ -203,6 +203,11 @@ class LotUserDTO(LotPublicDTO):
     or `GET /api/lots/{id}/user-state` — never via fan-out SSE.
 
     Inherits the `raw_json` exclusion from `LotPublicDTO`.
+
+    ``was_new``: True when the lot was first seen during a monitor cycle
+    (not a historical backfill). Drives the ``lot-card--new`` accent border
+    in the UI (hiq3). Defaults to False — safe for all pre-hiq3 lots that
+    were persisted without this flag.
     """
 
     model_config = _DOMAIN_MODEL_CONFIG
@@ -212,6 +217,7 @@ class LotUserDTO(LotPublicDTO):
     submitted_at: datetime | None = None
     note: str | None = None
     seen_at: datetime | None = None
+    was_new: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -952,6 +958,30 @@ class SseCycleDone(BaseModel):
     duration_ms: StrictInt
 
 
+class SseCycleStarted(BaseModel):
+    """Normal event: monitor cycle began execution (hiq3).
+
+    Published once at the very start of ``MonitorCycleService.run_cycle``,
+    before any I/O, so the UI pulse-dot can switch from «idle» to «checking»
+    state.  Pair with ``SseCycleDone``: one ``cycle.started`` per run, one
+    ``cycle.done`` per run (emitted from ``_publish_cycle_done`` in every
+    ``_close_with_*`` helper).
+
+    SSE name: ``cycle.started``.
+    JS handler: ``data-state="checking"`` on the ``.check-status`` span.
+
+    No PII: timestamp and numeric cycle id only.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["normal"]] = "normal"
+
+    event: Literal["cycle.started"] = "cycle.started"
+    timestamp: datetime
+    cycle_id: StrictInt
+
+
 class SseStatus(BaseModel):
     """Normal event: header-status widget refresh (bd 47uh).
 
@@ -961,17 +991,13 @@ class SseStatus(BaseModel):
     - ``state``: traffic-light for the monitor — active / warning / error /
       paused. Drives the dot colour and the screen-reader label.
     - ``interval_minutes``: configured polling interval.
-    - ``next_cycle_mmss``: best-effort "MM:SS until next poll" rendered on
-      the server. Empty when not yet known (first render).
-    - ``next_fire_at``: absolute UTC datetime of the next scheduled cycle
-      (``None`` when not yet known). The client-side countdown JS uses this
-      absolute timestamp to compute remaining seconds on every tick, making
-      the timer swap-safe: a fresh SSE swap carries the ground-truth timestamp
-      so the countdown restarts from the correct remaining time, not from
-      the full interval. Introduced by bd r82m.
     - ``last_new_human``: relative-time string for the most-recent lot
       (``"5 мин назад"``); "—" when the database is empty.
     - ``expires_at_hhmm``: session-expiry clock for the warning state.
+
+    Countdown fields (``next_cycle_mmss``, ``next_fire_at``) are removed
+    as part of hiq3 — superseded by the ``SseCycleStarted`` / ``SseCycleDone``
+    pulse-dot pattern (ADR-050 supersedes ADR-048).
 
     Published from ``MonitorCycleService._publish_cycle_done`` alongside
     ``SseCycleDone`` so a single cycle yields both terminal signals on
@@ -989,24 +1015,10 @@ class SseStatus(BaseModel):
     timestamp: datetime
     state: Literal["active", "warning", "error", "paused"]
     interval_minutes: StrictInt
-    next_cycle_mmss: str = ""
-    next_fire_at: datetime | None = None
     last_new_human: str = "—"
+    last_new_at_hhmm: str = ""
+    """Absolute HH:MM for tooltip (alongside `last_new_human`). Empty if no lot seen yet."""
     expires_at_hhmm: str = ""
-
-    @property
-    def next_fire_at_iso(self) -> str:
-        """ISO-8601 UTC string for the next fire timestamp.
-
-        Returns an empty string when ``next_fire_at`` is ``None`` (unknown).
-        The ``Z`` suffix ensures ``Date.parse()`` in all modern browsers
-        reliably parses the value as UTC without relying on timezone-aware
-        ISO strings (``+00:00`` is also valid, ``Z`` is simpler and
-        universally supported).
-        """
-        if self.next_fire_at is None:
-            return ""
-        return self.next_fire_at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ---------------------------------------------------------------------------
@@ -1118,7 +1130,7 @@ class ProviderSuggestion:
 # ---------------------------------------------------------------------------
 # SseEvent — closed union over all bus event types
 # ---------------------------------------------------------------------------
-#: All five concrete SSE event DTOs. `EventBus.publish(event: SseEvent)` and
+#: All concrete SSE event DTOs. `EventBus.publish(event: SseEvent)` and
 #: `EventBus.subscribe() -> EventSubscription[SseEvent]` use this alias.
 #: Adding a new event type = extend this union AND register its priority
 #: ClassVar; nothing else changes (OCP).
@@ -1129,5 +1141,6 @@ type SseEvent = (
     | SseLotNew
     | SseLotStatus
     | SseCycleDone
+    | SseCycleStarted
     | SseStatus
 )

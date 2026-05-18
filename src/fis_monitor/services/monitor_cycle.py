@@ -35,7 +35,7 @@ import logging
 import queue
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
@@ -62,6 +62,7 @@ from fis_monitor.domain.models import (
     Lot,
     SseCycleDone,
     SseCycleError,
+    SseCycleStarted,
     SseSessionExpired,
     SseStatus,
 )
@@ -406,6 +407,16 @@ class MonitorCycleService:
         )
         cycle_id = self._cycles_repo.open(region=region, at=started_at)
 
+        # hiq3 (ADR-050): publish cycle.started so the pulse-dot switches to
+        # "checking" state before any I/O.  Best-effort — failures must not
+        # prevent the cycle from running.
+        try:
+            self._event_bus.publish(
+                SseCycleStarted(timestamp=started_at, cycle_id=cycle_id)
+            )
+        except Exception:
+            logger.warning("monitor_cycle.cycle_started.publish_failed", exc_info=True)
+
         try:
             return self._run_cycle_inner(
                 region=region,
@@ -702,10 +713,12 @@ class MonitorCycleService:
         """Publish ``SseStatus`` for the header-status widget (bd 47uh).
 
         Reads ``MAX(first_seen)`` from the repo for the "Последний новый"
-        chip and the current ``interval_minutes`` for the countdown text.
-        State is ``"error"`` on a failed cycle, otherwise ``"active"``;
+        chip. State is ``"error"`` on a failed cycle, otherwise ``"active"``;
         session-aware states (``warning``/``paused``) are driven by other
         events (``SseSessionExpired``) — this event covers the cycle path.
+
+        Countdown fields removed by hiq3 (ADR-050 supersedes ADR-048):
+        the pulse-dot pattern (SseCycleStarted / SseCycleDone) replaces them.
 
         Errors in repo or settings access are logged and swallowed: the
         widget refresh is best-effort and must not break the consumer loop.
@@ -717,23 +730,16 @@ class MonitorCycleService:
             last_new_human = "—" if last_new is None else _humanize_relative_age(
                 now - last_new
             )
+            last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
             interval = int(settings.interval_minutes)
-            next_cycle_mmss = f"{interval}:00" if interval > 0 else ""
-            # bd r82m: absolute next-fire timestamp is the SSOT for the client
-            # countdown. The JS reads data-next-check-at and computes remaining
-            # seconds as (Date.parse(nextAt) - Date.now()) / 1000 each tick, so
-            # an SSE swap or reconnect always restores the correct remaining time
-            # without resetting to the full interval.
-            next_fire_at = (now + timedelta(minutes=interval)) if interval > 0 else None
             state = "error" if result.status == "error" else "active"
             self._event_bus.publish(
                 SseStatus(
                     timestamp=now,
                     state=state,
                     interval_minutes=interval,
-                    next_cycle_mmss=next_cycle_mmss,
-                    next_fire_at=next_fire_at,
                     last_new_human=last_new_human,
+                    last_new_at_hhmm=last_new_at_hhmm,
                     expires_at_hhmm="",
                 )
             )

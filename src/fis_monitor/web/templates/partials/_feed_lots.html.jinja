@@ -5,6 +5,39 @@
              <button id="filter-trigger" hx-swap-oob="true"> so htmx refreshes
              the subject-filter trigger button outside #feed on POST responses.
 #}
+
+{# hiq3: filter-bar — between header and list, sort select + lot count #}
+<div class="filter-bar">
+  <div class="filter-bar__left">
+    <label class="filter-bar__label" for="sort-dir-select">Сортировка:</label>
+    <select id="sort-dir-select" name="sort_dir" class="filter-bar__select"
+            hx-post="/filters/view"
+            hx-target="#feed"
+            hx-swap="outerHTML"
+            hx-include="#filters">
+      <option value="desc" {% if not filters.sort_dir or filters.sort_dir == 'desc' %}selected{% endif %}>по дате ↓</option>
+      <option value="asc"  {% if filters.sort_dir == 'asc' %}selected{% endif %}>по дате ↑</option>
+    </select>
+  </div>
+  <div class="filter-bar__right">
+    {% if zones.today %}
+    <span class="filter-bar__count">
+      {{ zones.today|length }} лот{{ 'а' if zones.today|length in [2,3,4] else ('' if zones.today|length == 1 else 'ов') }}
+    </span>
+    {% endif %}
+  </div>
+</div>
+
+{# Backfill spinner — упрощённый вариант (hiq3): только spinner + label, без детализации region/page/lots #}
+<div id="backfill-progress" style="display:none; text-align:center; padding: 10px 0 4px;">
+  <span class="spinner-dots" aria-label="Загружаем каталог" style="display:inline-flex; vertical-align: middle;">
+    <span class="spinner-dots__dot"></span>
+    <span class="spinner-dots__dot"></span>
+    <span class="spinner-dots__dot"></span>
+  </span>
+  <span style="margin-left: 8px; font-size: 0.875rem; color: var(--ink-2);">Загружаем каталог…</span>
+</div>
+
 <div id="feed"
      sse-swap="lot.new,lot.status"
      hx-target="this"

@@ -4,7 +4,7 @@
    - SSE-listener stub (with comment markers)
    - IntersectionObserver "seen" reporter for [NEW] badge
    - aria-live announcements
-   - countdown header timer
+   - pulse-dot status indicator
    - DND, star, expand/collapse toggles (UI only)
    - lot freshness flash, sticky "N new above" pill, scroll persistence
    - escalation progress, since-arrived counter
@@ -185,31 +185,24 @@
     area.focus();
   });
 
-  // ---------- header countdown ----------
-  // Re-resolves the element on every tick: #header-status is replaced by
-  // sse-swap="status", so a once-captured node reference would become
-  // detached and the visible span would freeze on the server-rendered value.
+  // ---------- pulse-dot: SSE cycle.started / cycle.done (hiq3, ADR-050) ----------
+  // Replaces the countdown setInterval removed by hiq3.
+  // .check-status[data-state] is toggled by SSE events:
+  //   cycle.started → data-state="checking"  (JS triggers this via htmx:sseMessage)
+  //   cycle.done    → data-state="idle"
   //
-  // bd r82m: reads data-next-check-at (absolute UTC ISO-8601 timestamp) and
-  // computes remaining = (Date.parse(nextAt) - Date.now()) / 1000 each tick.
-  // This makes the countdown swap-safe: a fresh SSE swap or reconnect delivers
-  // the real next-fire timestamp, so the timer restores the correct remaining
-  // time instead of resetting to the full interval.
-  //
-  // Graceful degrade: if data-next-check-at is absent or unparseable the
-  // element text is cleared and the tick is a no-op (no bogus countdown).
-  setInterval(() => {
-    const el = $('[data-countdown]');
-    if (!el) return;
-    const nextAtStr = el.dataset.nextCheckAt;
-    if (!nextAtStr) return;
-    const nextAt = Date.parse(nextAtStr);
-    if (!Number.isFinite(nextAt)) return;
-    const remaining = Math.max(0, Math.round((nextAt - Date.now()) / 1000));
-    const m = Math.floor(remaining / 60);
-    const s = remaining % 60;
-    el.textContent = `${m}:${pad2(s)}`;
-  }, 1000);
+  // #header-status is replaced by sse-swap="status" so we re-resolve .check-status
+  // on every event (same pattern the old countdown used for [data-countdown]).
+  document.body.addEventListener('htmx:sseMessage', (e) => {
+    const type = e.detail && e.detail.type;
+    if (type === 'cycle.started') {
+      const dot = document.querySelector('.check-status');
+      if (dot) dot.dataset.state = 'checking';
+    } else if (type === 'cycle.done') {
+      const dot = document.querySelector('.check-status');
+      if (dot) dot.dataset.state = 'idle';
+    }
+  });
 
   // ---------- DND ----------
   document.addEventListener('click', (e) => {

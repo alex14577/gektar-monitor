@@ -108,16 +108,75 @@ def test_last_new_human_real_age_from_repo() -> None:
     assert vm.last_new_human == "5 мин назад"
 
 
+def test_last_new_at_hhmm_when_lot_exists() -> None:
+    """build_monitor_vm computes last_new_at_hhmm as HH:MM from first_seen (m1)."""
+    from fis_monitor.domain.models import Lot
+
+    repo = FakeLotRepository()
+    ts = datetime(2026, 5, 18, 14, 35, 0, tzinfo=UTC)  # 14:35 UTC
+    lot = Lot.model_construct(
+        id=2,
+        cadastral_no="00:00:000000:2",
+        area_sqm=None,
+        region="Test",
+        municipality=None,
+        land_category=None,
+        permitted_use=None,
+        ogv=None,
+        status="active",
+        date_create=_NOW,
+        date_update=None,
+        date_registry=None,
+        lat=None,
+        lon=None,
+        has_boundaries=None,
+        raw_json={},
+        parser_version=1,
+        first_seen=ts,
+        last_seen=_NOW,
+        detail_fetched_at=None,
+        enrichment_status="pending",
+        last_seen_at=_NOW,
+        is_active=True,
+        inactive_reason=None,
+        inactive_since=None,
+        inactive_confirmed_at=None,
+        region_id=None,
+    )
+    repo._lots[2] = lot
+
+    vm = build_monitor_vm(
+        settings=Settings(),
+        session=_session(),
+        lot_repo=repo,
+        now=_NOW,
+    )
+    assert vm.last_new_at_hhmm == "14:35", (
+        f"Expected '14:35' from first_seen 14:35 UTC, got {vm.last_new_at_hhmm!r}"
+    )
+
+
+def test_last_new_at_hhmm_empty_when_db_empty() -> None:
+    """build_monitor_vm returns last_new_at_hhmm='' when no lots in DB (m1)."""
+    vm = build_monitor_vm(
+        settings=Settings(),
+        session=_session(),
+        lot_repo=FakeLotRepository(),
+        now=_NOW,
+    )
+    assert vm.last_new_at_hhmm == ""
+
+
 # ---------------------------------------------------------------------------
-# bd r82m: next_fire_at_iso on initial render VM
+# hiq3 (ADR-050): pulse-dot replaces countdown
 # ---------------------------------------------------------------------------
 
 
-def test_next_fire_at_iso_empty_on_initial_render() -> None:
-    """build_monitor_vm always returns next_fire_at_iso='' (initial render).
+def test_no_countdown_fields_in_initial_render_vm() -> None:
+    """build_monitor_vm must NOT expose countdown fields (hiq3 cleanup, ADR-050).
 
-    The scheduler does not expose a next-fire probe API at initial render time.
-    The SSE SseStatus event populates next_fire_at after each cycle.
+    next_cycle_mmss and next_fire_at_iso are removed — superseded by the
+    SseCycleStarted / SseCycleDone pulse-dot pattern.
     """
     vm = build_monitor_vm(
         settings=Settings(interval_minutes=5),
@@ -125,22 +184,18 @@ def test_next_fire_at_iso_empty_on_initial_render() -> None:
         lot_repo=FakeLotRepository(),
         now=_NOW,
     )
-    assert hasattr(vm, "next_fire_at_iso"), (
-        "VM must expose next_fire_at_iso so the template can render data-next-check-at"
+    assert not hasattr(vm, "next_fire_at_iso"), (
+        "VM must NOT expose next_fire_at_iso — countdown removed by hiq3"
     )
-    assert vm.next_fire_at_iso == ""
+    assert not hasattr(vm, "next_cycle_mmss"), (
+        "VM must NOT expose next_cycle_mmss — countdown removed by hiq3"
+    )
 
 
-# ---------------------------------------------------------------------------
-# bd r82m: _header_status.html.jinja renders data-next-check-at attribute
-# ---------------------------------------------------------------------------
+def test_header_status_template_renders_pulse_dot() -> None:
+    """_header_status.html.jinja must render pulse-dot (.check-status) element.
 
-
-def test_header_status_template_renders_data_next_check_at_from_sse_status() -> None:
-    """SseStatus with next_fire_at → template renders non-empty data-next-check-at.
-
-    Layer 3 (web/templates) contract test: the Jinja2 partial must expose the
-    ``data-next-check-at`` attribute when ``monitor.next_fire_at_iso`` is set.
+    hiq3 contract: countdown span replaced by .check-status with data-state.
     """
     from datetime import UTC, datetime
 
@@ -148,45 +203,18 @@ def test_header_status_template_renders_data_next_check_at_from_sse_status() -> 
     from fis_monitor.web.templates import build_templates
 
     ts = datetime(2026, 5, 18, 10, 30, 0, tzinfo=UTC)
-    next_fire = datetime(2026, 5, 18, 10, 31, 0, tzinfo=UTC)
     evt = SseStatus(
         timestamp=ts,
         state="active",
         interval_minutes=1,
-        next_cycle_mmss="1:00",
-        next_fire_at=next_fire,
     )
 
     tpl = build_templates()
     html = tpl.env.get_template("partials/_header_status.html.jinja").render(monitor=evt)
 
-    assert 'data-next-check-at="2026-05-18T10:31:00Z"' in html, (
-        f"Expected data-next-check-at attribute in rendered HTML. Got:\n{html}"
+    assert "check-status" in html, (
+        f"Expected .check-status pulse-dot element in rendered header. Got:\n{html}"
     )
-
-
-def test_header_status_template_renders_empty_data_next_check_at_on_initial_render() -> None:
-    """Initial-render VM (next_fire_at_iso='') → attribute present but empty.
-
-    The JS countdown gracefully skips ticking when the attribute is empty,
-    so the initial render before the first SSE cycle is safe.
-    """
-    from fis_monitor.web.templates import build_templates
-
-    vm = build_monitor_vm(
-        settings=Settings(interval_minutes=5),
-        session=_session(),
-        lot_repo=FakeLotRepository(),
-        now=_NOW,
-    )
-
-    tpl = build_templates()
-    html = tpl.env.get_template("partials/_header_status.html.jinja").render(monitor=vm)
-
-    # Attribute must be present (even if empty) for JS to detect the element.
-    assert "data-next-check-at" in html, (
-        f"data-next-check-at attribute must be present in initial render. Got:\n{html}"
-    )
-    assert 'data-next-check-at=""' in html, (
-        f"data-next-check-at must be empty on initial render. Got:\n{html}"
+    assert "data-state" in html, (
+        f"Expected data-state attribute on .check-status. Got:\n{html}"
     )

@@ -48,27 +48,23 @@ def build_monitor_vm(
         settings: live ``Settings`` snapshot — supplies ``interval_minutes``.
         session: the same ``session`` namespace that the layout uses for
             expiry rendering. Provides ``expires_at_hhmm`` (best-effort,
-            may be empty until ``HttpSessionProbe`` is wired — see bd a4t.8).
+            may be empty until ``HttpSessionProbe`` is wired).
         lot_repo: source for ``MAX(first_seen)`` — drives ``last_new_human``.
         now: injected wallclock (UTC-aware) so tests don't drift.
 
-    The ``next_cycle_mmss`` and ``next_fire_at_iso`` fields are intentionally
-    empty on initial render — the scheduler does not expose a "next-fire" probe
-    API. The SSE ``status`` event populates them after each cycle when the
-    scheduler has a known cadence.
+    Countdown fields (``next_cycle_mmss``, ``next_fire_at_iso``) are removed
+    by hiq3 — superseded by the pulse-dot pattern (ADR-050).
     """
     last_new = lot_repo.latest_new_first_seen()
     last_new_human = (
         "—" if last_new is None else humanize_relative_age(now - last_new)
     )
+    last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
 
     return SimpleNamespace(
         state=_state_from_session(session),
         interval_minutes=settings.interval_minutes,
-        next_cycle_mmss="",
-        # bd r82m: empty on initial render; SSE SseStatus provides the real
-        # value after the first cycle so the countdown ticks correctly.
-        next_fire_at_iso="",
         last_new_human=last_new_human,
+        last_new_at_hhmm=last_new_at_hhmm,
         expires_at_hhmm=getattr(session, "expires_at_hhmm", ""),
     )

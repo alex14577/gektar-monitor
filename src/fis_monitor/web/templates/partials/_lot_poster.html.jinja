@@ -2,8 +2,11 @@
    _lot_poster.html.jinja — poster-карточка (для горячих/тёплых лотов).
    Используется как полный фрагмент SSE-event "lot.new" — сервер шлёт <article>…</article>.
    Ожидает переменную `lot` в контексте.
+
+   hiq3: grid 1fr auto, was_new → lot-card--new accent border-left, dateformat filter,
+   ОГВ без uppercase, inline copy-cadastre через [data-copy] delegation.
    ======================================================================== #}
-<article class="lot lot--poster"
+<article class="lot lot--poster {% if lot.was_new %}lot-card--new{% endif %}"
          id="lot-{{ lot.id }}"
          data-lot-id="{{ lot.id }}"
          data-temp="{{ lot.temp }}"
@@ -21,31 +24,39 @@
     </div>
   </div>
 
-  <h3 class="lot__title" id="lot-{{ lot.id }}-title">
-    {{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %}
-  </h3>
-  <p class="lot__meta">{{ lot.area_ha | replace('.', ',') }} га · {{ lot.category }}</p>
-  {% if lot.vri %}
-    <p class="lot__vri" title="Вид разрешённого использования">ВРИ: {{ lot.vri }}</p>
-  {% endif %}
+  {# Grid: content left (1fr), actions right (auto), top-aligned #}
+  <div class="lot__content-grid">
+    <div class="lot__content">
+      <h3 class="lot__title" id="lot-{{ lot.id }}-title">
+        {{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %}
+      </h3>
+      <p class="lot__meta">{{ lot.area_ha | replace('.', ',') }} га · {{ lot.category }}</p>
+      {% if lot.vri %}
+        <p class="lot__vri" title="Вид разрешённого использования">ВРИ: {{ lot.vri }}</p>
+      {% endif %}
 
-  <span class="lot__cad">
-    <span data-copy="{{ lot.cadastral_no }}">{{ lot.cadastral_no }}</span>
-    <button class="copy" type="button" data-copy="{{ lot.cadastral_no }}"
-            aria-label="Скопировать кадастровый номер">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-    </button>
-    <span class="lot__appeared" title="Дата создания в ФИС">· {{ lot.published_at_human }}</span>{% if lot.has_registry_date %}<span class="lot__registry" title="Дата постановки на учёт в ЕГРН"> · ЕГРН {{ lot.registry_date_human }}</span>{% endif %}
-  </span>
+      <span class="lot__cad">
+        <span data-copy="{{ lot.cadastral_no }}">{{ lot.cadastral_no }}</span>
+        <button class="copy" type="button" data-copy="{{ lot.cadastral_no }}"
+                aria-label="Скопировать кадастровый номер">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        {# hiq3: дата через format_date_ru — «17 марта 2026» без времени, без babel #}
+        <span class="lot__appeared" title="Дата создания в ФИС">· {{ lot.date_create | dateformat }}</span>
+        {% if lot.has_registry_date %}<span class="lot__registry" title="Дата постановки на учёт в ЕГРН"> · ЕГРН {{ lot.date_registry | dateformat }}</span>{% endif %}
+      </span>
 
-  {% if lot.ogv %}<p class="lot__ogv" title="Орган государственной власти">ОГВ: {{ lot.ogv }}</p>{% endif %}
+      {# hiq3: ОГВ без text-transform uppercase — см. lot__ogv в CSS #}
+      {% if lot.ogv %}<p class="lot__ogv" title="Орган государственной власти">ОГВ: {{ lot.ogv }}</p>{% endif %}
+    </div>
 
-  <div class="lot__cta">
-    <a class="btn btn--primary" href="{{ lot.url }}" target="_blank" rel="noopener"
-       {% if session.expired %}aria-disabled="true" tabindex="-1" style="pointer-events:none; opacity:0.5"{% endif %}>
-      Открыть на сайте
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
-    </a>
+    <div class="lot__actions-col">
+      <a class="btn btn--primary btn--sm" href="{{ lot.url }}" target="_blank" rel="noopener"
+         {% if session.expired %}aria-disabled="true" tabindex="-1" style="pointer-events:none; opacity:0.5"{% endif %}>
+        Открыть ↗
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+      </a>
+    </div>
   </div>
 
   <div class="lot__details">

@@ -1,6 +1,9 @@
 {# ========================================================================
    _header_status.html.jinja — содержимое #header-status
    Сервер шлёт этот фрагмент через SSE-event "status" каждый цикл / при изменении.
+
+   hiq3 (ADR-050): countdown заменён на pulse-dot.
+   data-state переключается JS-ом через SSE events cycle.started / cycle.done.
    ======================================================================== #}
 <span class="status" data-state="{{ monitor.state }}"
       title="{% if monitor.state == 'active' %}Все системы в норме{% elif monitor.state == 'warning' %}Сессия скоро истечёт{% elif monitor.state == 'error' %}Сессия истекла{% else %}Пауза{% endif %}">
@@ -11,21 +14,16 @@
   {% else %}Пауза{% endif %}
 </span>
 
-{% if monitor.interval_minutes > 0 %}
-  <span class="countdown" aria-label="До следующей проверки">
-    Проверка через
-    <span data-countdown data-next-check-at="{{ monitor.next_fire_at_iso }}">{{ monitor.next_cycle_mmss }}</span>
-  </span>
-{% else %}
-  <span class="countdown" aria-label="Непрерывный цикл">
-    <span class="status__dot" style="background: var(--accent); display: inline-block; vertical-align: middle; margin-right: 4px;"></span>
-    Без паузы между проверками
-  </span>
-{% endif %}
+{# pulse-dot: cycle.started → checking, cycle.done → idle #}
+<span class="check-status" data-state="idle">
+  <span class="check-dot" aria-hidden="true"></span>
+  <span class="check-label">Жду</span>
+</span>
 
-<span style="color: var(--muted); font-size: 0.8125rem;">·</span>
+<span class="header-divider" aria-hidden="true"></span>
 <span style="font-size: 0.8125rem; color: var(--ink-2);">
-  Последний новый: <b>{{ monitor.last_new_human }}</b>
+  Последний новый:
+  <b title="{{ monitor.last_new_human }}{% if monitor.last_new_at_hhmm %} ({{ monitor.last_new_at_hhmm }}){% endif %}">{{ monitor.last_new_human }}</b>
 </span>
 {# bd-bi7i: чип «Громче через ...» убран из UI — пользователю смысл непонятен,
    плюс он триггерился на backfilled-лотах (исторический догон). После

@@ -377,12 +377,12 @@ def _make_service(rows: list[sqlite3.Row] | None = None) -> LotQueryService:
 @pytest.mark.parametrize(
     "filters,last_id,limit,expected_fragments,not_expected",
     [
-        # No filters — only is_active + LIMIT
+        # No filters — only is_active + LIMIT; default sort is first_seen DESC (hiq3)
         (
             LotFilters(),
             None,
             10,
-            ["is_active = 1", "ORDER BY id ASC LIMIT ?"],
+            ["is_active = 1", "ORDER BY first_seen DESC", "LIMIT ?"],
             ["region IN", "area_sqm >=", "area_sqm <=", "status =", "id >"],
         ),
         # Regions filter
@@ -539,15 +539,20 @@ def test_search_lot_with_user_state() -> None:
 
 
 def test_search_has_more_true_when_extra_row() -> None:
-    """Fetch page_size+1 rows → has_more=True, next_cursor set to last returned id."""
+    """Fetch page_size+1 rows → has_more=True, next_cursor set to last returned id.
+
+    hiq3: default sort is first_seen DESC, id DESC. With 6 rows having equal first_seen
+    the order is id DESC: 6,5,4,3,2,1. First page (5 items): 6,5,4,3,2. Last item id=2.
+    """
     rows = [_make_db_row(lot_id=i) for i in range(1, 7)]  # 6 rows
     svc = _make_service(rows=rows)
     page = svc.search(LotFilters(), page_size=5)
     assert page.has_more is True
     assert page.next_cursor is not None
     assert len(page.items) == 5
-    # next_cursor encodes the last item id (5)
-    assert _decode_cursor(page.next_cursor) == 5
+    # next_cursor encodes the last item id on the first page
+    # With equal first_seen values, ORDER BY id DESC → first page = [6,5,4,3,2], last=2
+    assert _decode_cursor(page.next_cursor) == 2
 
 
 def test_search_has_more_false_exact_page() -> None:

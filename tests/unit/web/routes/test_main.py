@@ -20,7 +20,6 @@ from urllib.parse import quote
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
 from fis_monitor.domain.interfaces import ConfigSubscription
@@ -40,7 +39,7 @@ from fis_monitor.web.deps import (
     get_user_state_repo,
 )
 from fis_monitor.web.routes.main import router
-from fis_monitor.web.templates import STATIC_DIR, TEMPLATES_DIR
+from fis_monitor.web.templates import STATIC_DIR, build_templates
 from tests.factories import make_settings
 from tests.unit.web.routes.conftest import FakeLotQueryService, FakeLotRepo
 
@@ -201,7 +200,7 @@ def _make_app(
     fake_lot_repo = lot_repo if lot_repo is not None else FakeLotRepo()
     fake_lot_query = lot_query if lot_query is not None else FakeLotQuery()
     fake_clock = clock if clock is not None else FakeClock()
-    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates = build_templates()
 
     # Real FakeSessionProbe.check() never raises NotImplementedError, so the
     # fallback to LoginService.status() is dormant in these tests. We still

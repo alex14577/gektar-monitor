@@ -135,4 +135,77 @@ fis-monitor.exe запущен
 
 Делать это сразу — рано, см. [[product/risks-legal]] про 152-ФЗ (на сервере мы становимся оператором ПДн со всеми обязательствами). Но **архитектурно дорога открыта**.
 
+## Компоненты UI (hiq3)
+
+### Header — три зоны
+
+Header разделён на три зоны через CSS flex:
+
+- **Левая:** логотип + название + индикатор статуса (pulse-dot, см. ниже).
+- **Центральная:** flex-spacer (`margin-left: auto` на правой зоне).
+- **Правая:** «Последний новый: X мин назад» → `.header-divider` → иконки (DND, notifications, settings, «Проверить сейчас»).
+
+Разделители: CSS-класс `.header-divider` (1px, `var(--color-border)`). Не inline-style.
+
+Иконки: 32×32, `title` + `aria-label` обязательны. Текст «Не беспокоить» удалён.
+
+### Status indicator — pulse-dot (ADR-050, supersedes ADR-048)
+
+Вместо обратного отсчёта «Проверка через MM:SS» — pulse-dot:
+
+```html
+<span class="check-status" data-state="idle|checking">
+  <span class="check-dot" aria-hidden="true"></span>
+  <span class="check-label">Жду | Проверяю</span>
+</span>
+```
+
+Состояния переключаются через SSE-события:
+- `cycle.started` → JS ставит `data-state="checking"` (анимация pulse запускается)
+- `cycle.done`    → JS ставит `data-state="idle"`
+
+Событие `SseCycleStarted(timestamp, cycle_id)` добавлено в `domain/models.py` симметрично `SseCycleDone`.
+Поля `next_cycle_mmss`, `next_fire_at`, `next_fire_at_iso` удалены из `SseStatus`.
+
+Подробности: [[decisions/ADR-050-status-indicator-supersedes-countdown|ADR-050]].
+
+### Lot cards — двухколоночный грид
+
+```css
+.lot__content-grid { display: grid; grid-template-columns: 1fr auto; align-items: start; }
+```
+
+- Контент слева (1fr), actions (кнопка «Открыть») справа, прижаты к верху.
+- `@media (max-width: 720px)` — стек, actions снизу.
+- Акцентный border-left: класс `.lot-card--new` — оранжевый (`#e67e22`) для `was_new=True`; зелёный дефолт.
+- `was_new` передаётся из `LotUserDTO` через `LotViewModel` → шаблон.
+- ОГВ: `text-transform: uppercase` убран (только это).
+- Дата: `{{ lot.date_create | dateformat }}` через `format_date_ru` (без babel, `web/filters.py`).
+- Кадастровый номер: inline `<button data-copy="...">` — переиспользует delegation-обработчик на `document` (`app.js`).
+
+### Filter bar
+
+Отдельный `<div class="filter-bar">` между header и лентой лотов (`_feed_lots.html.jinja`).
+- Слева: sort select («по дате ↓ / ↑»), `name="sort_dir"`, вызывает `hx-post="/filters/view"`.
+- Справа: счётчик лотов.
+- Sort field: `first_seen DESC/ASC` (момент обнаружения парсером). `LotFilters.sort_dir: Literal["desc","asc"] = "desc"`.
+
+#### UX-улучшения фильтров
+
+- **C3 onboarding-hint:** при `{% if not filters.subjects %}` — inline-подсказка «Выберите субъекты…».
+- **M6 «Очистить фильтры»:** рендерится только при `{% if filters_active %}`.
+
+### Локализация дат
+
+`src/fis_monitor/web/filters.py::format_date_ru` — чистая функция, зарегистрирована
+как Jinja2-фильтр `dateformat` в `build_templates()`.  Словарь месяцев встроен
+(родительный падеж), без `locale.setlocale`, без babel (~10 МБ экономии, ADR-026).
+
+### Нормализация ВРИ
+
+`src/fis_monitor/infra/normalize.py::normalize_vri` — вызывается в `list_parser.py`
+при парсинге, до сохранения в БД.  Whitelist аббревиатур {ИЖС, ЛПХ, СНТ, ДНТ, ОНТ, КФХ}
+приводится к `upper()`; остальные строки — первая буква в uppercase, остальные как есть
+(не `.capitalize()` — она ломает внутренние заглавные).
+
 См. также: [[product/mvp-scope]], [[product/monitoring-plan]], [[ops/dev-environment]].
