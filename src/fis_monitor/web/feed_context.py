@@ -39,9 +39,8 @@ def _view_filters_to_lot_filters(vf: ViewFilters) -> LotFilters:
     Non-numeric or unknown site-ids are silently dropped — defensive against a
     stale cookie surviving a catalog bump.
 
-    ``only_new`` / ``only_stars`` are user-state predicates not available at
-    the SQL layer and are applied as an in-memory post-filter in
-    ``_assemble_feed_zones``.
+    ``only_new`` is a user-state predicate not available at the SQL layer
+    and is applied as an in-memory post-filter in ``_assemble_feed_zones``.
     """
     subject_display_names: list[str] = []
     for s in vf.subjects:
@@ -67,7 +66,6 @@ def _filters_are_active(filters: ViewFilters) -> bool:
         or filters.area_min is not None
         or filters.area_max is not None
         or filters.only_new
-        or filters.only_stars
     )
 
 
@@ -84,16 +82,14 @@ def _assemble_feed_zones(
     ``archive_count`` is always 0 because ``lot_query.search`` already caps
     results at ``_FEED_PAGE_SIZE`` — there is nothing left over.
 
-    Applies the user-state post-filters (``only_new``, ``only_stars``) that
-    the SQL layer cannot express.  Each surfaced lot is wrapped in
-    ``LotUserViewModel`` so it can be consumed by the existing partials.
+    Applies the user-state post-filter (``only_new``) that the SQL layer
+    cannot express.  Each surfaced lot is wrapped in ``LotUserViewModel``
+    so it can be consumed by the existing partials.
     """
     today: list[LotUserViewModel] = []
 
     for dto in items:
         if view_filters.only_new and dto.seen_at is not None:
-            continue
-        if view_filters.only_stars and not dto.starred:
             continue
 
         today.append(LotUserViewModel(dto))
@@ -110,7 +106,6 @@ def _build_filters_context(filters: ViewFilters) -> SimpleNamespace:
         area_min_label=str(filters.area_min) if filters.area_min is not None else "0",
         area_max_label=str(filters.area_max) if filters.area_max is not None else "∞",
         only_new=filters.only_new,
-        only_stars=filters.only_stars,
         sort_dir=filters.sort_dir,
     )
 

@@ -104,7 +104,7 @@ def test_field_change_tracked_field_literal():
 # T8 — LotPublicDTO MUST NOT carry user-state fields
 # ---------------------------------------------------------------------------
 def test_lot_public_dto_no_user_state_fields():
-    for forbidden in ("starred", "submitted", "submitted_at", "note", "seen_at"):
+    for forbidden in ("submitted", "submitted_at", "note", "seen_at"):
         assert forbidden not in LotPublicDTO.model_fields, (
             f"LotPublicDTO must not expose user-state field {forbidden!r}"
         )
@@ -118,7 +118,7 @@ def test_lot_public_dto_no_user_state_fields():
 # ---------------------------------------------------------------------------
 def test_lot_user_dto_inherits_public():
     assert issubclass(LotUserDTO, LotPublicDTO)
-    for required in ("starred", "submitted", "submitted_at", "note", "seen_at"):
+    for required in ("submitted", "submitted_at", "note", "seen_at"):
         assert required in LotUserDTO.model_fields
     for required in ("age_seconds", "tier", "freshness", "id", "cadastral_no"):
         assert required in LotUserDTO.model_fields
@@ -218,7 +218,7 @@ def test_lot_user_dto_excludes_raw_json(make_lot):
         age_seconds=120,
         tier="match",
         freshness="hot",
-        starred=True,
+        submitted=True,
     )
     assert "raw_json" not in user.model_dump()
     assert "raw_json" not in user.model_dump_json()
@@ -248,7 +248,7 @@ def test_lot_user_dto_is_frozen(make_lot):
         freshness="hot",
     )
     with pytest.raises(ValidationError):
-        user.starred = True  # type: ignore[misc]
+        user.submitted = True  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------

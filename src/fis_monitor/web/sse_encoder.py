@@ -74,7 +74,7 @@ class LotViewModel:
     but that are not present on the domain DTO (user-state, human-readable
     derived values, external URL, etc.).
 
-    All user-state fields default to "not seen / not starred / no note" —
+    All user-state fields default to "not seen / no note" —
     correct for brand-new lots arriving via SSE.
     """
 
@@ -258,10 +258,6 @@ class LotViewModel:
         return False
 
     @property
-    def is_starred(self) -> bool:
-        return False
-
-    @property
     def note(self) -> str | None:
         return None
 
@@ -290,9 +286,9 @@ class _SseLotNewViewModel(LotViewModel):
 class LotUserViewModel(LotViewModel):
     """``LotViewModel`` variant that surfaces per-user state from a ``LotUserDTO``.
 
-    Used by the server-rendered feed (``GET /``) where ``starred`` / ``seen_at``
-    / ``note`` are loaded from ``UserStateRepository``.  The SSE fan-out path
-    keeps using the base ``LotViewModel`` (no per-user state available).
+    Used by the server-rendered feed (``GET /``) where ``seen_at`` / ``note``
+    are loaded from ``UserStateRepository``.  The SSE fan-out path keeps
+    using the base ``LotViewModel`` (no per-user state available).
     """
 
     def __init__(self, dto: LotUserDTO) -> None:
@@ -305,10 +301,6 @@ class LotUserViewModel(LotViewModel):
     @property
     def is_seen(self) -> bool:
         return self._user_dto.seen_at is not None
-
-    @property
-    def is_starred(self) -> bool:
-        return self._user_dto.starred
 
     @property
     def note(self) -> str | None:

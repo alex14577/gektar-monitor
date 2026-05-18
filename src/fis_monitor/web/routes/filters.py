@@ -197,7 +197,6 @@ def post_view_filters(
     area_min: Annotated[str | None, Form()] = None,
     area_max: Annotated[str | None, Form()] = None,
     only_new: Annotated[str | None, Form()] = None,
-    only_stars: Annotated[str | None, Form()] = None,
     sort_dir: Annotated[str | None, Form()] = None,
 ) -> Response:
     """Apply view filters and return the rendered feed partial for htmx outerHTML swap.
@@ -232,7 +231,6 @@ def post_view_filters(
             # only_new="" (empty value, key present) also → True — non-browser edge case,
             # intentional.
             only_new=only_new is not None,
-            only_stars=only_stars is not None,
             sort_dir=_coerce_sort_dir(sort_dir),
         )
     except ValidationError as exc:
@@ -263,6 +261,7 @@ def post_view_filters(
         status_code=200,
     )
     _set_filter_cookie(response, cookie_value)
+    response.headers["HX-Trigger"] = "filter-changed"
     _log.debug("view_filters applied: %r", cookie_value)
     return response
 
@@ -301,5 +300,6 @@ def post_clear_filters(
         status_code=200,
     )
     _clear_filter_cookie(response)
+    response.headers["HX-Trigger"] = "filter-changed"
     _log.debug("view_filters cleared")
     return response

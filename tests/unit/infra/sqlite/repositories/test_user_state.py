@@ -58,21 +58,10 @@ def test_get_missing_lot_returns_none(tmp_db: ConnectionProvider) -> None:
     assert repo.get(999) is None
 
 
-def test_get_after_set_starred_returns_state(tmp_db: ConnectionProvider) -> None:
-    """get() reflects state written by set_starred()."""
-    repo = _make_repo(tmp_db)
-    repo.set_starred(LOT_ID, True)
-    state = repo.get(LOT_ID)
-    assert state is not None
-    assert state.lot_id == LOT_ID
-    assert state.starred is True
-    assert state.submitted is False  # default
-
-
 def test_get_returns_correct_updated_at(tmp_db: ConnectionProvider) -> None:
     """updated_at is stored and returned as an aware datetime."""
     repo = _make_repo(tmp_db)
-    repo.set_starred(LOT_ID, False)
+    repo.set_submitted(LOT_ID, False, None)
     state = repo.get(LOT_ID)
     assert state is not None
     assert state.updated_at is not None
@@ -101,49 +90,17 @@ def test_get_many_all_missing_returns_empty_dict(tmp_db: ConnectionProvider) -> 
 def test_get_many_mixed_returns_only_existing(tmp_db: ConnectionProvider) -> None:
     """get_many returns only the ids that have rows; missing ones are absent."""
     repo = _make_repo(tmp_db)
-    repo.set_starred(10, True)
-    repo.set_starred(20, False)
+    repo.set_submitted(10, True, None)
+    repo.set_submitted(20, False, None)
     result = repo.get_many([10, 20, 99])  # 99 is missing
     assert set(result.keys()) == {10, 20}
-    assert result[10].starred is True
-    assert result[20].starred is False
+    assert result[10].submitted is True
+    assert result[20].submitted is False
 
 
 # ---------------------------------------------------------------------------
-# Tests: set_starred / set_submitted / set_note (UPSERT field isolation)
+# Tests: set_submitted / set_note (UPSERT field isolation)
 # ---------------------------------------------------------------------------
-
-
-def test_set_starred_then_set_submitted_both_values_preserved(
-    tmp_db: ConnectionProvider,
-) -> None:
-    """UPSERT for one field must NOT clobber a different field set earlier."""
-    repo = _make_repo(tmp_db)
-    submitted_at = datetime(2026, 5, 14, 9, 0, 0, tzinfo=UTC)
-
-    repo.set_starred(LOT_ID, True)
-    repo.set_submitted(LOT_ID, True, submitted_at)
-
-    state = repo.get(LOT_ID)
-    assert state is not None
-    assert state.starred is True
-    assert state.submitted is True
-    assert state.submitted_at is not None
-    assert state.submitted_at == submitted_at
-
-
-def test_set_submitted_then_set_starred_both_values_preserved(
-    tmp_db: ConnectionProvider,
-) -> None:
-    """Reverse order: submitted first, starred second — both survive."""
-    repo = _make_repo(tmp_db)
-    repo.set_submitted(LOT_ID, True, None)
-    repo.set_starred(LOT_ID, True)
-
-    state = repo.get(LOT_ID)
-    assert state is not None
-    assert state.submitted is True
-    assert state.starred is True
 
 
 def test_set_note_stores_and_retrieves(tmp_db: ConnectionProvider) -> None:

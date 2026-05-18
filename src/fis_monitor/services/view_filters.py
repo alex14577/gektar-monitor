@@ -53,7 +53,6 @@ class ViewFilters(BaseModel):
     area_min: int | None = Field(default=None, ge=0)
     area_max: int | None = Field(default=None, ge=0)
     only_new: bool = False
-    only_stars: bool = False
     sort_dir: Literal["desc", "asc"] = "desc"
 
     @model_validator(mode="after")

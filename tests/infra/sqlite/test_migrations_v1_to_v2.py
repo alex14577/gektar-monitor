@@ -286,8 +286,8 @@ class TestDefaultMigrationRunnerFactory:
         migrations = list(runner.list_migrations())
 
         # v1→v2, v2→v3 (smtp_from_name, bd ljp), v3→v4 (region_subscriptions, nvx2),
-        # v4→v5 (lots.date_registry, ADR-040)
-        assert len(migrations) == 4
+        # v4→v5 (lots.date_registry, ADR-040), v5→v6 (drop starred, ADR-053)
+        assert len(migrations) == 5
         m1 = migrations[0]
         assert m1.from_version == 1
         assert m1.to_version == 2

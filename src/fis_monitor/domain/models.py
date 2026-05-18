@@ -213,7 +213,6 @@ class LotUserDTO(LotPublicDTO):
 
     model_config = _DOMAIN_MODEL_CONFIG
 
-    starred: bool = False
     submitted: bool = False
     submitted_at: datetime | None = None
     note: str | None = None
@@ -560,7 +559,6 @@ class LotUserState(BaseModel):
     model_config = _DOMAIN_MODEL_CONFIG
 
     lot_id: StrictInt
-    starred: bool = False
     submitted: bool = False
     submitted_at: datetime | None = None
     note: str | None = None

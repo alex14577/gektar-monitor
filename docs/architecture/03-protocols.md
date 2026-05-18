@@ -55,7 +55,6 @@ class LotRepository(Protocol):
 
 class UserStateRepository(Protocol):
     def get(self, lot_id: int) -> LotUserState | None: ...
-    def set_starred(self, lot_id: int, value: bool) -> None: ...
     def set_submitted(self, lot_id: int, value: bool, at: datetime | None) -> None: ...
     def set_note(self, lot_id: int, note: str | None) -> None: ...
     def mark_visited(self, at: datetime) -> None: ...
@@ -526,11 +525,11 @@ class SseCycleDone(BaseModel):
 
 Канонические DTO (определены в [[data-model/lot]]):
 - **`LotPublicDTO`** — лот без user-state. Поля: id/cadastral_no/area_sqm/.../is_active/freshness/tier/age_seconds. Безопасно публиковать через **EventBus** (никаких отметок текущего пользователя в multi-tab fan-out).
-- **`LotUserDTO`** — `LotPublicDTO` + `LotUserState` (starred/submitted/note). Запрашивается отдельным GET `/api/lots/{id}/user-state` либо включается в server-rendered HTML на главной странице (one-shot).
+- **`LotUserDTO`** — `LotPublicDTO` + `LotUserState` (submitted/note). Запрашивается отдельным GET `/api/lots/{id}/user-state` либо включается в server-rendered HTML на главной странице (one-shot).
 - **`LotUpsertResult`** — `was_new: bool`, `changes: list[FieldChange]`.
 - **`FieldChange`** — `field: Literal[<allowed>], old_value: Any, new_value: Any` (см. [[data-model/lot]]). `old_value`/`new_value` сериализуются в БД через `json.dumps(..., ensure_ascii=False)` — N-M9.
 
-Решение принято для forward-compat с multi-user v3 (хостинг): SSE-fan-out на сервере не должен знать про user, иначе одна вкладка увидит чужие starred/note.
+Решение принято для forward-compat с multi-user v3 (хостинг): SSE-fan-out на сервере не должен знать про user, иначе одна вкладка увидит чужие note/submitted-state.
 
 ### 3.6.2 ParseError — разделение категорий
 

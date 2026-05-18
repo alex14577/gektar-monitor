@@ -67,7 +67,6 @@ class LotPublicDTO(Lot):
 class LotUserDTO(LotPublicDTO):
     """LotPublicDTO + LotUserState. Возвращается в server-rendered HTML
     или через отдельный GET /api/lots/{id}/user-state."""
-    starred: bool = False
     submitted: bool = False
     submitted_at: datetime | None = None
     note: str | None = None

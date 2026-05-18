@@ -14,7 +14,7 @@
 | `regions` | int[] | `[1, 2]` | min 1 элемент. Макрорегионы: 1=ДФО, 2=Арктика. **Fetch-time** — определяет какие данные тянутся с сайта и попадают в БД | да |
 | `filters.rf_subjects` | int[] | `[]` | пусто = все субъекты выбранных макрорегионов. **Notify-time** — фильтрует уведомления, в БД хранятся все лоты выбранных макрорегионов | да |
 | `monitoring.full_scan_time` | str | `"04:00"` | `HH:MM`, локальное время. Расписание ежедневного full_scan для removal-detection (L1) | да |
-| `monitoring.full_scan_l2_priority_days` | int | `7` | ≥0. L2 active verification вне starred/submitted дёргается для лотов младше N дней | да |
+| `monitoring.full_scan_l2_priority_days` | int | `7` | ≥0. L2 active verification для лотов младше N дней | да |
 | `ui.bind_host` | str | `"127.0.0.1"` | IP | нет |
 | `ui.port` | int | `8080` | `1024..65535` | нет |
 | `ui.auto_open_browser` | bool | `true` | — | да |

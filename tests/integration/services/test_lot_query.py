@@ -170,7 +170,6 @@ class FakeUserStateRepository:
         # call-tracking for anti-mock test
         self.get_calls: list[int] = []
         self.get_many_calls: list[Sequence[int]] = []
-        self.set_starred_calls: list[tuple[int, bool]] = []
         self.set_submitted_calls: list[Any] = []
         self.set_note_calls: list[Any] = []
         self.mark_visited_calls: list[datetime] = []
@@ -183,9 +182,6 @@ class FakeUserStateRepository:
     def get_many(self, ids: Sequence[int]) -> dict[int, LotUserState]:
         self.get_many_calls.append(list(ids))
         return {i: self._states[i] for i in ids if i in self._states}
-
-    def set_starred(self, lot_id: int, value: bool) -> None:
-        self.set_starred_calls.append((lot_id, value))
 
     def set_submitted(self, lot_id: int, value: bool, at: datetime | None) -> None:
         self.set_submitted_calls.append((lot_id, value, at))
@@ -264,7 +260,6 @@ def test_fake_user_state_repo_all_methods_called() -> None:
     repo = FakeUserStateRepository()
     state = LotUserState(
         lot_id=1,
-        starred=True,
         submitted=False,
         submitted_at=None,
         note="n",
@@ -276,7 +271,6 @@ def test_fake_user_state_repo_all_methods_called() -> None:
     assert repo.get(1) is state
     result = repo.get_many([1, 99])
     assert result == {1: state}
-    repo.set_starred(1, False)
     repo.set_submitted(1, True, _NOW)
     repo.set_note(1, "hello")
     repo.mark_visited(_NOW)
@@ -285,7 +279,6 @@ def test_fake_user_state_repo_all_methods_called() -> None:
 
     assert repo.get_calls == [1]
     assert repo.get_many_calls == [[1, 99]]
-    assert repo.set_starred_calls == [(1, False)]
 
 
 def test_fake_connection_provider_all_methods_called() -> None:
@@ -491,7 +484,6 @@ def test_build_query_area_sqm_params() -> None:
 def _make_state(lot_id: int) -> LotUserState:
     return LotUserState(
         lot_id=lot_id,
-        starred=True,
         submitted=False,
         submitted_at=None,
         note=None,
@@ -515,7 +507,7 @@ def test_search_single_lot_no_user_state() -> None:
     assert len(page.items) == 1
     dto = page.items[0]
     assert dto.id == 1
-    assert dto.starred is False  # default
+    assert dto.submitted is False  # default
     assert dto.freshness == "hot"  # first_seen 30 min ago
     assert page.has_more is False
 
@@ -532,7 +524,7 @@ def test_search_lot_with_user_state() -> None:
     )
     page = svc.search(LotFilters())
     assert len(page.items) == 1
-    assert page.items[0].starred is True
+    assert page.items[0].submitted is False  # state merged from user_state_repo
     # get_many called once, not N get() calls
     assert len(repo.get_many_calls) == 1
     assert repo.get_calls == []  # no individual get() calls on hot-path

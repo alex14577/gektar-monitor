@@ -5,7 +5,7 @@ Depends only on Protocol interfaces (LotRepository, UserStateRepository).
 
 Responsibilities:
 - Provide (Lot, LotUserState | None) for the details view.
-- Toggle starred / archived (set_starred) flags.
+- Toggle archived (set_submitted) flags.
 - Persist free-text notes (max 4096 chars — validated here, not in route).
 
 This service has NO business rules beyond the note length cap and 404 guard.
@@ -62,16 +62,6 @@ class LotUserStateService:
     # ------------------------------------------------------------------
     # Mutations
     # ------------------------------------------------------------------
-
-    def toggle_star(self, lot_id: int) -> None:
-        """Toggle the starred flag for the given lot.
-
-        Raises LotNotFoundError if the lot does not exist.
-        """
-        self._require_lot(lot_id)
-        current = self._user_state_repo.get(lot_id)
-        new_value = not current.starred if current is not None else True
-        self._user_state_repo.set_starred(lot_id, new_value)
 
     def toggle_archive(self, lot_id: int) -> None:
         """Toggle the archived flag for the given lot.

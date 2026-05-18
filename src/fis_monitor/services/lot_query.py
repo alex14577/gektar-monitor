@@ -199,7 +199,6 @@ def _lot_to_user_dto(
 
     user_kwargs: dict[str, Any] = {}
     if user_state is not None:
-        user_kwargs["starred"] = user_state.starred
         user_kwargs["submitted"] = user_state.submitted
         user_kwargs["submitted_at"] = user_state.submitted_at
         user_kwargs["note"] = user_state.note

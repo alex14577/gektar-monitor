@@ -50,7 +50,6 @@ def _row_to_state(row: sqlite3.Row) -> LotUserState:
     """Convert a ``lot_user_state`` DB row to a ``LotUserState`` model."""
     return LotUserState(
         lot_id=row["lot_id"],
-        starred=bool(row["starred"]),
         submitted=bool(row["submitted"]),
         submitted_at=_parse_datetime(row["submitted_at"]),
         note=row["note"],
@@ -99,7 +98,7 @@ class SqliteUserStateRepository:
         """Return ``LotUserState`` for *lot_id*, or ``None`` if absent."""
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT lot_id, starred, submitted, submitted_at, note, seen_at, updated_at"
+            "SELECT lot_id, submitted, submitted_at, note, seen_at, updated_at"
             " FROM lot_user_state WHERE lot_id = ?",
             (lot_id,),
         ).fetchone()
@@ -128,7 +127,7 @@ class SqliteUserStateRepository:
             placeholders = ",".join("?" * len(chunk))
             conn = self._get_conn()
             rows = conn.execute(
-                f"SELECT lot_id, starred, submitted, submitted_at, note, seen_at, updated_at"
+                f"SELECT lot_id, submitted, submitted_at, note, seen_at, updated_at"
                 f" FROM lot_user_state WHERE lot_id IN ({placeholders})",
                 chunk,
             ).fetchall()
@@ -154,31 +153,6 @@ class SqliteUserStateRepository:
     # ------------------------------------------------------------------
     # Write methods (BEGIN IMMEDIATE, ADR-016)
     # ------------------------------------------------------------------
-
-    def set_starred(self, lot_id: int, value: bool) -> None:
-        """Set the ``starred`` flag for *lot_id*.
-
-        Uses UPSERT so only the ``starred`` column (and ``updated_at``) is
-        modified; all other columns retain their current or DEFAULT values.
-        """
-        conn = self._get_conn()
-        now = self._clock.now().isoformat()
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            conn.execute(
-                """
-                INSERT INTO lot_user_state (lot_id, starred, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(lot_id) DO UPDATE
-                    SET starred    = excluded.starred,
-                        updated_at = excluded.updated_at
-                """,
-                (lot_id, int(value), now),
-            )
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
 
     def set_submitted(self, lot_id: int, value: bool, at: datetime | None) -> None:
         """Set the ``submitted`` flag and optional ``submitted_at`` for *lot_id*.

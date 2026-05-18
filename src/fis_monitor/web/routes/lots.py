@@ -5,7 +5,6 @@ Endpoints:
   GET  /lots/{lot_id}          — single lot via LotQueryService.get_by_id()
   GET  /lots/{lot_id}/redirect — 302 redirect to canonical lot page on torgi.gov.ru
   GET  /lots/{lot_id}/details  — HTMX partial: lot detail card + user state
-  POST /lots/{lot_id}/star     — toggle starred flag (204)
   POST /lots/{lot_id}/archive  — toggle archived flag (204)
   POST /lots/{lot_id}/note     — set free-text note, max 4096 chars (204)
 
@@ -153,19 +152,6 @@ def get_lot_details(
         name="partials/_lot_details.html.jinja",
         context={"lot": lot, "user_state": user_state},
     )
-
-
-@router.post("/{lot_id}/star", status_code=204)
-def toggle_star(
-    lot_id: int,
-    svc: LotUserStateService = Depends(get_lot_user_state_service),
-) -> Response:
-    """Toggle the starred flag for a lot. Returns 204 on success, 404 if lot missing."""
-    try:
-        svc.toggle_star(lot_id)
-    except LotNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return Response(status_code=204)
 
 
 @router.post("/{lot_id}/archive", status_code=204)

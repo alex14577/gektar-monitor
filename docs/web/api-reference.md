@@ -346,7 +346,6 @@ HTML главного экрана (feed). Доступен только при 
 | `area_min` | `str \| null` | целое ≥ 0 или пусто | `null` |
 | `area_max` | `str \| null` | целое ≥ 0 или пусто | `null` |
 | `only_new` | `str \| null` | присутствие ключа = `true` | `false` |
-| `only_stars` | `str \| null` | присутствие ключа = `true` | `false` |
 | `sort_dir` | `str \| null` | `"desc"` \| `"asc"` | `"desc"` |
 
 `sort_dir` управляет порядком сортировки лотов в фиде (DESC = новее первым, ASC = старше первым). Невалидное или отсутствующее значение тихо приводится к `"desc"` (silent default, не 422). Значение сохраняется в cookie `view_filters` и переживает F5.

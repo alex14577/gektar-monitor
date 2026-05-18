@@ -31,7 +31,6 @@ def test_view_filters_defaults_are_empty() -> None:
     assert f.area_min is None
     assert f.area_max is None
     assert f.only_new is False
-    assert f.only_stars is False
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +51,6 @@ class TestRoundtrip:
             area_min=10,
             area_max=500,
             only_new=True,
-            only_stars=False,
         )
         recovered = deserialize(serialize(original))
         assert recovered is not None
@@ -60,7 +58,6 @@ class TestRoundtrip:
         assert recovered.area_min == original.area_min
         assert recovered.area_max == original.area_max
         assert recovered.only_new == original.only_new
-        assert recovered.only_stars == original.only_stars
 
     def test_none_area_values_survive_roundtrip(self) -> None:
         original = ViewFilters(area_min=None, area_max=None)
@@ -71,14 +68,14 @@ class TestRoundtrip:
 
     def test_serialize_produces_percent_encoded_valid_json(self) -> None:
         """serialize() percent-encodes JSON so non-ASCII chars are cookie-safe."""
-        f = ViewFilters(subjects=["Свердловская область"], only_stars=True)
+        f = ViewFilters(subjects=["Свердловская область"], only_new=True)
         raw = serialize(f)
         # The raw cookie value must be ASCII-only (latin-1 safe)
         raw.encode("latin-1")  # raises UnicodeEncodeError if not ASCII-safe
         # Decoded value must be valid JSON with correct content
         parsed = json.loads(unquote(raw))
         assert parsed["subjects"] == ["Свердловская область"]
-        assert parsed["only_stars"] is True
+        assert parsed["only_new"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +158,7 @@ class TestSortDir:
         from urllib.parse import quote
 
         old_json = json.dumps(
-            {"subjects": [], "area_min": None, "area_max": None,
-             "only_new": False, "only_stars": False}
+            {"subjects": [], "area_min": None, "area_max": None, "only_new": False}
         )
         encoded = quote(old_json, safe="")
         result = deserialize(encoded)

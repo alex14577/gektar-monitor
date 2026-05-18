@@ -108,16 +108,6 @@
     copyText(val);
   });
 
-  // ---------- star toggle (UI only; server expected to receive via HTMX) ----------
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action="star"]');
-    if (!btn) return;
-    const pressed = btn.getAttribute('aria-pressed') === 'true';
-    btn.setAttribute('aria-pressed', String(!pressed));
-    // hx-post stub:
-    // fetch(`/lots/${btn.dataset.lotId}/star`, { method: 'POST', body: JSON.stringify({ value: !pressed }) });
-  });
-
   // ---------- expand details ----------
   // Toggle "open" state on a lot, and sync the ▼/▲ caret on any expand button inside it.
   function toggleLot(lot, forceOpen) {
@@ -206,6 +196,29 @@
       const dot = document.querySelector('.check-status');
       if (dot) dot.dataset.state = 'idle';
     }
+  });
+
+  // ---------- SSE live-reconnect on view-filter change (m72b, ADR-052 resolved) ----------
+  // POST /filters/view and POST /filters/clear respond with HX-Trigger: filter-changed.
+  // htmx fires a `filter-changed` CustomEvent on the request element which bubbles to
+  // document.body. We cycle the sse-connect attribute on #sse-root so htmx-sse tears
+  // down the old EventSource and creates a new one that reads the updated view_filters
+  // cookie in its GET /events handshake.
+  // Debounce ~200 ms protects against rapid sort_dir clicks spawning many reconnects.
+  let _reconnectTimer = null;
+  document.body.addEventListener('filter-changed', function() {
+    const root = document.getElementById('sse-root');
+    if (!root) return;
+    const url = root.getAttribute('sse-connect');
+    if (!url) return;
+    clearTimeout(_reconnectTimer);
+    _reconnectTimer = setTimeout(function() {
+      root.removeAttribute('sse-connect');
+      setTimeout(function() {
+        root.setAttribute('sse-connect', url);
+        if (window.htmx && htmx.process) htmx.process(root);
+      }, 0);
+    }, 200);
   });
 
   document.addEventListener('click', (e) => {
@@ -661,7 +674,6 @@
     closeCtxMenu();
     const id = lot.dataset.lotId || '';
     const isPinned = lot.dataset.pinned === 'true';
-    const isStarred = lot.querySelector('[data-action="star"]')?.getAttribute('aria-pressed') === 'true';
     const menu = document.createElement('div');
     menu.className = 'ctx-menu';
     menu.setAttribute('role', 'menu');
@@ -672,7 +684,6 @@
       <button role="menuitem" data-ctx="copy-cad">Скопировать кадастровый</button>
       <button role="menuitem" data-ctx="copy-md">Скопировать как Markdown</button>
       <hr/>
-      <button role="menuitem" data-ctx="star">${isStarred ? 'Убрать звезду' : 'В избранное ★'}</button>
       <button role="menuitem" data-ctx="pin">${isPinned ? 'Открепить' : 'Закрепить сверху'}</button>
       <button role="menuitem" data-ctx="note">Заметка…</button>
     `;
@@ -691,8 +702,6 @@
         lot.querySelector('[data-action="copy-md"]')?.click() ||
           // synthetic — copy-md handler reads from the lot regardless of source button
           (function(){ const fake = document.createElement('button'); fake.dataset.action='copy-md'; lot.appendChild(fake); fake.click(); fake.remove(); })();
-      } else if (action === 'star') {
-        lot.querySelector('[data-action="star"]')?.click();
       } else if (action === 'pin') {
         // dispatch a synthetic pin
         const fake = document.createElement('button'); fake.dataset.action='pin'; lot.appendChild(fake); fake.click(); fake.remove();

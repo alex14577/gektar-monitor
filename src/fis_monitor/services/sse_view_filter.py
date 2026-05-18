@@ -15,10 +15,10 @@ Design:
     the lot payload that view-filters act upon. Other event types (cycle.done,
     status, session.expired, …) always pass through so the UI stays live.
   - **Fast path**: if all filter fields are at default (no subjects, no area
-    bounds, only_stars=False, only_new=False) the factory returns an
-    always-True sentinel — avoids per-event isinstance checks on idle tabs.
+    bounds, only_new=False) the factory returns an always-True sentinel —
+    avoids per-event isinstance checks on idle tabs.
 
-Filter semantics per ADR-052 and brainstorm consolidated spec:
+Filter semantics per ADR-052:
   - ``subjects`` — list of site-id strings from the cookie; converted to an
     ``int`` set once at factory time.  Match: ``event.lot.region_id in ids``.
     ``region_id=None`` on the lot → **suppress** (conservative: we don't know
@@ -29,10 +29,6 @@ Filter semantics per ADR-052 and brainstorm consolidated spec:
     dropped before area is fetched).
   - ``only_new=True`` — always pass for ``lot.new`` (by definition, every
     ``lot.new`` event *is* a new lot).  No-op filter for this field.
-  - ``only_stars=True`` — always suppress ``lot.new`` (new lots are not starred;
-    ``LotPublicDTO`` has no ``starred`` field — ``LotUserDTO`` would be needed
-    for that, and it never crosses the SSE boundary per docs/architecture/
-    03-protocols.md §3.6.1).
 
 See ADR-052 for rationale, alternatives, and deferred scope (live cookie sync).
 """
@@ -60,14 +56,12 @@ def _is_default(vf: ViewFilters) -> bool:
     A ViewFilters is "default" when it would never suppress any lot.new event:
       - no subjects restriction
       - no area bounds
-      - only_stars=False (True would suppress all lot.new)
       - only_new has no effect on lot.new (always pass-through), so ignored.
     """
     return (
         not vf.subjects
         and vf.area_min is None
         and vf.area_max is None
-        and not vf.only_stars
     )
 
 
@@ -101,7 +95,6 @@ def make_sse_view_filter(vf: ViewFilters) -> Callable[[SseEvent], bool]:
     # Snapshot scalar bounds (immutable ints or None).
     area_min: int | None = vf.area_min
     area_max: int | None = vf.area_max
-    only_stars: bool = vf.only_stars
     # only_new=True → always pass for lot.new → captured but never used to suppress.
 
     def _predicate(event: SseEvent) -> bool:
@@ -110,14 +103,6 @@ def make_sse_view_filter(vf: ViewFilters) -> Callable[[SseEvent], bool]:
             return True
 
         lot = event.lot
-
-        # only_stars=True → suppress all lot.new (new lots are not starred).
-        if only_stars:
-            _log.debug(
-                "sse.event.filtered",
-                extra={"reason": "only_stars", "lot_id": lot.id},
-            )
-            return False
 
         # subjects filter: if set, lot must have a matching region_id.
         if subject_ids and (lot.region_id is None or lot.region_id not in subject_ids):

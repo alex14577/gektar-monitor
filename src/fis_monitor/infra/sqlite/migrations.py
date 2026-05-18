@@ -163,15 +163,17 @@ from fis_monitor.infra.sqlite.migrations_v1_to_v2 import v1_to_v2  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v2_to_v3 import v2_to_v3  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v3_to_v4 import v3_to_v4  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v4_to_v5 import v4_to_v5  # noqa: E402
+from fis_monitor.infra.sqlite.migrations_v5_to_v6 import v5_to_v6  # noqa: E402
 
 MIGRATION_V1_TO_V2 = Migration(from_version=1, to_version=2, apply=v1_to_v2)
 MIGRATION_V2_TO_V3 = Migration(from_version=2, to_version=3, apply=v2_to_v3)
 MIGRATION_V3_TO_V4 = Migration(from_version=3, to_version=4, apply=v3_to_v4)
 MIGRATION_V4_TO_V5 = Migration(from_version=4, to_version=5, apply=v4_to_v5)
+MIGRATION_V5_TO_V6 = Migration(from_version=5, to_version=6, apply=v5_to_v6)
 
 
 def default_migration_runner() -> SqliteMigrationRunner:
-    """Factory: runner with registered v1→v2, v2→v3, v3→v4, and v4→v5 migration chains.
+    """Factory: runner with registered v1→v2, v2→v3, v3→v4, v4→v5, and v5→v6 migration chains.
 
     Usage (composition root / init_db):
         runner = default_migration_runner()
@@ -179,8 +181,14 @@ def default_migration_runner() -> SqliteMigrationRunner:
 
     Returns:
         SqliteMigrationRunner with MIGRATION_V1_TO_V2 + MIGRATION_V2_TO_V3 +
-        MIGRATION_V3_TO_V4 + MIGRATION_V4_TO_V5 registered.
+        MIGRATION_V3_TO_V4 + MIGRATION_V4_TO_V5 + MIGRATION_V5_TO_V6 registered.
     """
     return SqliteMigrationRunner(
-        migrations=[MIGRATION_V1_TO_V2, MIGRATION_V2_TO_V3, MIGRATION_V3_TO_V4, MIGRATION_V4_TO_V5]
+        migrations=[
+            MIGRATION_V1_TO_V2,
+            MIGRATION_V2_TO_V3,
+            MIGRATION_V3_TO_V4,
+            MIGRATION_V4_TO_V5,
+            MIGRATION_V5_TO_V6,
+        ]
     )

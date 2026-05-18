@@ -386,7 +386,7 @@ class RegionSubscriptionRepository(Protocol):
 
 
 class UserStateRepository(Protocol):
-    """Per-lot user interaction state (starred, submitted, notes, visits)."""
+    """Per-lot user interaction state (submitted, notes, visits)."""
 
     def get(self, lot_id: int) -> LotUserState | None: ...
 
@@ -398,7 +398,6 @@ class UserStateRepository(Protocol):
         override with a single ``WHERE id IN (...)`` query for efficiency.
         """
         ...
-    def set_starred(self, lot_id: int, value: bool) -> None: ...
     def set_submitted(self, lot_id: int, value: bool, at: datetime | None) -> None: ...
     def set_note(self, lot_id: int, note: str | None) -> None: ...
 
@@ -407,7 +406,7 @@ class UserStateRepository(Protocol):
 
         This is a **global** (single-valued) timestamp — it tracks the last
         time the user opened the dashboard, not a per-lot visit counter.
-        For per-lot interaction state (starred, submitted, notes) use the
+        For per-lot interaction state (submitted, notes) use the
         other methods on this repository.
         """
         ...

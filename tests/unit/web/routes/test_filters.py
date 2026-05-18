@@ -172,14 +172,14 @@ class TestPostViewFiltersValid:
                     "subjects": "ASCII_SUBJECT",
                     "area_min": "5",
                     "area_max": "50",
-                    "only_stars": "on",
+                    "only_new": "on",
                 },
             )
         data = _cookie_data(resp)
         assert data["subjects"] == ["ASCII_SUBJECT"]
         assert data["area_min"] == 5
         assert data["area_max"] == 50
-        assert data["only_stars"] is True
+        assert data["only_new"] is True
 
     def test_empty_body_defaults_accepted(self) -> None:
         """Completely empty form body should use defaults — no 422."""
@@ -321,20 +321,6 @@ class TestPostViewFiltersEdgeCases:
             resp = client.post("/filters/view", data={})
         data = _cookie_data(resp)
         assert data["only_new"] is False
-
-    def test_checkbox_only_stars_checked(self) -> None:
-        app = _build_app()
-        with TestClient(app) as client:
-            resp = client.post("/filters/view", data={"only_stars": "on"})
-        data = _cookie_data(resp)
-        assert data["only_stars"] is True
-
-    def test_checkbox_only_stars_unchecked(self) -> None:
-        app = _build_app()
-        with TestClient(app) as client:
-            resp = client.post("/filters/view", data={})
-        data = _cookie_data(resp)
-        assert data["only_stars"] is False
 
     def test_unknown_form_field_ignored(self) -> None:
         """Unknown form fields must not cause 422 — they are silently ignored."""
@@ -496,7 +482,6 @@ class TestOobFilterTrigger:
             area_min_label="0",
             area_max_label="∞",
             only_new=False,
-            only_stars=False,
             sort_dir="desc",
         )
         scope_ctx = SimpleNamespace(subjects_count=19)
@@ -705,6 +690,39 @@ class TestGetSubjects:
         # site-id 88 must NOT be checked.
         assert not re.search(r'<input[^>]*value="88"[^>]*\bchecked\b', body), (
             "Expected value=88 input to NOT be checked"
+        )
+
+
+# ---------------------------------------------------------------------------
+# (m72b) HX-Trigger: filter-changed — SSE live-reconnect header (ADR-052 resolved)
+# ---------------------------------------------------------------------------
+
+
+class TestHxTriggerFilterChanged:
+    def test_post_view_filters_returns_hx_trigger_header(self) -> None:
+        """POST /filters/view must include HX-Trigger: filter-changed.
+
+        htmx reads this header and fires htmx:trigger on document.body so
+        app.js can reconnect the SSE EventSource with the updated cookie.
+        """
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/view", data={})
+        assert resp.headers.get("hx-trigger") == "filter-changed", (
+            "Expected HX-Trigger: filter-changed in POST /filters/view response"
+        )
+
+    def test_post_clear_filters_returns_hx_trigger_header(self) -> None:
+        """POST /filters/clear must include HX-Trigger: filter-changed.
+
+        Clearing filters also changes the view_filters cookie; the SSE
+        connection must reconnect to pick up the reset predicate.
+        """
+        app = _build_app()
+        with TestClient(app) as client:
+            resp = client.post("/filters/clear")
+        assert resp.headers.get("hx-trigger") == "filter-changed", (
+            "Expected HX-Trigger: filter-changed in POST /filters/clear response"
         )
 
 

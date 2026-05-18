@@ -3,7 +3,7 @@
 После ревью DBA: **бэкапим только user-state**, не весь `state.db`. Mirror восстановим с сайта.
 
 **`USER_STATE_TABLES`** — явный список:
-- `lot_user_state` (starred / submitted / note)
+- `lot_user_state` (submitted / note)
 - `notifications` (idempotency-журнал)
 - `smtp_credentials` (логин/пароль)
 - `state` (KV — onboarding, last_visit, dnd_until)

@@ -20,7 +20,7 @@ MVP-stub, переезжающие в follow-up bd:
 ``zones.hot`` / ``zones.today`` / ``archive_count`` рендерятся через
 ``LotQueryService.search`` + feed_context helpers: фильтры из cookie
 сайдбара (``ViewFilters``) транслируются в ``LotFilters`` для SQL и
-``only_new``/``only_stars`` применяются post-filter.
+``only_new`` применяется post-filter.
 """
 
 from __future__ import annotations

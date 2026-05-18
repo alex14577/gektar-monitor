@@ -290,9 +290,6 @@ class _FakeUserStateRepository:
     def get(self, lot_id: int) -> LotUserState | None:
         return None
 
-    def set_starred(self, lot_id: int, value: bool) -> None:
-        pass
-
     def set_submitted(self, lot_id: int, value: bool, at: Any) -> None:
         pass
 

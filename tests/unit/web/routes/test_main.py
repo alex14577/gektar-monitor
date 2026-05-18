@@ -132,9 +132,6 @@ class FakeUserStateRepo:
     def get_many(self, ids: Any) -> dict[int, LotUserState]:
         raise NotImplementedError
 
-    def set_starred(self, lot_id: int, value: bool) -> None:
-        raise NotImplementedError
-
     def set_submitted(self, lot_id: int, value: bool, at: datetime | None) -> None:
         raise NotImplementedError
 
@@ -365,8 +362,8 @@ def test_dnd_active_route_does_not_break() -> None:
 def test_view_filters_cookie_parsed_and_applied() -> None:
     """AC#2: a valid view_filters cookie populates filters.* + filters_active.
 
-    Sidebar UI surfaces only the subject filter; area/only_new/only_stars
-    are still honoured at the backend layer but no longer have UI affordances.
+    Sidebar UI surfaces only the subject filter; area/only_new are still
+    honoured at the backend layer but no longer have UI affordances.
     """
     payload = ViewFilters(subjects=["Москва", "Татарстан"], area_min=10, only_new=True)
     cookie = serialize(payload)
@@ -435,7 +432,6 @@ def _make_user_dto(
     *,
     lot_id: int,
     age_seconds: int,
-    starred: bool = False,
     seen_at: datetime | None = None,
     region: str = "Хабаровский край",
 ) -> Any:
@@ -456,7 +452,6 @@ def _make_user_dto(
     payload["freshness"] = "hot" if age_seconds < 3600 else (
         "warm" if age_seconds < 86_400 else "cold"
     )
-    payload["starred"] = starred
     payload["seen_at"] = seen_at
     return LotUserDTO(**payload)
 
@@ -493,21 +488,6 @@ def test_feed_zones_all_lots_in_today_regardless_of_age() -> None:
     assert "Список" in html
     # LotQueryService was actually consulted
     assert len(fake_lot_query.search_calls) == 1
-
-
-def test_feed_only_stars_filter_hides_unstarred() -> None:
-    """ViewFilters.only_stars removes lots whose ``starred`` is False."""
-    items = (
-        _make_user_dto(lot_id=10, age_seconds=600, starred=False),
-        _make_user_dto(lot_id=11, age_seconds=600, starred=True),
-    )
-    cookie = serialize(ViewFilters(only_stars=True))
-    app, _, _ = _make_app(lot_query=FakeLotQuery(items=items))
-    with TestClient(app, raise_server_exceptions=True) as client:
-        resp = client.get("/", cookies={"view_filters": cookie})
-    html = resp.text
-    assert 'id="lot-10"' not in html
-    assert 'id="lot-11"' in html
 
 
 def test_feed_subjects_filter_passed_to_lot_query() -> None:

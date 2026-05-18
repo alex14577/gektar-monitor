@@ -158,7 +158,6 @@ def test_filters_default_empty_rf_subjects():
 def test_lot_user_state_defaults():
     now = datetime(2026, 5, 13, tzinfo=UTC)
     s = LotUserState(lot_id=1, updated_at=now)
-    assert s.starred is False
     assert s.submitted is False
     assert s.submitted_at is None
     assert s.note is None
@@ -169,7 +168,7 @@ def test_lot_user_state_frozen_and_extra_forbid():
     now = datetime(2026, 5, 13, tzinfo=UTC)
     s = LotUserState(lot_id=1, updated_at=now)
     with pytest.raises(ValidationError):
-        s.starred = True  # type: ignore[misc]
+        s.submitted = True  # type: ignore[misc]
     with pytest.raises(ValidationError):
         LotUserState(lot_id=1, updated_at=now, unknown=True)  # type: ignore[call-arg]
 

@@ -2,14 +2,13 @@
 
 Covers the pure predicate function — no network, no FastAPI, no Jinja.
 
-Invariants per ADR-052 and brainstorm spec:
+Invariants per ADR-052:
   - Default ViewFilters → always-True (fast path).
   - subjects filter: region_id match → pass; mismatch → suppress;
     region_id=None → suppress (conservative).
   - area_min: area_sqm >= area_min → pass; below → suppress.
   - area_max: area_sqm <= area_max → pass; above → suppress.
   - area_sqm=None on lot → pass-through (fail-open, enrichment pending).
-  - only_stars=True → all lot.new suppressed (new lots are never starred).
   - only_new=True → lot.new passes (no-op for SSE lot.new).
   - Non-SseLotNew events → always pass-through regardless of filter.
 """
@@ -207,21 +206,6 @@ class TestAreaMaxFilter:
 
 
 # ---------------------------------------------------------------------------
-# only_stars filter
-# ---------------------------------------------------------------------------
-
-
-class TestOnlyStarsFilter:
-    def test_only_stars_suppresses_all_lot_new(self) -> None:
-        """only_stars=True → all lot.new suppressed."""
-        vf = ViewFilters(only_stars=True)
-        pred = make_sse_view_filter(vf)
-        assert pred(_make_lot_new(region_id=34)) is False
-        assert pred(_make_lot_new(region_id=None)) is False
-        assert pred(_make_lot_new(area_sqm=None)) is False
-
-
-# ---------------------------------------------------------------------------
 # only_new filter
 # ---------------------------------------------------------------------------
 
@@ -268,7 +252,7 @@ class TestNonLotNewPassThrough:
     def test_non_lot_new_always_passes(self, event: Any) -> None:
         """Non-SseLotNew events pass regardless of filter state."""
         # Use a filter that would suppress lot.new events.
-        vf = ViewFilters(subjects=["34"], only_stars=True)
+        vf = ViewFilters(subjects=["34"])
         pred = make_sse_view_filter(vf)
         assert pred(event) is True  # type: ignore[arg-type]
 

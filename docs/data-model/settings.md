@@ -139,7 +139,6 @@ class OnboardingState(str, Enum):
 ```python
 class LotUserState(BaseModel):
     lot_id: int
-    starred: bool = False
     submitted: bool = False
     submitted_at: datetime | None = None
     note: str | None = None
@@ -147,4 +146,4 @@ class LotUserState(BaseModel):
     updated_at: datetime
 ```
 
-См. также: [[data-model/lot]], [[config-reference]], [[decisions/ADR-015-smtp-host-validation|ADR-015]], [[decisions/ADR-017-secrets-secretstr-crash-dump-exclusion|ADR-017]], [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]], [[decisions/ADR-038-smtp-provider-catalog|ADR-038]].
+См. также: [[data-model/lot]], [[config-reference]], [[decisions/ADR-015-smtp-host-validation|ADR-015]], [[decisions/ADR-017-secrets-secretstr-crash-dump-exclusion|ADR-017]], [[decisions/ADR-020-smtp-host-port-ssot-state-db|ADR-020]], [[decisions/ADR-038-smtp-provider-catalog|ADR-038]], [[decisions/ADR-053-remove-favorites-feature|ADR-053]].

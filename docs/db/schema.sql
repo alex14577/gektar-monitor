@@ -32,7 +32,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
@@ -43,6 +43,8 @@ PRAGMA user_version = 5;
 --   ADR-039: subscribed_at per-region cutoff. MigrationRunner v3→v4.
 -- user_version bumped 4→5 (svqi): колонка lots.date_registry TIMESTAMP NULL —
 --   дата постановки на учет в ЕГРН с detail-страницы. ADR-040. MigrationRunner v4→v5.
+-- user_version bumped 5→6 (qhw8): удалена колонка lot_user_state.starred + индекс
+--   idx_lus_starred. Фича «Избранное» удалена. ADR-053. MigrationRunner v5→v6.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
@@ -243,14 +245,12 @@ CREATE INDEX IF NOT EXISTS idx_cycles_region  ON cycles(region, started_at);
 
 CREATE TABLE IF NOT EXISTS lot_user_state (
     lot_id        INTEGER PRIMARY KEY,
-    starred       INTEGER NOT NULL DEFAULT 0 CHECK (starred   IN (0, 1)),
     submitted     INTEGER NOT NULL DEFAULT 0 CHECK (submitted IN (0, 1)),
     submitted_at  TIMESTAMP,
     note          TEXT,
     seen_at       TIMESTAMP,
     updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_lus_starred   ON lot_user_state(starred)   WHERE starred = 1;
 CREATE INDEX IF NOT EXISTS idx_lus_submitted ON lot_user_state(submitted) WHERE submitted = 1;
 
 -- Журнал отправленных уведомлений + state-machine попыток (ADR-019).

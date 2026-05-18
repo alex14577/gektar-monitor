@@ -407,10 +407,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
   display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center;
 }
 
-/* star button */
-.starbtn { width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
-.starbtn[aria-pressed="true"] { color: var(--warm); border-color: color-mix(in oklab, var(--warm) 40%, var(--line)); background: var(--warm-soft); }
-
 /* copy button (inline) */
 .copy {
   border: 0; background: transparent; color: var(--muted);

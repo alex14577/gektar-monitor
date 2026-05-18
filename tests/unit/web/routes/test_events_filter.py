@@ -13,7 +13,6 @@ Coverage per ADR-052 brainstorm test plan:
   #F3  area_min match → event passes
   #F4  area_min out of range → suppressed
   #F5  area_sqm=None → pass (fail-open)
-  #F6  only_stars=True → all lot.new suppressed
   #F7  only_new=True → lot.new passes
   #F8  empty/no cookie → all events pass
   #F9  malformed cookie → fallback default → all events pass
@@ -226,16 +225,6 @@ class TestSseViewFilterIntegration:
 
         assert "lot.new" in payload, "area_sqm=None must pass-through (fail-open)"
 
-    def test_f6_only_stars_suppresses_all_lot_new(self) -> None:
-        """#F6 — only_stars=True → all lot.new suppressed."""
-        vf = ViewFilters(only_stars=True)
-        lot_new = _make_lot_new(region_id=34, area_sqm=5000)
-        streamer = _make_finite_streamer([lot_new])
-
-        payload = _stream_payload(streamer, cookie=_cookie_for(vf))
-
-        assert "lot.new" not in payload, "only_stars=True must suppress all lot.new events"
-
     def test_f7_only_new_passes_lot_new(self) -> None:
         """#F7 — only_new=True → lot.new passes (no-op for SSE)."""
         vf = ViewFilters(only_new=True)
@@ -267,7 +256,7 @@ class TestSseViewFilterIntegration:
 
     def test_non_lot_new_events_always_pass_even_with_filter(self) -> None:
         """Non-SseLotNew events pass through regardless of view-filter."""
-        vf = ViewFilters(subjects=["34"], only_stars=True)
+        vf = ViewFilters(subjects=["34"])
         lot_status = SseLotStatus(lot_id=99, new_status="gone", event_type="gone")
         streamer = _make_finite_streamer([lot_status])
 

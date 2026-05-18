@@ -10,16 +10,6 @@
   <header class="lot-details__header">
     <h2 class="lot-details__title">{{ lot.cadastral_no }}</h2>
     <div class="lot-details__actions">
-      <button class="btn btn--ghost btn--sm starbtn"
-              type="button"
-              data-action="star"
-              data-lot-id="{{ lot.id }}"
-              hx-post="/lots/{{ lot.id }}/star"
-              hx-swap="none"
-              aria-pressed="{{ 'true' if user_state and user_state.starred else 'false' }}"
-              aria-label="{{ 'Убрать из избранного' if user_state and user_state.starred else 'В избранное' }}">
-        {% if user_state and user_state.starred %}★ В избранном{% else %}☆ В избранное{% endif %}
-      </button>
       <button class="btn btn--ghost btn--sm"
               type="button"
               data-action="archive"

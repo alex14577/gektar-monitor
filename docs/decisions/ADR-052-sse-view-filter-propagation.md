@@ -107,6 +107,48 @@ Both are non-trivial; deferred as a follow-up bd task.
 
 ---
 
+## Amendment — m72b (2026-05-18): Live cookie sync via HX-Trigger + client-side reconnect
+
+**Deferred scope "Live cookie sync" is now closed.**
+
+`POST /filters/view` and `POST /filters/clear` now return the HTTP response header
+`HX-Trigger: filter-changed`. htmx fires a `filter-changed` CustomEvent on the
+request element which bubbles to `document.body`; `app.js` listens for this event
+and cycles the `sse-connect` attribute on `#sse-root`:
+
+1. `root.removeAttribute('sse-connect')` — htmx-sse MutationObserver tears down the
+   existing `EventSource`.
+2. `root.setAttribute('sse-connect', url)` + `htmx.process(root)` (in a `setTimeout(0)`
+   tick) — htmx-sse creates a new `EventSource`, which re-reads the updated
+   `view_filters` cookie during the `GET /events` handshake.
+3. A 200 ms debounce (module-scoped `_reconnectTimer`) prevents multiple rapid filter
+   clicks (e.g. sort_dir toggle) from spawning several reconnects.
+
+**Test plan:**
+- Layer 4 (`TestClient`): `test_post_view_filters_returns_hx_trigger_header` and
+  `test_post_clear_filters_returns_hx_trigger_header` in
+  `tests/unit/web/routes/test_filters.py`.
+- Layer 3 JS (`app.js`): not covered automatically (Playwright excluded per
+  `docs/architecture/09-test-strategy.md`); smoke test manually via browser DevTools
+  → Network tab → confirm new `GET /events` request after filter submit.
+
+**Cookie-change-while-connected** section below is now resolved for the POST
+`/filters/view` and `/filters/clear` paths. The predicate snapshot is still immutable
+within a single `EventSource` lifetime; the fix works by forcing a reconnect after each
+filter mutation so a fresh snapshot is taken.
+
+---
+
+## Amendment — qhw8 (2026-05-18)
+
+`only_stars` удалён как часть продуктового решения по удалению фичи «Избранное»
+(см. [[decisions/ADR-053-remove-favorites-feature|ADR-053]]). Строка `only_stars=True`
+в таблице «Filter semantics» выше — исторический контекст; поле больше не существует
+в `ViewFilters`. Special-case ветка в `make_sse_view_filter` удалена: fast-path и
+predicate-логика больше не ссылаются на `only_stars`.
+
+---
+
 ## References
 
 - `src/fis_monitor/services/sse_view_filter.py` — predicate factory (new)
