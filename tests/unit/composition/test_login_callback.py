@@ -23,6 +23,7 @@ from typing import Any
 
 from fis_monitor.composition import make_login_success_callback
 from fis_monitor.domain.models import OnboardingState, Settings, SseLoginSucceeded, SseStatus
+from fis_monitor.infra.sse.bus import ThreadEventBus
 from tests.fakes.clock import FakeClock
 from tests.fakes.event_bus import FakeEventBus
 from tests.fakes.lot_repository import FakeLotRepository
@@ -217,3 +218,36 @@ def test_login_callback_publish_failure_does_not_break() -> None:
 
     # Backfill was still scheduled (guard code below the try-block ran)
     assert "backfill-auto" in supervisor.scheduled
+
+
+# ---------------------------------------------------------------------------
+# Invariant 6 — login.succeeded replay slot is evicted after publish (fplb)
+# ---------------------------------------------------------------------------
+
+
+def test_login_callback_evicts_login_succeeded_replay_slot() -> None:
+    """After callback fires, the login.succeeded slot is absent from _last_normal.
+
+    Uses a real ThreadEventBus so evict_normal_replay() (extension method,
+    guarded by isinstance check) is actually called and the slot state can
+    be inspected directly on _last_normal.
+    """
+    bus = ThreadEventBus()
+    cb = make_login_success_callback(
+        clock=FakeClock(_BASE_NOW),
+        config_source=_FakeConfigSource(_default_settings()),
+        lot_repo=FakeLotRepository(),
+        event_bus=bus,
+        onboarding=_FakeOnboarding(OnboardingState.COMPLETED),
+        backfill=_FakeBackfill(),
+        supervisor_cell=[None],
+    )
+
+    cb(None)
+
+    # The slot must have been evicted — reconnecting SSE clients won't replay
+    # the OOB-wipe fragment and stale-overwrite a fresh cycle.done result.
+    assert "login.succeeded" not in bus._last_normal, (
+        "login.succeeded slot should be evicted after publish to prevent "
+        "stale-overwrite race on SSE reconnect"
+    )

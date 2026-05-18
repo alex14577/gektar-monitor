@@ -159,6 +159,23 @@ class ThreadEventBus:
         with self._lock:
             return self._last_critical.get(event_type)
 
+    def evict_normal_replay(self, event_type: str) -> None:
+        """Remove the normal-event replay slot for *event_type*, if present.
+
+        Idempotent — calling with an unknown *event_type* is a no-op.
+
+        Not part of EventBus Protocol. Same extension pattern as
+        ``last_critical()``: callers must hold a concrete ``ThreadEventBus``
+        reference. Use this when an event should be delivered to live
+        subscribers but must NOT be replayed to future SSE reconnects —
+        for example ``login.succeeded`` whose OOB fragment would overwrite
+        a fresh ``cycle.done`` result written after login.
+
+        Thread safety: slot removal is performed under ``self._lock``.
+        """
+        with self._lock:
+            self._last_normal.pop(event_type, None)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

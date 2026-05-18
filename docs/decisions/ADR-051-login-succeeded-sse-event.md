@@ -81,6 +81,33 @@ is the natural bus-native fix.
 - Tests: `tests/unit/composition/test_login_callback.py` (5 invariants, Layer 2/3) +
   `tests/unit/web/test_sse_encoder.py` extended with 2 encoder invariants (Layer 4).
 
+### Replay-TTL and stale-overwrite-race fix (fix-round 1)
+
+`SseLoginSucceeded` has `priority="normal"` which places it in
+`ThreadEventBus._last_normal["login.succeeded"]` (see `infra/sse/bus.py`).
+The 30s TTL window (ADR-008 design — long enough to bridge a tab reload or
+SSE reconnect) creates a **stale-overwrite race**: if a fresh `SseCycleDone(ok)`
+is published during the 30s window after login, an SSE reconnect would replay
+events in insertion order — `cycle.done(ok)` first, then `login.succeeded` OOB-wipe
+second — erasing the fresh cycle result.
+
+**Fix**: after publishing `SseLoginSucceeded`, the callback immediately calls
+`event_bus.evict_normal_replay("login.succeeded")` (guarded by
+`isinstance(event_bus, ThreadEventBus)`). This is an extension method on the
+concrete impl — same pattern as `last_critical()` — not part of the `EventBus`
+Protocol. The eviction is idempotent and thread-safe (acquires `self._lock`).
+
+After the fix:
+
+- `SseLoginSucceeded` is delivered to **live subscribers** (those connected at
+  the moment of publish) — the OOB-wipe reaches the current browser tab.
+- **Replay on reconnect is suppressed** — the slot is evicted before any future
+  subscriber's `subscribe()` replay scan can pick it up.
+- Both flash-race and stale-overwrite-race are eliminated.
+
+See `[[architecture/07-concurrency]]` §7.3 for the dual-circuit routing rules
+and `infra/sse/bus.py` for `_last_normal` slot lifecycle details.
+
 ---
 
 ## References

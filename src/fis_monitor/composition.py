@@ -144,8 +144,8 @@ def make_login_success_callback(
         # Publish UI-recovery events FIRST, unconditionally on any successful
         # headed login (independent of onboarding/regions/supervisor guards
         # below — those gate the backfill, not the auth-chip refresh).
-        now = clock.now()  # type: ignore[union-attr]
         try:
+            now = clock.now()  # type: ignore[union-attr]
             settings_for_status = config_source.current()  # type: ignore[union-attr]
             last_new = lot_repo.latest_new_first_seen()  # type: ignore[union-attr]
             last_new_human = "—" if last_new is None else _humanize_relative_age(now - last_new)
@@ -161,6 +161,12 @@ def make_login_success_callback(
                 )
             )
             event_bus.publish(SseLoginSucceeded(timestamp=now))  # type: ignore[union-attr]
+            # Evict the login.succeeded normal-replay slot so future SSE
+            # reconnects do not re-deliver the OOB-wipe fragment and overwrite
+            # a fresh cycle.done result written after this login.
+            # Extension method on ThreadEventBus (same pattern as last_critical()).
+            if isinstance(event_bus, ThreadEventBus):
+                event_bus.evict_normal_replay("login.succeeded")
         except Exception:
             _log.warning(
                 "on_login_success.ui_recovery_publish_failed",

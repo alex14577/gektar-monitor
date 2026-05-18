@@ -541,3 +541,80 @@ class TestNormalEventReplaySlot:
         # No assertion on contents — just that subscribe() returns cleanly.
         with bus.subscribe() as sub:
             assert sub is not None
+
+
+# ---------------------------------------------------------------------------
+# 10. evict_normal_replay extension method (fplb)
+# ---------------------------------------------------------------------------
+
+
+class TestEvictNormalReplay:
+    """ThreadEventBus.evict_normal_replay() — removes the replay slot for an
+    event type so future SSE reconnects do not re-deliver a stale OOB fragment."""
+
+    def test_evict_removes_existing_slot(self):
+        """After publish + evict, the _last_normal slot for the event type is gone."""
+        bus = ThreadEventBus()
+        bus.publish(make_lot_new())
+        assert "lot.new" in bus._last_normal, "precondition: slot must exist after publish"
+
+        bus.evict_normal_replay("lot.new")
+
+        assert "lot.new" not in bus._last_normal, (
+            "evict_normal_replay must remove the slot so late subscribers "
+            "do not receive a stale replay"
+        )
+
+    def test_evict_missing_key_is_noop(self):
+        """Calling evict_normal_replay with an unknown event_type must not raise."""
+        bus = ThreadEventBus()
+        # No publish — slot does not exist
+        bus.evict_normal_replay("login.succeeded")  # must be silent
+
+    def test_evict_prevents_replay_on_subscribe(self):
+        """After eviction, a new subscriber must NOT receive the event via replay."""
+        bus = ThreadEventBus()
+        bus.publish(make_lot_new())
+        bus.evict_normal_replay("lot.new")
+
+        with bus.subscribe() as sub:
+            events = list(sub.iter())
+
+        assert events == [], (
+            "subscriber attached after eviction must not receive the evicted event"
+        )
+
+    def test_evict_concurrent_safety(self):
+        """evict_normal_replay acquires _lock — concurrent publish+evict must not corrupt."""
+        import threading as _threading
+
+        bus = ThreadEventBus()
+        errors: list[Exception] = []
+
+        def publisher():
+            for _ in range(50):
+                try:
+                    bus.publish(make_lot_new())
+                except Exception as exc:
+                    errors.append(exc)
+
+        def evictor():
+            for _ in range(50):
+                try:
+                    bus.evict_normal_replay("lot.new")
+                except Exception as exc:
+                    errors.append(exc)
+
+        threads = [
+            _threading.Thread(target=publisher),
+            _threading.Thread(target=evictor),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"concurrent publish/evict raised: {errors}"
+        # _last_normal is either absent or contains a valid (event, float) tuple
+        slot = bus._last_normal.get("lot.new")
+        assert slot is None or (isinstance(slot, tuple) and len(slot) == 2)
