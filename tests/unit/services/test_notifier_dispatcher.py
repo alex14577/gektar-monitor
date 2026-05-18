@@ -1601,6 +1601,115 @@ def test_rf_filter_empty_rf_subjects_passes_all_lots():
     assert len(inner.send_calls) == 1
 
 
+def test_rf_empty_with_subscribed_at_passes_new_lots():
+    """ADR-035 I4 + ADR-039 composite invariant (variant b confirmed by user).
+
+    Empty rf_subjects = notify-all (no region restriction), but
+    SubscribedAtFilteredNotifier still applies the subscribed_at cutoff.
+    A lot whose date_create >= subscribed_at must reach the inner notifier.
+    """
+    # Given
+    smtp = FakeNotifier(channel_id="email")
+    region_repo = FakeRegionSubscriptionRepository()
+    subscribed_at = _NOW - timedelta(days=1)  # subscribed yesterday
+    region_repo.seed(_REGION_KHABAROVSK, subscribed_at)
+
+    subscribed_wrapper = SubscribedAtFilteredNotifier(
+        inner=smtp, region_sub_repo=region_repo
+    )
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[]))  # notify-all
+    outer = RfSubjectFilteredEmailNotifier(
+        inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
+    )
+
+    # lot created today — AFTER subscribed_at
+    lot = _make_lot_public(region_id=_REGION_KHABAROVSK)
+    # _make_lot_public uses make_lot which defaults date_create to _DEFAULT_NOW (_NOW)
+
+    # When
+    result = outer.send(lot, "user@example.com")
+
+    # Then
+    assert result.ok is True
+    assert (result.detail or "") != "suppressed (subscribed_at)"
+    assert len(smtp.send_calls) == 1, "new lot must pass through to smtp"
+
+
+def test_rf_empty_with_subscribed_at_drops_old_lots():
+    """ADR-035 I4 + ADR-039 composite invariant (variant b confirmed by user).
+
+    Empty rf_subjects lets all regions through the RF decorator, but
+    SubscribedAtFilteredNotifier must still suppress lots created BEFORE
+    subscribed_at (onboarding anti-spam cutoff by design).
+    """
+    # Given
+    smtp = FakeNotifier(channel_id="email")
+    region_repo = FakeRegionSubscriptionRepository()
+    subscribed_at = _NOW + timedelta(days=1)  # subscribed tomorrow → today's lot is old
+    region_repo.seed(_REGION_KHABAROVSK, subscribed_at)
+
+    subscribed_wrapper = SubscribedAtFilteredNotifier(
+        inner=smtp, region_sub_repo=region_repo
+    )
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[]))  # notify-all
+    outer = RfSubjectFilteredEmailNotifier(
+        inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
+    )
+
+    # lot created today — strictly BEFORE subscribed_at (tomorrow)
+    lot = _make_lot_public(region_id=_REGION_KHABAROVSK)
+
+    # When
+    result = outer.send(lot, "user@example.com")
+
+    # Then: suppressed by subscribed_at filter (not by rf_subjects)
+    assert result.ok is True
+    assert "suppressed" in (result.detail or ""), "lot must be suppressed"
+    assert len(smtp.send_calls) == 0, "smtp must not be called for old lot"
+
+
+def test_rf_non_empty_with_unselected_region_drops_before_subscribed_at():
+    """ADR-035 I5: when rf_subjects is set and lot region is NOT in it,
+    suppression fires at the RF layer — SubscribedAtFilteredNotifier inner
+    should_suppress is NOT invoked (short-circuit at the outer decorator).
+
+    Concretely: region_Y lot with rf_subjects=[region_X] is suppressed on
+    the rf_subjects check; the subscribed_at layer is never reached.
+    """
+    # Given — two distinct regions
+    region_x = 77  # Moscow — in rf_subjects
+    region_y = _REGION_KHABAROVSK  # 89 — NOT in rf_subjects
+
+    smtp = FakeNotifier(channel_id="email")
+    region_repo = FakeRegionSubscriptionRepository()
+    # seed subscribed_at for region_y (so if it WERE checked, it would suppress)
+    region_repo.seed(region_y, _NOW + timedelta(days=1))
+
+    subscribed_wrapper = SubscribedAtFilteredNotifier(
+        inner=smtp, region_sub_repo=region_repo
+    )
+    config = FakeConfigSource(_make_filters_settings(rf_subjects=[region_x]))
+    outer = RfSubjectFilteredEmailNotifier(
+        inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
+    )
+
+    lot = _make_lot_public(region_id=region_y)  # region NOT in rf_subjects
+
+    # When
+    result = outer.send(lot, "user@example.com")
+
+    # Then: suppressed by rf_subjects (not subscribed_at)
+    assert result.ok is True
+    assert "suppressed" in (result.detail or ""), "lot must be suppressed at RF layer"
+    assert len(smtp.send_calls) == 0, "smtp must not be called"
+    # subscribed_at layer was not reached — region_repo has no get_subscribed_at call
+    # for region_y via the subscribed_wrapper path (it was short-circuited by rf filter)
+    subscribed_at_calls = [c for c in region_repo._calls if f"get_subscribed_at:{region_y}" in c]
+    assert subscribed_at_calls == [], (
+        "get_subscribed_at must NOT be called when rf_subjects suppresses first"
+    )
+
+
 def test_rf_filter_chains_inner_should_suppress():
     """Composite chain (Rf → SubscribedAt → smtp): if rf passes but inner
     subscribed_at suppresses, the OUTER ``should_suppress`` must reflect

@@ -46,6 +46,10 @@ Addendum ADR-031 вводил UX-инвариант «≥1 subject required» д
 
 **I4. Пустой `filters.rf_subjects` ⇒ notify-all**: поведение унаследовано от `filter_matcher.py:67–68` (`if not filters.rf_subjects: return True`) и подтверждено пользователем 2026-05-15. Это явный инвариант, а не дефект.
 
+> **Важно**: пустой `rf_subjects` означает отсутствие региональных ограничений, но **не отключает**
+> `SubscribedAtFilteredNotifier`. Лоты старше `subscribed_at` подавляются на уровне inner-decorator'а
+> независимо от значения `rf_subjects`. See [[decisions/ADR-039-subscribed-at-region-cutoff|ADR-039]].
+
 **I5. Browser channel НЕ фильтруется по `rf_subjects`** (amendment 2026-05-18, bd-scrd).
 Notify-scope разделяет каналы: email применяет `rf_subjects` через decorator
 `RfSubjectFilteredEmailNotifier`; browser-канал получает ВСЕ лоты, чтобы открытая

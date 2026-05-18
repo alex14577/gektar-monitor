@@ -330,6 +330,44 @@ if attempt_no > MAX_TOTAL_ATTEMPTS:
 
 Защита от бесконечного retry при перманентной невозможности отправки (sustained provider outage > 24h, deactivated bot-account). Без cap'а `attempt_no` рос бы без границ при каждом рестарте, забивая лог.
 
+## Пустой rf_subjects vs subscribed_at
+
+**Семантика пустого `filters.rf_subjects` (ADR-035 I4):** пустой список означает «без региональных
+ограничений» — `RfSubjectFilterMatcher.matches` возвращает `True` для любого лота. Это явный
+инвариант «notify-all», а не дефект.
+
+**Subscribed_at остаётся активным при пустом rf_subjects (ADR-039, by design).**
+`SubscribedAtFilteredNotifier` — отдельный decorator-слой в цепочке
+`RfSubjectFilteredEmailNotifier → SubscribedAtFilteredNotifier → SmtpEmailNotifier`.
+Когда RF-декоратор пропускает лот (в том числе при пустом rf_subjects), управление передаётся
+inner-декоратору `SubscribedAtFilteredNotifier`, который применяет cutoff по `subscribed_at`.
+
+Пример цепочки при пустом rf_subjects:
+
+```
+Лот (region=Хабаровский край, date_create=2026-01-10)
+   ↓ RfSubjectFilteredEmailNotifier: rf_subjects=[] → pass-through (I4)
+   ↓ SubscribedAtFilteredNotifier: subscribed_at=2026-02-01 → SUPPRESS (date_create < subscribed_at)
+   ✗ SmtpEmailNotifier: не вызван
+```
+
+```
+Лот (region=Хабаровский край, date_create=2026-02-15)
+   ↓ RfSubjectFilteredEmailNotifier: rf_subjects=[] → pass-through (I4)
+   ↓ SubscribedAtFilteredNotifier: subscribed_at=2026-02-01 → pass (date_create >= subscribed_at)
+   ✓ SmtpEmailNotifier: письмо отправлено
+```
+
+Это предотвращает спам при онбординге нового региона: даже без региональных ограничений
+исторические лоты (до момента подписки) не рассылаются.
+
+Покрыто тестами `test_rf_empty_with_subscribed_at_passes_new_lots` и
+`test_rf_empty_with_subscribed_at_drops_old_lots` в
+`tests/unit/services/test_notifier_dispatcher.py`.
+
+См. [[decisions/ADR-035-three-scope-filter-model|ADR-035]] §I4 и
+[[decisions/ADR-039-subscribed-at-region-cutoff|ADR-039]].
+
 ## API-эндпоинты
 
 Каналами управляют:
