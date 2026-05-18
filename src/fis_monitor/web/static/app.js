@@ -139,32 +139,36 @@
     toggleLot(btn.closest('.lot'));
   });
 
-  // Whole-card click → toggle expand.
-  // Skip clicks that landed on something interactive (links, buttons, inputs,
-  // copy icons, the star toggle, etc.) so they keep doing their own thing.
+  // Whole-card click → open the lot in a new tab (same as the primary
+  // «Открыть» button). Skip clicks on inner interactive controls so copy,
+  // links, and buttons keep their own behaviour.
   const INTERACTIVE = 'a, button, input, textarea, select, label, [data-copy], [role="button"], summary, details';
+  function openLotPrimary(lot) {
+    const link = lot.querySelector('a.btn--primary[href]');
+    if (!link) return;
+    // Respect the disabled-on-session-expired state set in the template.
+    if (link.getAttribute('aria-disabled') === 'true') return;
+    // Use .click() so target="_blank" + rel="noopener" semantics are honoured.
+    link.click();
+  }
   document.addEventListener('click', (e) => {
     const lot = e.target.closest('.lot');
     if (!lot) return;
-    // Ignore selection drags
     if (window.getSelection && String(window.getSelection()).length > 0) return;
-    // Ignore clicks on anything interactive
     if (e.target.closest(INTERACTIVE)) return;
-    // Don't toggle for "gone" diff cards (no details to show)
     if (lot.dataset.event === 'gone') return;
-    toggleLot(lot);
+    openLotPrimary(lot);
   });
 
-  // Keyboard: Enter or Space toggles the focused card.
+  // Keyboard: Enter or Space on the focused card opens the lot.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const lot = e.target.closest('.lot');
     if (!lot) return;
-    // only when the .lot itself is the focus target — don't hijack inputs/buttons
     if (e.target !== lot) return;
     if (lot.dataset.event === 'gone') return;
     e.preventDefault();
-    toggleLot(lot);
+    openLotPrimary(lot);
   });
 
   // ---------- note inline open ----------

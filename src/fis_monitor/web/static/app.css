@@ -386,7 +386,8 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .lot[data-event="gone"] .lot__age { color: var(--muted); }
 
 /* ============== POSTER variant (hot / warm) ============== */
-.lot--poster { padding: 18px 20px 18px 28px; }
+.lot--poster { padding: 18px 20px 18px 28px; cursor: pointer; }
+.lot--poster :is(a, button, input, textarea, select, label, [data-copy]) { cursor: auto; }
 .lot--poster .lot__row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
 .lot--poster .lot__chips { display: flex; gap: 6px; flex-wrap: wrap; }
 
@@ -420,7 +421,7 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .copy:hover { background: var(--surface-2); color: var(--ink); }
 
 /* details — hidden by default, revealed via JS toggle; always expanded in poster variant */
-.lot__details { display: none; padding: 14px 16px 0; border-top: 1px dashed var(--line); margin-top: 14px; }
+.lot__details { display: none; padding: 0 16px; }
 .lot--poster .lot__details { display: block; }
 .lot[data-open="true"] .lot__details { display: block; }
 .lot__details-row { display: flex; gap: 24px; flex-wrap: wrap; }

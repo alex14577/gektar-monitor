@@ -7,7 +7,7 @@
 <form id="filters"
       hx-post="/filters/view"
       hx-trigger="change delay:200ms, input changed delay:400ms"
-      hx-target="#feed"
+      hx-target="#feed-wrapper"
       hx-swap="outerHTML">
 
   <div class="sidebar__group">
@@ -15,18 +15,13 @@
     {% set oob = false %}
     {% include "partials/_filter_trigger.html.jinja" %}
     <div id="filter-subjects-menu" data-menu role="dialog" aria-label="Фильтр по субъектам" tabindex="-1" hidden></div>
-
-    {# C3: onboarding-hint — показывать только когда subjects не выбраны #}
-    {% if not filters.subjects %}
-    <p class="filter-hint">Выберите субъекты, чтобы видеть приоритетные лоты (чип «подписан»)</p>
-    {% endif %}
   </div>
 
   {# M6: «Очистить фильтры» — показывать только при активных фильтрах #}
   {% if filters_active %}
   <div class="sidebar__group">
     <button class="btn btn--ghost btn--sm btn--full" type="button"
-            hx-post="/filters/clear" hx-target="#feed" hx-swap="outerHTML">
+            hx-post="/filters/clear" hx-target="#feed-wrapper" hx-swap="outerHTML">
       Очистить фильтры
     </button>
   </div>

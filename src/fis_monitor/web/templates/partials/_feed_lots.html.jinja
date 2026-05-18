@@ -1,10 +1,17 @@
 {# Feed lots partial — rendered by GET / (via feed.html.jinja) and POST /filters/view.
-   htmx target: hx-target="#feed" hx-swap="outerHTML"
+   htmx target: hx-target="#feed-wrapper" hx-swap="outerHTML"
    Variables: zones, archive_count, filters_active, health, filters, scope
    Optional: render_oob (bool, default false) — when true, appends an out-of-band
              <button id="filter-trigger" hx-swap-oob="true"> so htmx refreshes
              the subject-filter trigger button outside #feed on POST responses.
+
+   Wrapper #feed-wrapper:
+   The partial contains filter-bar + backfill-progress + #feed (lots list).
+   htmx outerHTML на #feed дублировал бы filter-bar (response > 1 element), —
+   поэтому swap-target = #feed-wrapper (вся обёртка целиком), а SSE-swap
+   остаётся на внутреннем #feed (htmx-sse MutationObserver re-wires).
 #}
+<div id="feed-wrapper">
 
 {# hiq3: filter-bar — between header and list, sort select + lot count #}
 <div class="filter-bar">
@@ -12,7 +19,7 @@
     <label class="filter-bar__label" for="sort-dir-select">Сортировка:</label>
     <select id="sort-dir-select" name="sort_dir" class="filter-bar__select"
             hx-post="/filters/view"
-            hx-target="#feed"
+            hx-target="#feed-wrapper"
             hx-swap="outerHTML"
             hx-include="#filters">
       <option value="desc" {% if not filters.sort_dir or filters.sort_dir == 'desc' %}selected{% endif %}>по дате ↓</option>
@@ -96,16 +103,22 @@
     <div class="zone" style="text-align: center; padding: 48px 24px;">
       <p style="margin: 0; color: var(--ink-2);">Ничего не подходит под текущие фильтры.</p>
       <p style="margin: 6px 0 14px; color: var(--muted); font-size: 0.875rem;">Снимите часть, чтобы увидеть остальное.</p>
-      <button class="btn" hx-post="/filters/clear" hx-target="#feed" hx-swap="outerHTML">Очистить фильтры</button>
+      <button class="btn" hx-post="/filters/clear" hx-target="#feed-wrapper" hx-swap="outerHTML">Очистить фильтры</button>
     </div>
   {% endif %}
 
 </div>{# /#feed #}
 
-{# Out-of-band swap: update subject-filter trigger button (outside #feed) on POST.
+</div>{# /#feed-wrapper #}
+
+{# Out-of-band swap: update subject-filter trigger button (outside #feed-wrapper) on POST.
    htmx processes elements with hx-swap-oob="true" as secondary swaps regardless
    of the primary hx-target. Only emitted when render_oob is truthy (POST path).
-   GET / renders the button inline via _sidebar_filters.html.jinja instead. #}
+   GET / renders the button inline via _sidebar_filters.html.jinja instead.
+
+   Important: hx-swap-oob fragments MUST be top-level siblings in the response,
+   not nested inside #feed-wrapper, otherwise htmx ignores them.
+   That's why this block sits AFTER the </div>{# /#feed-wrapper #} above. #}
 {% if render_oob | default(false) %}
 {% set oob = true %}
 {% include "partials/_filter_trigger.html.jinja" %}
