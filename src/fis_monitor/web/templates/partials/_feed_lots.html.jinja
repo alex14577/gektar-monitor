@@ -111,14 +111,14 @@
 
 </div>{# /#feed-wrapper #}
 
-{# Out-of-band swap: update subject-filter trigger button (outside #feed-wrapper) on POST.
+{# Out-of-band swap: update subject-filter trigger button (outside feed-wrapper) on POST.
    htmx processes elements with hx-swap-oob="true" as secondary swaps regardless
    of the primary hx-target. Only emitted when render_oob is truthy (POST path).
    GET / renders the button inline via _sidebar_filters.html.jinja instead.
 
    Important: hx-swap-oob fragments MUST be top-level siblings in the response,
-   not nested inside #feed-wrapper, otherwise htmx ignores them.
-   That's why this block sits AFTER the </div>{# /#feed-wrapper #} above. #}
+   not nested inside feed-wrapper, otherwise htmx ignores them — that's why
+   this block sits AFTER the feed-wrapper closing div above. #}
 {% if render_oob | default(false) %}
 {% set oob = true %}
 {% include "partials/_filter_trigger.html.jinja" %}
