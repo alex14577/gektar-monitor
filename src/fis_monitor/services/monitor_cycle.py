@@ -35,7 +35,7 @@ import logging
 import queue
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
@@ -719,6 +719,12 @@ class MonitorCycleService:
             )
             interval = int(settings.interval_minutes)
             next_cycle_mmss = f"{interval}:00" if interval > 0 else ""
+            # bd r82m: absolute next-fire timestamp is the SSOT for the client
+            # countdown. The JS reads data-next-check-at and computes remaining
+            # seconds as (Date.parse(nextAt) - Date.now()) / 1000 each tick, so
+            # an SSE swap or reconnect always restores the correct remaining time
+            # without resetting to the full interval.
+            next_fire_at = (now + timedelta(minutes=interval)) if interval > 0 else None
             state = "error" if result.status == "error" else "active"
             self._event_bus.publish(
                 SseStatus(
@@ -726,6 +732,7 @@ class MonitorCycleService:
                     state=state,
                     interval_minutes=interval,
                     next_cycle_mmss=next_cycle_mmss,
+                    next_fire_at=next_fire_at,
                     last_new_human=last_new_human,
                     expires_at_hhmm="",
                 )

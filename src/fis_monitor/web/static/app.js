@@ -16,6 +16,7 @@
   // ---------- helpers ----------
   const $  = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const pad2 = (n) => String(n).padStart(2, '0');
 
   // ---------- toaster ----------
   function ensureToaster() {
@@ -188,18 +189,23 @@
   // Re-resolves the element on every tick: #header-status is replaced by
   // sse-swap="status", so a once-captured node reference would become
   // detached and the visible span would freeze on the server-rendered value.
+  //
+  // bd r82m: reads data-next-check-at (absolute UTC ISO-8601 timestamp) and
+  // computes remaining = (Date.parse(nextAt) - Date.now()) / 1000 each tick.
+  // This makes the countdown swap-safe: a fresh SSE swap or reconnect delivers
+  // the real next-fire timestamp, so the timer restores the correct remaining
+  // time instead of resetting to the full interval.
+  //
+  // Graceful degrade: if data-next-check-at is absent or unparseable the
+  // element text is cleared and the tick is a no-op (no bogus countdown).
   setInterval(() => {
     const el = $('[data-countdown]');
     if (!el) return;
-    const intervalMin = Number(el.dataset.countdown);
-    if (!Number.isFinite(intervalMin) || intervalMin <= 0) return;
-    let remaining = Number(el.dataset.remaining);
-    if (!Number.isFinite(remaining) || remaining <= 0) {
-      remaining = intervalMin * 60;
-    }
-    remaining -= 1;
-    if (remaining <= 0) remaining = intervalMin * 60;
-    el.dataset.remaining = String(remaining);
+    const nextAtStr = el.dataset.nextCheckAt;
+    if (!nextAtStr) return;
+    const nextAt = Date.parse(nextAtStr);
+    if (!Number.isFinite(nextAt)) return;
+    const remaining = Math.max(0, Math.round((nextAt - Date.now()) / 1000));
     const m = Math.floor(remaining / 60);
     const s = remaining % 60;
     el.textContent = `${m}:${pad2(s)}`;

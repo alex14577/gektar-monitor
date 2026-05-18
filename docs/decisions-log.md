@@ -59,6 +59,7 @@
 - [[decisions/ADR-045-ci-pipeline|ADR-045]] — GitHub Actions CI pipeline: 4 blocking jobs (lint / typecheck / test-unit / test-integration); coverage gate ≥80% on domain+services; concurrency cancel-in-progress; `pip install -e ".[dev]"` install strategy (bd vgm.4)
 - [[decisions/ADR-046-session-monitor-combined-probe-and-publish|ADR-046]] — SessionMonitor: combined HTTP probe + SseSessionExpired publish in a single class (bd a4t.9); SRP split deferred until second probe consumer materialises
 - [[decisions/ADR-047-tls-trust-playwright-context|ADR-047]] — TLS trust posture for Playwright login context (accepted-with-known-risk)
+- [[decisions/ADR-048-header-countdown-absolute-next-fire-at|ADR-048]] — Header countdown: `SseStatus.next_fire_at` (absolute UTC) as client-side timer SSOT; `data-next-check-at` attribute; JS computes remaining via `Date.parse` each tick (swap-safe, bd r82m)
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

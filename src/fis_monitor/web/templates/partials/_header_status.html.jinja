@@ -14,7 +14,7 @@
 {% if monitor.interval_minutes > 0 %}
   <span class="countdown" aria-label="До следующей проверки">
     Проверка через
-    <span data-countdown="{{ monitor.interval_minutes }}">{{ monitor.next_cycle_mmss }}</span>
+    <span data-countdown data-next-check-at="{{ monitor.next_fire_at_iso }}">{{ monitor.next_cycle_mmss }}</span>
   </span>
 {% else %}
   <span class="countdown" aria-label="Непрерывный цикл">

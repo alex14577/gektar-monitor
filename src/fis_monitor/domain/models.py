@@ -960,10 +960,15 @@ class SseStatus(BaseModel):
 
     - ``state``: traffic-light for the monitor — active / warning / error /
       paused. Drives the dot colour and the screen-reader label.
-    - ``interval_minutes``: configured polling interval; the client-side
-      ``data-countdown`` JS uses it to tick down between SSE updates.
+    - ``interval_minutes``: configured polling interval.
     - ``next_cycle_mmss``: best-effort "MM:SS until next poll" rendered on
       the server. Empty when not yet known (first render).
+    - ``next_fire_at``: absolute UTC datetime of the next scheduled cycle
+      (``None`` when not yet known). The client-side countdown JS uses this
+      absolute timestamp to compute remaining seconds on every tick, making
+      the timer swap-safe: a fresh SSE swap carries the ground-truth timestamp
+      so the countdown restarts from the correct remaining time, not from
+      the full interval. Introduced by bd r82m.
     - ``last_new_human``: relative-time string for the most-recent lot
       (``"5 мин назад"``); "—" when the database is empty.
     - ``expires_at_hhmm``: session-expiry clock for the warning state.
@@ -985,8 +990,23 @@ class SseStatus(BaseModel):
     state: Literal["active", "warning", "error", "paused"]
     interval_minutes: StrictInt
     next_cycle_mmss: str = ""
+    next_fire_at: datetime | None = None
     last_new_human: str = "—"
     expires_at_hhmm: str = ""
+
+    @property
+    def next_fire_at_iso(self) -> str:
+        """ISO-8601 UTC string for the next fire timestamp.
+
+        Returns an empty string when ``next_fire_at`` is ``None`` (unknown).
+        The ``Z`` suffix ensures ``Date.parse()`` in all modern browsers
+        reliably parses the value as UTC without relying on timezone-aware
+        ISO strings (``+00:00`` is also valid, ``Z`` is simpler and
+        universally supported).
+        """
+        if self.next_fire_at is None:
+            return ""
+        return self.next_fire_at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ---------------------------------------------------------------------------
