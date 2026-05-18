@@ -27,6 +27,10 @@ dependencies = [
     "jinja2>=3.1",
     "platformdirs>=4.2",
     "python-multipart>=0.0.9",
+    # На Windows у Python нет системной IANA-базы таймзон, и stdlib `zoneinfo`
+    # ищет её в пакете `tzdata`. Без него падают и Europe/Moscow, и UTC
+    # (ZoneInfoNotFoundError) — full-scan-тред умирает на старте.
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

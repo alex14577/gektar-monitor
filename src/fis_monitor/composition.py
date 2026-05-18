@@ -244,6 +244,15 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     # monitor_cycle / backfill requests carry valid session cookies (ADR-034).
     cookie_store = RequestsCookieStore(http_session)
     target_cfg = config_source.current().target
+    # ADR-024: upstream сервер использует self-signed cert в цепочке, поэтому
+    # verify=False — осознанное решение. urllib3 на каждый такой запрос печатает
+    # InsecureRequestWarning в stderr, что забивает лог цикла. Глушим
+    # единоразово здесь, рядом с местом, где принимается решение не верифицировать
+    # TLS — чтобы было видно связь warning↔verify=False при ревью.
+    import urllib3
+    from urllib3.exceptions import InsecureRequestWarning
+
+    urllib3.disable_warnings(InsecureRequestWarning)
     http_client = RequestsHttpClient(
         session=http_session,
         verify=False,  # ADR-024: upstream uses self-signed cert in chain
