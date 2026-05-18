@@ -471,13 +471,18 @@ def _make_user_dto(
     return LotUserDTO(**payload)
 
 
-def test_feed_zones_split_by_age() -> None:
-    """zones.hot ≤ 1h, zones.today 1-24h, archive_count > 24h."""
+def test_feed_zones_all_lots_in_today_regardless_of_age() -> None:
+    """All lots go to zones.today; zones.hot is always empty; age does not bucket lots.
+
+    Previously lots were split by age_seconds into hot/today/archive. Since the
+    «Горячее» section was removed, all filtered lots (within _FEED_PAGE_SIZE) are
+    placed in zones.today so the «Список» section never disappears due to age.
+    """
     items = (
-        _make_user_dto(lot_id=1, age_seconds=600),          # hot
-        _make_user_dto(lot_id=2, age_seconds=10_000),       # today (~2.7h)
-        _make_user_dto(lot_id=3, age_seconds=200_000),      # archive (>24h)
-        _make_user_dto(lot_id=4, age_seconds=300_000),      # archive
+        _make_user_dto(lot_id=1, age_seconds=600),          # was hot
+        _make_user_dto(lot_id=2, age_seconds=10_000),       # was today (~2.7h)
+        _make_user_dto(lot_id=3, age_seconds=200_000),      # was archive (>24h)
+        _make_user_dto(lot_id=4, age_seconds=300_000),      # was archive
     )
     fake_lot_query = FakeLotQuery(items=items)
     app, _, _ = _make_app(lot_query=fake_lot_query)
@@ -485,14 +490,17 @@ def test_feed_zones_split_by_age() -> None:
         resp = client.get("/")
     assert resp.status_code == 200
     html = resp.text
-    # All non-archive lots present in HTML
+    # All lots rendered inline regardless of age
     assert 'id="lot-1"' in html
     assert 'id="lot-2"' in html
-    # Archive lots not rendered inline
-    assert 'id="lot-3"' not in html
-    assert 'id="lot-4"' not in html
-    # Archive reveal button shows 2 (= number of >24h lots)
-    assert "<b style=\"margin-left: 4px;\">2</b>" in html
+    assert 'id="lot-3"' in html
+    assert 'id="lot-4"' in html
+    # No archive reveal button (all lots fit in page)
+    assert "Показать ещё" not in html
+    # No «Горячее» section
+    assert "Горячее" not in html
+    # «Список» section heading present
+    assert "Список" in html
     # LotQueryService was actually consulted
     assert len(fake_lot_query.search_calls) == 1
 

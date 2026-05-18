@@ -16,33 +16,21 @@
      hx-target=#feed (POST /filters/view), so removing the local
      sse-connect does not break live updates. #}
 
-  {# HOT (≤ 1 hour) #}
-  {% if zones.hot %}
-    <section class="zone zone--hot" aria-label="Горячее (новее 1 часа)">
-      <header class="zone__head">
-        <h2 class="zone__title">🔥 Горячее <span class="zone__title-count">· {{ zones.hot|length }} лот{{ 'а' if zones.hot|length in [2,3,4] else ('' if zones.hot|length == 1 else 'ов') }} · ≤ 1 часа</span></h2>
-      </header>
-      {% for lot in zones.hot %}
-        {% include "partials/_lot_poster.html.jinja" %}
-      {% endfor %}
-    </section>
-  {% endif %}
-
-  {# TODAY (1h–24h) #}
+  {# LIST — all filtered lots regardless of age #}
   {% if zones.today %}
-    <section class="zone" aria-label="Сегодня">
+    <section class="zone" aria-label="Список лотов">
       <header class="zone__head">
-        <h2 class="zone__title">Сегодня <span class="zone__title-count">· {{ zones.today|length }} лот{{ 'а' if zones.today|length in [2,3,4] else ('' if zones.today|length == 1 else 'ов') }} · 1 ч – 24 ч</span></h2>
+        <h2 class="zone__title">Список <span class="zone__title-count">· {{ zones.today|length }} лот{{ 'а' if zones.today|length in [2,3,4] else ('' if zones.today|length == 1 else 'ов') }}</span></h2>
       </header>
       {% for lot in zones.today %}
-        {% include "partials/_lot_list.html.jinja" %}
+        {% include "partials/_lot_poster.html.jinja" %}
       {% endfor %}
     </section>
   {% endif %}
 
   {# Loading state: в БД ещё нет лотов и нет активных фильтров — сервис ещё качает первую партию. #}
   {# Скрывается через CSS как только в #feed появляется первый ребёнок-лот (через :has). #}
-  {% if not zones.hot and not zones.today and not filters_active and health.total_lots == 0 %}
+  {% if not zones.today and not filters_active and health.total_lots == 0 %}
   <div id="feed-loading" class="zone" style="text-align:center; padding:48px 24px;">
     <span class="spinner-dots" aria-label="Загружаем первую партию лотов" style="margin: 0 auto 12px;">
       <span class="spinner-dots__dot"></span>
@@ -71,7 +59,7 @@
   {% endif %}
 
   {# Empty state for active filters #}
-  {% if not zones.hot and not zones.today and filters_active %}
+  {% if not zones.today and filters_active %}
     <div class="zone" style="text-align: center; padding: 48px 24px;">
       <p style="margin: 0; color: var(--ink-2);">Ничего не подходит под текущие фильтры.</p>
       <p style="margin: 6px 0 14px; color: var(--muted); font-size: 0.875rem;">Снимите часть, чтобы увидеть остальное.</p>

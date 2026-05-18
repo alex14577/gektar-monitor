@@ -21,10 +21,6 @@ from fis_monitor.web.sse_encoder import LotUserViewModel
 
 __all__ = ["build_feed_context"]
 
-# Feed zone age thresholds — must match _lot_poster vs _lot_list visual split.
-_AGE_HOT_SECS = 3_600          # < 1 hour  → hot zone (poster card)
-_AGE_TODAY_SECS = 86_400       # 1 h – 24 h → today zone (list card)
-
 # Single-page feed cap: at most this many active lots are loaded into the
 # initial HTML.  Lots beyond this fall into the archive count only.
 _FEED_PAGE_SIZE = 200
@@ -82,17 +78,17 @@ def _assemble_feed_zones(
 ) -> tuple[SimpleNamespace, int]:
     """Group ``LotUserDTO`` items into the template's feed zones.
 
-    Splits by ``age_seconds`` into hot (≤ 1 h) and today (1 h – 24 h);
-    everything older counts towards ``archive_count`` but is not rendered
-    inline (revealed on demand via the "Показать ещё" button).
+    All lots that pass the user-state post-filters are placed into
+    ``zones.today`` regardless of age; ``zones.hot`` is always an empty
+    tuple (kept for backward-compat with any callers that read the field).
+    ``archive_count`` is always 0 because ``lot_query.search`` already caps
+    results at ``_FEED_PAGE_SIZE`` — there is nothing left over.
 
     Applies the user-state post-filters (``only_new``, ``only_stars``) that
     the SQL layer cannot express.  Each surfaced lot is wrapped in
     ``LotUserViewModel`` so it can be consumed by the existing partials.
     """
-    hot: list[LotUserViewModel] = []
     today: list[LotUserViewModel] = []
-    archive_count = 0
 
     for dto in items:
         if view_filters.only_new and dto.seen_at is not None:
@@ -100,14 +96,9 @@ def _assemble_feed_zones(
         if view_filters.only_stars and not dto.starred:
             continue
 
-        if dto.age_seconds < _AGE_HOT_SECS:
-            hot.append(LotUserViewModel(dto, subscribed_regions=subscribed_regions))
-        elif dto.age_seconds < _AGE_TODAY_SECS:
-            today.append(LotUserViewModel(dto, subscribed_regions=subscribed_regions))
-        else:
-            archive_count += 1
+        today.append(LotUserViewModel(dto, subscribed_regions=subscribed_regions))
 
-    return SimpleNamespace(hot=tuple(hot), today=tuple(today)), archive_count
+    return SimpleNamespace(hot=(), today=tuple(today)), 0
 
 
 def _build_filters_context(filters: ViewFilters) -> SimpleNamespace:
