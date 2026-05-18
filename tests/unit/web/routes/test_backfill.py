@@ -60,10 +60,7 @@ class FakeBackfillService:
             status=self._mode,
             current_region=77 if running else None,
             current_page=3 if running else None,
-            lots_seen=42 if (running or done) else 0,
-            regions_done=2 if done else (1 if running else 0),
             regions_total=2,
-            total_pages_seen=5 if (running or done) else 0,
             started_at="2026-01-01T12:00:00+00:00" if (running or done) else None,
             updated_at="2026-01-01T12:01:00+00:00" if (running or done) else None,
         )
@@ -90,7 +87,6 @@ def test_fake_backfill_service_all_methods() -> None:
 
     snap = fake.status()
     assert snap.running is True
-    assert snap.lots_seen == 42
 
     fake.cancel()
     assert fake.cancel_calls == 1
@@ -102,8 +98,6 @@ def test_fake_backfill_service_all_methods() -> None:
     assert done_snap.status == "done"
     assert done_snap.running is False
     assert done_snap.started_at is not None
-    assert done_snap.lots_seen > 0
-    assert done_snap.total_pages_seen > 0
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +179,7 @@ class TestBackfillStartConflict:
 
 class TestBackfillStatus:
     def test_idle_status_all_fields(self) -> None:
-        """idle: status='idle', all numeric fields zero, timestamps None."""
+        """idle: status='idle', progress fields at defaults, timestamps None."""
         fake = FakeBackfillService(running=False)
         app = _build_app(fake)
 
@@ -196,14 +190,15 @@ class TestBackfillStatus:
         body = resp.json()
         assert body["status"] == "idle"
         assert body["running"] is False
-        assert body["lots_seen"] == 0
-        assert body["total_pages_seen"] == 0
         assert body["regions_total"] == 2
         assert body["current_region"] is None
         assert body["current_page"] is None
-        assert body["regions_done"] == 0
         assert body["started_at"] is None
         assert body["updated_at"] is None
+        # hs9c: dead counter fields must not appear in the response
+        assert "lots_seen" not in body
+        assert "regions_done" not in body
+        assert "total_pages_seen" not in body
 
     def test_running_status(self) -> None:
         """running: status='running', progress fields populated."""
@@ -219,13 +214,15 @@ class TestBackfillStatus:
         assert body["running"] is True
         assert body["current_region"] == 77
         assert body["current_page"] == 3
-        assert body["lots_seen"] == 42
-        assert body["total_pages_seen"] == 5
         assert body["started_at"] is not None
         assert body["updated_at"] is not None
+        # hs9c: dead counter fields must not appear in the response
+        assert "lots_seen" not in body
+        assert "regions_done" not in body
+        assert "total_pages_seen" not in body
 
     def test_done_status_returns_correct_shape(self) -> None:
-        """done: status='done', running=False, counters survive, timestamps set."""
+        """done: status='done', running=False, timestamps set."""
         fake = FakeBackfillService(running=False, mode="done")
         app = _build_app(fake)
 
@@ -238,8 +235,10 @@ class TestBackfillStatus:
         assert body["running"] is False
         assert body["started_at"] is not None
         assert body["updated_at"] is not None
-        assert body["lots_seen"] > 0, "counters must survive completion"
-        assert body["total_pages_seen"] > 0, "page counter must survive completion"
+        # hs9c: dead counter fields must not appear in the response
+        assert "lots_seen" not in body
+        assert "regions_done" not in body
+        assert "total_pages_seen" not in body
 
 
 # ---------------------------------------------------------------------------

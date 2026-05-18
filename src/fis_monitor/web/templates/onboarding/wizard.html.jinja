@@ -45,25 +45,6 @@
         <span></span>
 
         <div style="display: flex; gap: 8px;">
-          {% if step == 2 %}
-            <button class="btn btn--ghost"
-                    type="button"
-                    name="action" value="skip"
-                    hx-post="/onboarding/save?step={{ step }}"
-                    hx-include="closest form"
-                    hx-target=".wiz__inner"
-                    hx-swap="innerHTML"
-                    hx-disabled-elt="this">Настроить позже</button>
-          {% elif step == 3 %}
-            <button class="btn btn--ghost"
-                    type="button"
-                    name="action" value="skip"
-                    hx-post="/onboarding/save?step={{ step }}"
-                    hx-include="closest form"
-                    hx-target=".wiz__inner"
-                    hx-swap="innerHTML"
-                    hx-disabled-elt="this">Пропустить — только браузерные</button>
-          {% endif %}
           <button class="btn btn--primary btn--lg"
                   type="button"
                   name="action" value="next"

@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
-
 from fis_monitor.domain.errors import UpstreamError
 from fis_monitor.domain.models import SseCycleDone, SseCycleStarted
 from tests.unit.services.test_monitor_cycle import (
@@ -105,23 +103,29 @@ class TestPublishCycleStarted:
 class TestSseCycleStartedOnErrorPath:
     """On error paths, SseCycleStarted is still published before the cycle terminates."""
 
-    def test_cycle_started_published_before_upstream_error(self) -> None:
-        """SseCycleStarted is published before UpstreamError propagates out of run_cycle.
+    def test_cycle_started_and_done_published_on_parser_upstream_error(self) -> None:
+        """SseCycleStarted AND SseCycleDone are published when parse() raises UpstreamError.
 
-        Invariant: pulse-dot enters «checking» state on every run, even when the
-        parser raises UpstreamError.  run_cycle re-raises domain errors that escape
-        _run_cycle_inner; the supervisor (run_forever) handles the backoff.
+        Invariant (y38m): the pulse-dot must never strand in «checking» state.
+        Even if list_parser.parse raises UpstreamError (defensive path — current
+        parser raises only ParseBugError/SessionExpiredError) — run_cycle must
+        gracefully close the cycle with cycle.done, not re-raise.
         """
         svc, _, _, _, _, _, _, bus, _ = _make_service(
             list_parser=FakeListParser(raises=UpstreamError("timeout", category="timeout")),
             clock=FakeClock(fixed=_NOW),
         )
 
-        with pytest.raises(UpstreamError):
-            svc.run_cycle(_REGION)
+        # Defensive catch — must NOT propagate UpstreamError from parse step.
+        svc.run_cycle(_REGION)
 
         started = _started_events(bus.published)
+        done = _done_events(bus.published)
         assert started, (
             "SseCycleStarted must be published on upstream error path so the "
             "pulse-dot enters 'checking' state before the cycle fails"
+        )
+        assert done, (
+            "SseCycleDone must be published so the pulse-dot exits 'checking' "
+            "state — bug y38m regression guard"
         )

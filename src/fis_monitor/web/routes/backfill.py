@@ -2,7 +2,7 @@
 
 Endpoints:
   POST /backfill/start   — single-flight start; 202 if started, 409 if running.
-  GET  /backfill/status  — progress snapshot (running, lots_seen, …).
+  GET  /backfill/status  — progress snapshot (status, running, current_region, …).
   POST /backfill/cancel  — cancel any running backfill; 204 always.
 
 DI: ``BackfillService`` is injected via ``Depends(get_backfill)``.
@@ -94,10 +94,7 @@ def backfill_status(
         "running": snap.running,
         "current_region": snap.current_region,
         "current_page": snap.current_page,
-        "lots_seen": snap.lots_seen,
-        "regions_done": snap.regions_done,
         "regions_total": snap.regions_total,
-        "total_pages_seen": snap.total_pages_seen,
         "started_at": snap.started_at,
         "updated_at": snap.updated_at,
     }

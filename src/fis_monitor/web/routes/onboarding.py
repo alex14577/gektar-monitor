@@ -415,24 +415,6 @@ def _is_state_mismatch(exc: InvalidTransitionError, expected_from: OnboardingSta
     return exc.current_state != expected_from.value
 
 
-def _is_concurrent_advance_race(exc: InvalidTransitionError) -> bool:
-    """True for InvalidTransitionError caused by concurrent advance (skip handlers).
-
-    Skip-handlers выполняют цепочку из 2-3 service-calls (skip_email + 2x advance).
-    При race condition (двойной submit) state может оказаться past expected
-    from-state на любой из этих операций. Все эти случаи характеризуются
-    одним признаком: exc.current_state — это валидный OnboardingState, дальше
-    в FSM от expected от-state'а. Распознаём по тому что текущий state — не
-    тот что requested и не not_started (regression невозможен в этой FSM).
-
-    Применяется ТОЛЬКО в skip-хендлерах с цепочкой переходов, где невозможно
-    использовать узкий ``_is_state_mismatch`` (тот рассчитан на одиночный advance).
-    """
-    # not_started — единственный state в котором skip-handler НЕ должен оказаться;
-    # любой другой = пользователь уже прошёл часть FSM, redirect на актуальный step.
-    return exc.current_state != OnboardingState.NOT_STARTED.value
-
-
 def _test_lot_fixture() -> LotPublicDTO:
     """Return a deterministic synthetic LotPublicDTO for SMTP send tests."""
     _now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -521,9 +503,15 @@ def _handle_step2_next(
     svc: OnboardingService,
     cfg: ConfigSource,
     settings_svc: SettingsService,
+    smtp_test_svc: SmtpTestService,
     templates: Jinja2Templates,
 ) -> HTMLResponse:
-    """Handle step 2 action=next: validate SMTP creds, save, advance."""
+    """Handle step 2 action=next: validate SMTP creds, save, run auth test, advance.
+
+    SMTP authorization is verified inline on Next-click: a real test send is
+    performed against the provided credentials. On failure the user stays on
+    step 2 with an error message — no separate «Проверить подключение» button.
+    """
     smtp_host = (form.get("smtp_host") or "").strip()
     smtp_login = (form.get("smtp_login") or "").strip()
     smtp_pass = form.get("smtp_pass") or ""
@@ -573,45 +561,31 @@ def _handle_step2_next(
     # NB: бизнес-исключения ловятся выше. Любая другая Exception — баг,
     # пробрасываем чтобы её увидеть в логах / monitoring, не маскируем под UI-error.
 
+    # Inline SMTP auth check: real test send against provided creds.
+    # On failure — stay on step 2 with the safe error detail.
+    test_result = smtp_test_svc.test_send(_test_lot_fixture(), smtp_login)
+    if not test_result.ok:
+        detail_safe = (test_result.detail or "Неизвестная ошибка")[:200]
+        return _rerender(
+            request, templates, cfg, step=2,
+            error=f"Не удалось подключиться к почте: {detail_safe}",
+            extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
+                        "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
+        )
+
     try:
         svc.advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
     except InvalidTransitionError as exc:
         if _is_state_mismatch(exc, OnboardingState.REGIONS_SET):
             return _hx_redirect_to_step(svc)
-        # Guard fail: smtp_test_last_result_ok not set
+        # Guard fail despite a fresh successful test — bug, не должно случаться.
         return _rerender(
             request, templates, cfg, step=2,
-            error='Сначала нажмите "Проверить подключение" и дождитесь успешного результата.',
+            error="Не удалось сохранить настройки почты. Попробуйте ещё раз.",
             extra_data={"smtp_host": smtp_host, "smtp_port": smtp_port,
                         "smtp_login": smtp_login, "smtp_from_name": smtp_from_name},
         )
 
-    return _hx_redirect("/onboarding/recipients")
-
-
-def _handle_step2_skip(svc: OnboardingService) -> HTMLResponse:
-    """Handle step 2 action=skip: skip email, advance twice, redirect.
-
-    Idempotency: при concurrent submit'е (двойной клик в двух вкладках) первый
-    запрос меняет state, второй приходит уже к next state — ловим
-    InvalidTransitionError ТОЛЬКО при mismatch by-from-state и redirect'имся на
-    текущий step (idempotent повтор). Любой другой InvalidTransitionError
-    (guard-fail из реального бага) пробрасывается — bug должен быть видим.
-
-    UI-слой защищён hx-disabled-elt="this" — кнопка disabled во время request,
-    минимизирует race-окно. Server-слой — последний рубеж.
-    """
-    try:
-        svc.skip_email()
-        svc.advance(OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED)
-        svc.advance(OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET)
-    except InvalidTransitionError as exc:
-        # Concurrent submit или повторный клик — state уже past where we wanted.
-        # Любой mismatch by from-state в этой цепочке означает: кто-то уже сделал
-        # этот переход (или ещё дальше) — отдаём актуальный URL.
-        if _is_concurrent_advance_race(exc):
-            return _hx_redirect_to_step(svc)
-        raise
     return _hx_redirect("/onboarding/recipients")
 
 
@@ -685,21 +659,6 @@ def _handle_step3_next(
     return _hx_redirect("/onboarding/test-email")
 
 
-def _handle_step3_skip(svc: OnboardingService) -> HTMLResponse:
-    """Handle step 3 action=skip: skip email, advance, redirect.
-
-    См. docstring _handle_step2_skip про idempotency-стратегию.
-    """
-    try:
-        svc.skip_email()
-        svc.advance(OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET)
-    except InvalidTransitionError as exc:
-        if _is_concurrent_advance_race(exc):
-            return _hx_redirect_to_step(svc)
-        raise
-    return _hx_redirect("/onboarding/test-email")
-
-
 def _handle_step4_next(
     request: Request,
     form: dict[str, Any],
@@ -765,13 +724,9 @@ async def post_onboarding_save(
     if key == (1, "next"):
         return _handle_step1_next(request, form, svc, cfg, templates)  # type: ignore[arg-type]
     elif key == (2, "next"):
-        return _handle_step2_next(request, form, svc, cfg, settings_svc, templates)  # type: ignore[arg-type]
-    elif key == (2, "skip"):
-        return _handle_step2_skip(svc)
+        return _handle_step2_next(request, form, svc, cfg, settings_svc, smtp_test_svc, templates)  # type: ignore[arg-type]
     elif key == (3, "next"):
         return _handle_step3_next(request, form, svc, cfg, smtp_test_svc, templates)  # type: ignore[arg-type]
-    elif key == (3, "skip"):
-        return _handle_step3_skip(svc)
     elif key == (4, "next"):
         return _handle_step4_next(request, form, svc, cfg, templates)  # type: ignore[arg-type]
     else:

@@ -478,6 +478,14 @@ class MonitorCycleService:
         try:
             parsed_page = self._list_parser.parse(response.text)
             parsed_rows = parsed_page.rows
+        except UpstreamError as exc:
+            # Defensive: list_parser.parse() currently raises only
+            # SessionExpiredError / ParseBugError, but treat UpstreamError as a
+            # first-class close path so a future parser change can never strand
+            # the pulse-dot in «checking» state (y38m).
+            return self._close_with_upstream_error(
+                exc, cycle_id=cycle_id, region=region, started_at=started_at
+            )
         except SessionExpiredError:
             # Session cookie expired: site returned an ESIA login page instead of
             # lot-list DOM.  This is an auth failure, NOT a site DOM change.

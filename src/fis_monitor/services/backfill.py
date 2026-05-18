@@ -65,21 +65,19 @@ class BackfillStatus:
       ``"done"``    — the most recent run completed (``running=False`` but
                       ``started_at`` is non-None).
 
-    ``total_pages_seen`` is the cumulative count of pages fetched across all
-    regions in the current (or last) run.
-
     ``updated_at`` is the ISO-8601 UTC timestamp of the last progress update;
     ``None`` when no run has ever occurred.
+
+    Note: ``lots_seen``, ``regions_done``, and ``total_pages_seen`` were removed
+    in hs9c — they were dead code after hiq3 (UI reads only ``status``), and
+    ``lots_seen`` was mis-counting on prod due to pagination drift (652 vs 412).
     """
 
     running: bool
     status: str  # "idle" | "running" | "done"
     current_region: int | None
     current_page: int | None
-    lots_seen: int
-    regions_done: int
     regions_total: int
-    total_pages_seen: int
     started_at: str | None  # ISO-8601 UTC, or None when not running
     updated_at: str | None  # ISO-8601 UTC of last progress update
 
@@ -94,10 +92,7 @@ class _Progress:
     running: bool = False
     current_region: int | None = None
     current_page: int | None = None
-    lots_seen: int = 0
-    regions_done: int = 0
     regions_total: int = 0
-    total_pages_seen: int = 0
     started_at: datetime | None = None
     updated_at: datetime | None = None
     done: bool = False  # True after a successful (non-cancelled) finish
@@ -362,10 +357,7 @@ class BackfillService:
                 status=status_str,
                 current_region=p.current_region,
                 current_page=p.current_page,
-                lots_seen=p.lots_seen,
-                regions_done=p.regions_done,
                 regions_total=p.regions_total,
-                total_pages_seen=p.total_pages_seen,
                 started_at=p.started_at.isoformat() if p.started_at else None,
                 updated_at=p.updated_at.isoformat() if p.updated_at else None,
             )
@@ -455,7 +447,6 @@ class BackfillService:
                 self._monitor_cycle.clear_region_in_backfill(region)
 
             with self._progress_lock:
-                self._progress.regions_done += 1
                 self._progress.current_region = None
                 self._progress.current_page = None
 
@@ -508,7 +499,6 @@ class BackfillService:
             lots_upserted_per_page.setdefault(page_num, 0)
             with self._progress_lock:
                 self._progress.current_page = page_num
-                self._progress.total_pages_seen += 1
                 self._progress.updated_at = datetime.now(UTC)
             logger.debug(
                 "backfill.region.page",
@@ -579,9 +569,6 @@ class BackfillService:
                         exc_info=True,
                     )
                     continue
-
-                with self._progress_lock:
-                    self._progress.lots_seen += 1
 
         except Exception:
             logger.error(

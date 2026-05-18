@@ -5,7 +5,7 @@
    - IntersectionObserver "seen" reporter for [NEW] badge
    - aria-live announcements
    - pulse-dot status indicator
-   - DND, star, expand/collapse toggles (UI only)
+   - star, expand/collapse toggles (UI only)
    - lot freshness flash, sticky "N new above" pill, scroll persistence
    - escalation progress, since-arrived counter
    - context menu, pin, copy-as-markdown
@@ -204,18 +204,6 @@
     }
   });
 
-  // ---------- DND ----------
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action="dnd-preset"]');
-    if (!btn) return;
-    const minutes = Number(btn.dataset.minutes || 60);
-    const until = new Date(Date.now() + minutes * 60 * 1000);
-    const hh = pad2(until.getHours()), mm = pad2(until.getMinutes());
-    toast(`Не беспокоить до ${hh}:${mm}`);
-    // hx-post stub: fetch('/dnd', { method: 'POST', body: JSON.stringify({ until: until.toISOString() }) });
-    const menu = btn.closest('[data-menu]');
-    if (menu) menu.hidden = true;
-  });
   document.addEventListener('click', (e) => {
     const trigger = e.target.closest('[data-toggle-menu]');
     if (trigger) {
@@ -282,7 +270,6 @@
   function maybeBrowserNotify(title, body) {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'denied') {
-      // TODO(bd:DND-INTEGRATION): respect server DND state when implemented
       if (!_deniedToastShown && !localStorage.getItem('fis_notif_denied_toast')) {
         toast('Уведомления заблокированы — разрешите в настройках браузера', { timeout: 4000 });
         localStorage.setItem('fis_notif_denied_toast', '1');
@@ -349,16 +336,11 @@
   // ---------- Notification permission — one-shot on first user gesture ----------
   // Browsers require a user gesture before Notification.requestPermission()
   // can be called (Permissions Policy). We attach a listener on the first
-  // qualifying click (not DND-preset buttons — those are unrelated gestures).
-  // We show a brief preview toast first so the user knows why the system
-  // dialog is about to appear. On 'granted' a confirmation toast follows.
-  // On 'denied' the denied-path in maybeBrowserNotify handles UX.
-  // We use manual removeEventListener (not { once: true }) so we can skip
-  // ineligible clicks while keeping the listener alive for the next one.
+  // qualifying click. We show a brief preview toast first so the user knows
+  // why the system dialog is about to appear. On 'granted' a confirmation
+  // toast follows. On 'denied' the denied-path in maybeBrowserNotify handles UX.
   if ('Notification' in window && Notification.permission === 'default') {
     document.body.addEventListener('click', function _reqPermission(e) {
-      // Skip DND-preset buttons — they are not a meaningful "I want notifications" gesture.
-      if (e.target.closest('[data-action="dnd-preset"]')) return;
       document.body.removeEventListener('click', _reqPermission);
       toast('Сейчас попросим разрешение на уведомления о новых лотах', { timeout: 1800 });
       Notification.requestPermission().then((result) => {

@@ -446,7 +446,6 @@ class TestStatusSnapshot:
         svc, *_ = _make_service()
         snap = svc.status()
         assert snap.running is False
-        assert snap.lots_seen == 0
         assert snap.regions_total == 0
         assert snap.started_at is None
 
@@ -463,8 +462,6 @@ class TestStatusSnapshot:
 
         snap = svc.status()
         assert snap.running is False
-        assert snap.lots_seen == 2
-        assert snap.regions_done == 2
         assert snap.regions_total == 2
         assert snap.started_at is not None
 
@@ -938,6 +935,37 @@ class TestMaybeStartDecisionLog:
         _wait_until_done(svc)
         recs = [r for r in caplog.records if r.message == "backfill.maybe_start.decision"]
         assert recs and recs[0].decision == "skip_running"  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Regression: hs9c — dead counter fields must not be present on BackfillStatus
+# ---------------------------------------------------------------------------
+
+
+def test_progress_snapshot_has_no_dead_counter_fields() -> None:
+    """hs9c: lots_seen/regions_done/total_pages_seen removed — must not reappear.
+
+    On prod these counters reported 652 lots instead of 412 because
+    _progress.lots_seen was incremented on every upsert, including
+    re-seen lots from pagination drift on torgi.gov.ru.  After hiq3 the
+    UI reads only ``status``; the counters were dead code.  This test
+    catches accidental re-introduction of any of the three fields.
+    """
+    svc, *_ = _make_service(rows_by_region={_REGION_A: [_make_row(1)]})
+    stop = threading.Event()
+    svc.start(stop)
+    _wait_until_done(svc)
+
+    snap = svc.status()
+    assert not hasattr(snap, "lots_seen"), (
+        "lots_seen re-introduced on BackfillStatus — hs9c regression"
+    )
+    assert not hasattr(snap, "regions_done"), (
+        "regions_done re-introduced on BackfillStatus — hs9c regression"
+    )
+    assert not hasattr(snap, "total_pages_seen"), (
+        "total_pages_seen re-introduced on BackfillStatus — hs9c regression"
+    )
 
 
 class TestRegionStartFinishLog:

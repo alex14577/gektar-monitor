@@ -139,8 +139,6 @@ class FakeBackfillService:
             running: bool = False
             current_region: object = None
             current_page: object = None
-            lots_seen: int = 0
-            regions_done: int = 0
             regions_total: int = 0
             started_at: object = None
 

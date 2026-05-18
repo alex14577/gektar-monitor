@@ -101,29 +101,6 @@
 
       <span class="header-divider" aria-hidden="true"></span>
 
-      {# DND icon button (32×32) #}
-      <div style="position:relative;">
-        <button class="btn btn--sm btn--ghost btn--icon" type="button"
-                data-toggle-menu="dnd-menu"
-                aria-haspopup="true" aria-expanded="false"
-                title="{% if dnd.active %}Не беспокоить до {{ dnd.until_hhmm }}{% else %}Не беспокоить{% endif %}"
-                aria-label="{% if dnd.active %}Не беспокоить до {{ dnd.until_hhmm }}{% else %}Не беспокоить{% endif %}">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-          {% if dnd.active %}<span class="header-dnd-badge" aria-hidden="true"></span>{% endif %}
-        </button>
-        <div id="dnd-menu" data-menu hidden
-             style="position:absolute; right:0; top: calc(100% + 6px); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; min-width: 200px; z-index: 40;">
-          <button class="btn btn--ghost btn--sm" data-action="dnd-preset" data-minutes="60"
-                  hx-post="/dnd" hx-vals='{"minutes": 60}'  style="width:100%; justify-content:flex-start;">На 1 час</button>
-          <button class="btn btn--ghost btn--sm" data-action="dnd-preset" data-minutes="180"
-                  hx-post="/dnd" hx-vals='{"minutes": 180}' style="width:100%; justify-content:flex-start;">На 3 часа</button>
-          <button class="btn btn--ghost btn--sm" data-action="dnd-preset" data-minutes="600"
-                  hx-post="/dnd" hx-vals='{"minutes": 600}' style="width:100%; justify-content:flex-start;">До утра</button>
-          <button class="btn btn--ghost btn--sm" style="width:100%; justify-content:flex-start;"
-                  hx-get="/dnd/custom" hx-target="body" hx-swap="beforeend">Своё время…</button>
-        </div>
-      </div>
-
       {# Notifications icon button (32×32) #}
       <a class="btn btn--sm btn--ghost btn--icon" href="/notifications"
          title="Уведомления" aria-label="Уведомления">

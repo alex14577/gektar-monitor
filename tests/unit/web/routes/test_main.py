@@ -345,30 +345,21 @@ def test_all_fake_methods_are_called() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dnd_active_reflected_in_template() -> None:
-    """AC#1: DndService.is_active() drives the dnd.active flag in the template."""
+def test_dnd_active_route_does_not_break() -> None:
+    """DND button удалён из header (tl14) — route всё ещё работает с DnD-сервисом.
+
+    DnD-кнопка убрана из base.html.jinja, но DndService остаётся в backend
+    (для будущей интеграции). Тест проверяет что роут не падает при active DnD —
+    label «13:30» больше НЕ рендерится в header.
+    """
     now = datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
     dnd = FakeDndService(active=True, until=datetime(2026, 5, 15, 13, 30, tzinfo=UTC))
     app, _, _ = _make_app(dnd=dnd, clock=FakeClock(now=now))
     with TestClient(app, raise_server_exceptions=True) as client:
         resp = client.get("/")
     assert resp.status_code == 200
-    assert dnd.is_active_calls == 1
-    # When DnD is active the until() must be consulted to fill the header label.
-    assert dnd.until_calls == 1
-    # The HH:MM (UTC) of the until() value must appear in the page.
-    assert "13:30" in resp.text
-
-
-def test_dnd_inactive_does_not_call_until() -> None:
-    """When DnD is off the route should not waste a call on until()."""
-    dnd = FakeDndService(active=False)
-    app, _, _ = _make_app(dnd=dnd)
-    with TestClient(app, raise_server_exceptions=True) as client:
-        resp = client.get("/")
-    assert resp.status_code == 200
-    assert dnd.is_active_calls == 1
-    assert dnd.until_calls == 0
+    # DnD-кнопка удалена — label не должен появляться в header.
+    assert "13:30" not in resp.text
 
 
 def test_view_filters_cookie_parsed_and_applied() -> None:

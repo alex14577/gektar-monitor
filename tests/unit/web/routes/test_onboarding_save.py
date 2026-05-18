@@ -604,25 +604,37 @@ def test_save_with_auto_suggested_host_passes_host_policy() -> None:
     _reject_pre_resolve("smtp.gmail.com")  # must not raise
 
 
-def test_step2_skip_sets_email_skipped_and_redirects() -> None:
-    """Step 2 action=skip → skip_email + 2x advance + HX-Redirect to /onboarding/recipients."""
-    app, f_svc, _, _, _ = _make_app(onboarding_state=OnboardingState.REGIONS_SET)
+def test_step2_next_runs_smtp_auth_check_inline() -> None:
+    """Step 2 'Дальше' → inline SMTP test against submitted login (z4q7)."""
+    app, _, _, _, f_smtp = _make_app(onboarding_state=OnboardingState.REGIONS_SET)
     client = _client(app)
 
-    resp = client.post("/onboarding/save?step=2", data={"action": "skip"})
+    resp = client.post("/onboarding/save?step=2", data=_step2_form_data())
 
     assert resp.status_code == 200
     assert resp.headers.get("HX-Redirect") == "/onboarding/recipients"
-    assert f_svc.skip_email_calls == 1
-    assert len(f_svc.advance_calls) == 2
-    # First advance: REGIONS_SET → SMTP_CONFIGURED
-    assert f_svc.advance_calls[0] == (
-        OnboardingState.REGIONS_SET, OnboardingState.SMTP_CONFIGURED
+    assert len(f_smtp.test_send_calls) == 1
+    # Test was sent to the submitted smtp_login (self-send to verify auth).
+    assert f_smtp.test_send_calls[0][1] == "bot@example.com"
+
+
+def test_step2_next_smtp_auth_failure_rerenders_with_error_and_no_advance() -> None:
+    """Step 2 SMTP test fail → stay on step 2, show error, do NOT advance (z4q7)."""
+    fail = NotifyResult(ok=False, detail="535 authentication failed", retryable=False)
+    app, f_svc, _, _, f_smtp = _make_app(
+        onboarding_state=OnboardingState.REGIONS_SET,
+        smtp_test_result=fail,
     )
-    # Second advance: SMTP_CONFIGURED → RECIPIENTS_SET
-    assert f_svc.advance_calls[1] == (
-        OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET
-    )
+    client = _client(app)
+
+    resp = client.post("/onboarding/save?step=2", data=_step2_form_data())
+
+    assert resp.status_code == 200
+    assert "HX-Redirect" not in resp.headers
+    assert len(f_smtp.test_send_calls) == 1
+    assert len(f_svc.advance_calls) == 0
+    body = resp.text.lower()
+    assert "не удалось" in body or "ошибк" in body
 
 
 # ---------------------------------------------------------------------------
@@ -735,22 +747,6 @@ def test_step3_next_without_send_test_email_does_not_call_test_send() -> None:
 
     assert resp.status_code == 200
     assert len(f_smtp.test_send_calls) == 0
-
-
-def test_step3_skip_redirects_to_test_email() -> None:
-    """Step 3 action=skip → skip_email + advance + HX-Redirect."""
-    app, f_svc, _, _, _ = _make_app(onboarding_state=OnboardingState.SMTP_CONFIGURED)
-    client = _client(app)
-
-    resp = client.post("/onboarding/save?step=3", data={"action": "skip"})
-
-    assert resp.status_code == 200
-    assert resp.headers.get("HX-Redirect") == "/onboarding/test-email"
-    assert f_svc.skip_email_calls == 1
-    assert len(f_svc.advance_calls) == 1
-    assert f_svc.advance_calls[0] == (
-        OnboardingState.SMTP_CONFIGURED, OnboardingState.RECIPIENTS_SET
-    )
 
 
 # ---------------------------------------------------------------------------
