@@ -262,10 +262,6 @@ class LotViewModel:
         return False
 
     @property
-    def in_subscribed_subjects(self) -> bool:
-        return False
-
-    @property
     def note(self) -> str | None:
         return None
 
@@ -299,16 +295,8 @@ class LotUserViewModel(LotViewModel):
     keeps using the base ``LotViewModel`` (no per-user state available).
     """
 
-    __slots__ = ("_subscribed_regions",)
-
-    def __init__(
-        self,
-        dto: LotUserDTO,
-        *,
-        subscribed_regions: frozenset[int] = frozenset(),
-    ) -> None:
+    def __init__(self, dto: LotUserDTO) -> None:
         super().__init__(dto)
-        self._subscribed_regions = subscribed_regions
 
     @property
     def _user_dto(self) -> LotUserDTO:
@@ -321,13 +309,6 @@ class LotUserViewModel(LotViewModel):
     @property
     def is_starred(self) -> bool:
         return self._user_dto.starred
-
-    @property
-    def in_subscribed_subjects(self) -> bool:
-        if not self._subscribed_regions:
-            return False
-        rid = self._user_dto.region_id
-        return rid is not None and rid in self._subscribed_regions
 
     @property
     def note(self) -> str | None:

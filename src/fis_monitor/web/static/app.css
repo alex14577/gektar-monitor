@@ -271,7 +271,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
   border: 1px solid var(--line);
 }
 .chip--warm  { background: var(--warm); color: #fff; border-color: var(--warm); }
-.chip--cool  { background: var(--cool); color: #fff; border-color: var(--cool); }
 .chip--ok      { background: var(--ok-soft);  color: var(--ok);  border-color: color-mix(in oklab, var(--ok)  30%, var(--line)); }
 .chip--err     { background: var(--err-soft); color: var(--err); border-color: color-mix(in oklab, var(--err) 30%, var(--line)); }
 .chip--pending { background: var(--surface-2); color: var(--ink-2); border-color: var(--line); }

@@ -75,7 +75,6 @@ def _assemble_feed_zones(
     items: tuple,
     *,
     view_filters: ViewFilters,
-    subscribed_regions: frozenset[int],
 ) -> tuple[SimpleNamespace, int]:
     """Group ``LotUserDTO`` items into the template's feed zones.
 
@@ -97,7 +96,7 @@ def _assemble_feed_zones(
         if view_filters.only_stars and not dto.starred:
             continue
 
-        today.append(LotUserViewModel(dto, subscribed_regions=subscribed_regions))
+        today.append(LotUserViewModel(dto))
 
     return SimpleNamespace(hot=(), today=tuple(today)), 0
 
@@ -145,11 +144,9 @@ def build_feed_context(
     """
     lot_filters = _view_filters_to_lot_filters(filters)
     page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE)
-    subscribed_regions = frozenset(settings.regions)
     zones, archive_count = _assemble_feed_zones(
         page.items,
         view_filters=filters,
-        subscribed_regions=subscribed_regions,
     )
     return {
         "zones": zones,
