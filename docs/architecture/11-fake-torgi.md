@@ -40,7 +40,7 @@ created: 2026-05-15
 
 ### Auth bypass для headless-CI
 
-Если установить `FAKE_TORGI_NO_AUTH=1` (truthy: `1`/`true`/`yes`/`on`) — `SessionMiddleware` пропускает все `/cabinet/*` запросы без проверки cookie. Это нужно когда Playwright headed-окно недоступно (headless WSL без DISPLAY, CI-окружение): `monitor_cycle` сразу получает lot-list HTML и тестирует полный pipeline без шага login. Env-var читается per-request — можно тоглить рантайм. В `scripts/run_e2e_stack.sh` пробрасывается из `E2E_NO_AUTH=1`.
+Если установить `FAKE_TORGI_NO_AUTH=1` (truthy: `1`/`true`/`yes`/`on`) — `SessionMiddleware` пропускает все `/cabinet/*` запросы без проверки cookie. Это нужно когда Playwright headed-окно недоступно (headless WSL без DISPLAY, CI-окружение): `monitor_cycle` сразу получает lot-list HTML и тестирует полный pipeline без шага login. Env-var читается per-request — можно тоглить рантайм. В `scripts/run_e2e_stack.sh` переменная `FAKE_TORGI_NO_AUTH=1` экспортируется безусловно — скрипт предназначен только для локальной разработки. Для headed-Playwright тестирования реального auth-flow запускайте fake_torgi standalone без этой переменной: `FAKE_TORGI_NO_AUTH=0 uv run python tools/fake_torgi/server.py`.
 
 ## Как запустить
 

@@ -20,32 +20,30 @@ show_help() {
 Usage: run_e2e_stack.sh [OPTIONS]
 
 Start fake_torgi + fis-monitor for local e2e development.
+Always launches fake_torgi with auth bypass enabled (FAKE_TORGI_NO_AUTH=1)
+for local-dev convenience.
 Must be run from project root (where pyproject.toml lives).
 
 Options:
-  --no-auth         Skip fake-ESIA login (sets FAKE_TORGI_NO_AUTH=1)
   --no-onboarding   Mark onboarding completed in state.db, wait for cache to expire
   -h, --help        Show this help and exit
 
-Environment variables (flags override):
-  E2E_NO_AUTH=1        Same as --no-auth
+Environment variables:
   E2E_FAKE_PORT=N      fake_torgi port (default: 8001)
   E2E_FIS_PORT=N       fis-monitor port (default: 8000)
   E2E_STACK_DIR=PATH   working dir for logs/pids/data (default: /tmp/e2e-stack)
 
 Examples:
   run_e2e_stack.sh
-  run_e2e_stack.sh --no-auth --no-onboarding
+  run_e2e_stack.sh --no-onboarding
   E2E_FIS_PORT=9000 run_e2e_stack.sh --no-onboarding
 EOF
 }
 
 # ── Arg parsing ──────────────────────────────────────────────────────
-FLAG_NO_AUTH=0
 FLAG_NO_ONBOARDING=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-auth)       FLAG_NO_AUTH=1 ;;
     --no-onboarding) FLAG_NO_ONBOARDING=1 ;;
     --help|-h)       show_help; exit 0 ;;
     *) printf "Unknown flag: %s\n\n" "$1" >&2; show_help >&2; exit 2 ;;
@@ -130,19 +128,15 @@ pkill -f fis-monitor 2>/dev/null || true
 pkill -f fake_torgi 2>/dev/null || true
 rm -f "$DATA_DIR/app.lock"
 
-# ── Auth bypass mode ─────────────────────────────────────────────────
-# Set E2E_NO_AUTH=1 in the calling env to skip the fake-ESIA login step.
-# Useful for headless-CI / WSL-without-DISPLAY where Playwright can't open
-# a real browser. Propagates to fake_torgi as FAKE_TORGI_NO_AUTH.
-# --no-auth flag transparently sets E2E_NO_AUTH so the line below is unchanged.
-if [[ "$FLAG_NO_AUTH" == "1" ]]; then
-  E2E_NO_AUTH=1
+# ── Auth bypass (always on for local dev) ────────────────────────────
+# fake_torgi reads FAKE_TORGI_NO_AUTH and skips ESIA login when truthy.
+# Always enabled here — this script is for local development only.
+# For headed-login testing run fake_torgi standalone with FAKE_TORGI_NO_AUTH=0.
+if [[ -n "${E2E_NO_AUTH+x}" ]]; then
+  log "WARNING: E2E_NO_AUTH is set but no longer honoured — auth bypass is always on. Unset it from your shell."
 fi
-FAKE_TORGI_NO_AUTH="${E2E_NO_AUTH:-0}"
-if [[ "$FAKE_TORGI_NO_AUTH" == "1" ]]; then
-  log "Auth bypass ENABLED — /cabinet/* will respond without fake-ESIA login"
-fi
-export FAKE_TORGI_NO_AUTH
+export FAKE_TORGI_NO_AUTH=1
+log "Auth bypass ENABLED — /cabinet/* will respond without fake-ESIA login"
 
 # ── Launch fake_torgi ────────────────────────────────────────────────
 log "Starting fake_torgi on :${FAKE_PORT}..."
