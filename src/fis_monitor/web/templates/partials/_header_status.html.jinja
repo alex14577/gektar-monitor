@@ -1,9 +1,9 @@
 {# ========================================================================
    _header_status.html.jinja — содержимое #header-status
-   Сервер шлёт этот фрагмент через SSE-event "status" каждый цикл / при изменении.
-
-   hiq3 (ADR-050): countdown заменён на pulse-dot.
-   data-state переключается JS-ом через SSE events cycle.started / cycle.done.
+   Сервер шлёт этот фрагмент через SSE-event "status" каждый цикл / при
+   изменении. Рендерит .status чип («Мониторинг активен» / warning / error /
+   paused) + divider + «Последний новый:». Состояние полностью server-driven
+   через monitor.state. lw5s убрал дублирующий pulse-dot индикатор.
    ======================================================================== #}
 <span class="status" data-state="{{ monitor.state }}"
       title="{% if monitor.state == 'active' %}Все системы в норме{% elif monitor.state == 'warning' %}Сессия скоро истечёт{% elif monitor.state == 'error' %}Сессия истекла{% else %}Пауза{% endif %}">

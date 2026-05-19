@@ -4,7 +4,6 @@
    - SSE-listener stub (with comment markers)
    - IntersectionObserver "seen" reporter for [NEW] badge
    - aria-live announcements
-   - pulse-dot status indicator
    - star, expand/collapse toggles (UI only)
    - lot freshness flash, sticky "N new above" pill, scroll persistence
    - escalation progress, since-arrived counter
