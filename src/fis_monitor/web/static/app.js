@@ -295,6 +295,9 @@
       return;
     }
     if (Notification.permission !== 'granted') return;
+    // Chrome suppresses Notification() on the active foreground tab when the call
+    // has no user gesture (SSE handler). Sound + in-page UI suffice in that case.
+    if (!document.hidden) return;
     try { new Notification(title, { body, icon: '/static/icons/icon-192.png', tag: 'fis-monitor-lot' }); }
     catch {}
   }

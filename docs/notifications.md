@@ -13,6 +13,10 @@
 
 Если `Notification` API недоступен — кнопка скрывается (`btn.hidden = true`).
 
+**Browser Notification API — show-policy contract:** `maybeBrowserNotify()` вызывает `new Notification()` ТОЛЬКО когда `document.hidden === true` (вкладка свёрнута / фоне). На активной вкладке Chrome's show-policy всё равно подавляет фоновые вызовы без user gesture; вместо этого используется звук + in-page jump-pill. Исключение: test-нотификация по клику колокольчика — user gesture, браузер показывает вне зависимости от `document.hidden`.
+
+Root cause: Chrome show-policy spec — фоновые `Notification()` без user gesture suppress-ятся на активной вкладке (см. [Notification API spec](https://notifications.spec.whatwg.org/#require-user-gesture)).
+
 CSS-состояния:
 - `[data-notif-perm="granted"]` — акцентный цвет + `box-shadow: inset 0 -2px 0 var(--accent)` (non-color indicator, WCAG 1.4.1).
 - `[aria-disabled="true"]` — muted + `cursor: not-allowed`, но `pointer-events: auto` — кнопка остаётся в tab-order и генерирует click (toast «разрешите в настройках» доступен с клавиатуры).
