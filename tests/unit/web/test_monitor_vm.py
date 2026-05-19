@@ -192,29 +192,3 @@ def test_no_countdown_fields_in_initial_render_vm() -> None:
     )
 
 
-def test_header_status_template_renders_pulse_dot() -> None:
-    """_header_status.html.jinja must render pulse-dot (.check-status) element.
-
-    hiq3 contract: countdown span replaced by .check-status with data-state.
-    """
-    from datetime import UTC, datetime
-
-    from fis_monitor.domain.models import SseStatus
-    from fis_monitor.web.templates import build_templates
-
-    ts = datetime(2026, 5, 18, 10, 30, 0, tzinfo=UTC)
-    evt = SseStatus(
-        timestamp=ts,
-        state="active",
-        interval_minutes=1,
-    )
-
-    tpl = build_templates()
-    html = tpl.env.get_template("partials/_header_status.html.jinja").render(monitor=evt)
-
-    assert "check-status" in html, (
-        f"Expected .check-status pulse-dot element in rendered header. Got:\n{html}"
-    )
-    assert "data-state" in html, (
-        f"Expected data-state attribute on .check-status. Got:\n{html}"
-    )

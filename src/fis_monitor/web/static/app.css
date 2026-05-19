@@ -605,20 +605,20 @@ code, kbd, .mono { font-family: var(--font-mono); }
 
 /* ---------- header responsive — narrower desktop / tablet ---------- */
 /* At ≤960px: hide cycle-result text (ephemeral feedback),
-   keep status chip + check-status + actions + CTA. Prevents right zone overflow. */
+   keep status chip + actions + CTA. Prevents right zone overflow. */
 @media (max-width: 960px) {
   .header__inner { gap: 10px; }
   .cycle-result-host { display: none; }
   .header__right { gap: 6px; }
 }
 
-/* At ≤768px: status + check-status only in center; compress right */
+/* At ≤768px: status chip only in center; compress right.
+   Center children after removal of pulse-dot: 1=.status, 2=.header-divider, 3="Последний новый". */
 @media (max-width: 768px) {
   .header__inner { gap: 8px; }
   .cycle-result-host { display: none; }
-  /* Hide "Последний новый" span (4th child in center) */
-  .header__center > span:nth-child(3),
-  .header__center > span:nth-child(4) { display: none; }
+  .header__center > span:nth-child(2),
+  .header__center > span:nth-child(3) { display: none; }
   .header__right { gap: 4px; }
   .btn--sm { min-height: 32px; padding: 0 8px; font-size: 0.75rem; }
   .btn--icon { width: 32px; }
@@ -640,10 +640,9 @@ code, kbd, .mono { font-family: var(--font-mono); }
     font-size: 0.75rem;
     gap: 8px;
   }
-  /* On mobile hide "Последний новый" and check-status to keep status area compact */
+  /* Hide divider + "Последний новый" to keep status area compact */
   .header__center > span:nth-child(2),
-  .header__center > span:nth-child(3),
-  .header__center > span:nth-child(4) { display: none; }
+  .header__center > span:nth-child(3) { display: none; }
   /* "Проверить сейчас" button — hide label, keep icon */
   .header__right .btn:not(.btn--ghost) { padding: 0; width: 32px; font-size: 0; }
   .header__right .btn:not(.btn--ghost) svg { display: block; }
@@ -806,24 +805,6 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
 
 /* ---------- .header__left ---------- */
 .header__left { display: flex; align-items: center; }
-
-/* ---------- pulse-dot / check-status (replaces countdown) ---------- */
-/* data-state: idle (default) | checking */
-.check-status {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 0.8125rem; color: var(--ink-2);
-}
-.check-dot {
-  width: 8px; height: 8px; border-radius: 999px;
-  background: var(--muted);
-  transition: background var(--t);
-}
-.check-status[data-state="checking"] .check-dot {
-  background: var(--accent);
-  animation: pulseDot 1.2s ease-in-out infinite;
-}
-.check-status[data-state="checking"] .check-label::before { content: "Проверяю"; }
-.check-label { font-size: 0.8125rem; }
 
 /* ---------- lot-card--new (was_new accent) ---------- */
 /* Use inset box-shadow so the accent overlays the ::before freshness strip

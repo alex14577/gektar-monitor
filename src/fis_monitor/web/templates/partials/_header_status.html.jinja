@@ -14,14 +14,6 @@
   {% else %}Пауза{% endif %}
 </span>
 
-{# pulse-dot: cycle.started → checking, cycle.done → idle.
-   Idle state shows static dot only (text would duplicate the main
-   "Мониторинг активен" chip). Label appears only during active check. #}
-<span class="check-status" data-state="idle">
-  <span class="check-dot" aria-hidden="true"></span>
-  <span class="check-label"></span>
-</span>
-
 <span class="header-divider" aria-hidden="true"></span>
 <span style="font-size: 0.8125rem; color: var(--ink-2);">
   Последний новый:

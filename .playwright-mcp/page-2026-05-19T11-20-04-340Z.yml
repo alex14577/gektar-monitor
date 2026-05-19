@@ -1,0 +1,195 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - link "Монитор гектара — на главную" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: М
+        - generic [ref=e8]: Монитор гектара
+      - region "Статус мониторинга" [ref=e9]:
+        - generic "Все системы в норме" [ref=e258]: Мониторинг активен
+        - generic [ref=e262]: ЖдуЖду
+        - generic [ref=e264]: "Последний новый: только что"
+      - generic [ref=e17]:
+        - status [ref=e217]:
+          - generic [ref=e265]: "Проверка завершена: 8 лотов, 0 новых (0.0 с)"
+        - button "Включить браузерные уведомления о новых лотах" [ref=e23] [cursor=pointer]:
+          - img [ref=e24]
+        - link "Настройки" [ref=e27] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e28]
+        - button "Проверить сейчас" [ref=e31] [cursor=pointer]:
+          - img [ref=e32]
+          - text: Проверить сейчас
+  - generic [ref=e35]:
+    - complementary "Боковая панель" [ref=e36]:
+      - generic [ref=e38]:
+        - paragraph [ref=e39]: Субъект РФ
+        - button "Все · 19 ▾" [ref=e40] [cursor=pointer]:
+          - generic [ref=e41]: Все · 19
+          - generic [ref=e42]: ▾
+    - main [ref=e43]:
+      - generic [ref=e44]:
+        - generic [ref=e45]:
+          - generic [ref=e46]:
+            - generic [ref=e47]: "Сортировка:"
+            - combobox "Сортировка:" [ref=e48] [cursor=pointer]:
+              - option "по дате ↓" [selected]
+              - option "по дате ↑"
+          - generic [ref=e49]: 7 лотов
+        - generic [ref=e50]:
+          - article "Республика Карелия, Сортавала" [ref=e236] [cursor=pointer]:
+            - generic [ref=e237]:
+              - generic [ref=e238]:
+                - heading "Республика Карелия, Сортавала" [level=3] [ref=e239]
+                - paragraph [ref=e240]: 8,00 га · Земли лесного фонда
+                - paragraph [ref=e241]: "ВРИ: КФХ"
+                - generic [ref=e242]:
+                  - generic [ref=e243]: 10:03:000000:6666
+                  - button "Скопировать кадастровый номер" [ref=e244]:
+                    - img [ref=e245]
+                  - generic "Дата создания в ФИС" [ref=e248]: · 19 мая 2026
+                  - generic "Дата постановки на учёт в ЕГРН" [ref=e249]: · ЕГРН 19 мая 2026
+                - paragraph [ref=e250]: "ОГВ: Правительство Карелии"
+              - generic [ref=e251]:
+                - link "Открыть" [ref=e252]:
+                  - /url: /lots/6666/redirect
+                  - text: Открыть
+                  - img [ref=e253]
+                - button "Скопировать" [ref=e256]
+          - article [ref=e219] [cursor=pointer]
+          - region "Список лотов" [ref=e51]:
+            - heading "Список · 7 лотов" [level=2] [ref=e53]
+            - article "Республика Карелия, Кондопога" [ref=e54] [cursor=pointer]:
+              - generic [ref=e55]:
+                - generic [ref=e56]:
+                  - heading "Республика Карелия, Кондопога" [level=3] [ref=e57]
+                  - paragraph [ref=e58]: 7,00 га · Земли сельхозназначения
+                  - paragraph [ref=e59]: "ВРИ: КФХ"
+                  - generic [ref=e60]:
+                    - generic [ref=e61]: 10:02:000000:5555
+                    - button "Скопировать кадастровый номер" [ref=e62]:
+                      - img [ref=e63]
+                    - generic "Дата создания в ФИС" [ref=e66]: · 19 мая 2026
+                    - generic "Дата постановки на учёт в ЕГРН" [ref=e67]: · ЕГРН 19 мая 2026
+                  - paragraph [ref=e68]: "ОГВ: Правительство"
+                - generic [ref=e69]:
+                  - link "Открыть" [ref=e70]:
+                    - /url: /lots/5555/redirect
+                    - text: Открыть
+                    - img [ref=e71]
+                  - button "Скопировать" [ref=e74]
+            - article "Приморский край, Владивостокский округ" [ref=e76] [cursor=pointer]:
+              - generic [ref=e77]:
+                - generic [ref=e78]:
+                  - heading "Приморский край, Владивостокский округ" [level=3] [ref=e79]
+                  - paragraph [ref=e80]: 3,00 га · Земли населенных пунктов
+                  - paragraph [ref=e81]: "ВРИ: ИЖС"
+                  - generic [ref=e82]:
+                    - generic [ref=e83]: 25:28:000000:4444
+                    - button "Скопировать кадастровый номер" [ref=e84]:
+                      - img [ref=e85]
+                    - generic "Дата создания в ФИС" [ref=e88]: · 19 мая 2026
+                    - generic "Дата постановки на учёт в ЕГРН" [ref=e89]: · ЕГРН 19 мая 2026
+                  - paragraph [ref=e90]: "ОГВ: Администрация"
+                - generic [ref=e91]:
+                  - link "Открыть" [ref=e92]:
+                    - /url: /lots/4444/redirect
+                    - text: Открыть
+                    - img [ref=e93]
+                  - button "Скопировать" [ref=e96]
+            - article "Республика Карелия, Петрозаводск" [ref=e98] [cursor=pointer]:
+              - generic [ref=e99]:
+                - generic [ref=e100]:
+                  - heading "Республика Карелия, Петрозаводск" [level=3] [ref=e101]
+                  - paragraph [ref=e102]: 5,00 га · Земли населенных пунктов
+                  - paragraph [ref=e103]: "ВРИ: ИЖС"
+                  - generic [ref=e104]:
+                    - generic [ref=e105]: 10:01:000000:3333
+                    - button "Скопировать кадастровый номер" [ref=e106]:
+                      - img [ref=e107]
+                    - generic "Дата создания в ФИС" [ref=e110]: · 19 мая 2026
+                    - generic "Дата постановки на учёт в ЕГРН" [ref=e111]: · ЕГРН 19 мая 2026
+                  - paragraph [ref=e112]: "ОГВ: Министерство"
+                - generic [ref=e113]:
+                  - link "Открыть" [ref=e114]:
+                    - /url: /lots/3333/redirect
+                    - text: Открыть
+                    - img [ref=e115]
+                  - button "Скопировать" [ref=e118]
+            - article "Приморский край, Владивостокский округ" [ref=e120] [cursor=pointer]:
+              - generic [ref=e121]:
+                - generic [ref=e122]:
+                  - heading "Приморский край, Владивостокский округ" [level=3] [ref=e123]
+                  - paragraph [ref=e124]: 1,00 га · Земли населенных пунктов
+                  - paragraph [ref=e125]: "ВРИ: Для ИЖС"
+                  - generic [ref=e126]:
+                    - generic [ref=e127]: 00:00:000000:4
+                    - button "Скопировать кадастровый номер" [ref=e128]:
+                      - img [ref=e129]
+                    - generic "Дата создания в ФИС" [ref=e132]: · 19 мая 2026
+                    - generic "Дата постановки на учёт в ЕГРН" [ref=e133]: · ЕГРН 19 мая 2026
+                  - paragraph [ref=e134]: "ОГВ: Администрация"
+                - generic [ref=e135]:
+                  - link "Открыть" [ref=e136]:
+                    - /url: /lots/4/redirect
+                    - text: Открыть
+                    - img [ref=e137]
+                  - button "Скопировать" [ref=e140]
+            - article "Приморский край, Владивостокский округ" [ref=e142] [cursor=pointer]:
+              - generic [ref=e143]:
+                - generic [ref=e144]:
+                  - heading "Приморский край, Владивостокский округ" [level=3] [ref=e145]
+                  - paragraph [ref=e146]: 1,00 га · Земли населенных пунктов
+                  - paragraph [ref=e147]: "ВРИ: Для ИЖС"
+                  - generic [ref=e148]:
+                    - generic [ref=e149]: 00:00:000000:3
+                    - button "Скопировать кадастровый номер" [ref=e150]:
+                      - img [ref=e151]
+                    - generic "Дата создания в ФИС" [ref=e154]: · 19 мая 2026
+                    - generic "Дата постановки на учёт в ЕГРН" [ref=e155]: · ЕГРН 19 мая 2026
+                  - paragraph [ref=e156]: "ОГВ: Администрация"
+                - generic [ref=e157]:
+                  - link "Открыть" [ref=e158]:
+                    - /url: /lots/3/redirect
+                    - text: Открыть
+                    - img [ref=e159]
+                  - button "Скопировать" [ref=e162]
+            - article "Республика Карелия, Владивостокский округ" [ref=e164] [cursor=pointer]:
+              - generic [ref=e165]:
+                - generic [ref=e166]:
+                  - heading "Республика Карелия, Владивостокский округ" [level=3] [ref=e167]
+                  - paragraph [ref=e168]: 1,00 га · Земли населенных пунктов
+                  - paragraph [ref=e169]: "ВРИ: Для ИЖС"
+                  - generic [ref=e170]:
+                    - generic [ref=e171]: 00:00:000000:2
+                    - button "Скопировать кадастровый номер" [ref=e172]:
+                      - img [ref=e173]
+                    - generic "Дата создания в ФИС" [ref=e176]: · 19 мая 2026
+                    - generic "Дата постановки на учёт в ЕГРН" [ref=e177]: · ЕГРН 19 мая 2026
+                  - paragraph [ref=e178]: "ОГВ: Администрация"
+                - generic [ref=e179]:
+                  - link "Открыть" [ref=e180]:
+                    - /url: /lots/2/redirect
+                    - text: Открыть
+                    - img [ref=e181]
+                  - button "Скопировать" [ref=e184]
+            - article "Приморский край, Владивостокский округ" [ref=e186] [cursor=pointer]:
+              - generic [ref=e187]:
+                - generic [ref=e188]:
+                  - heading "Приморский край, Владивостокский округ" [level=3] [ref=e189]
+                  - paragraph [ref=e190]: 1,00 га · Земли населенных пунктов
+                  - paragraph [ref=e191]: "ВРИ: Для ИЖС"
+                  - generic [ref=e192]:
+                    - generic [ref=e193]: 00:00:000000:1
+                    - button "Скопировать кадастровый номер" [ref=e194]:
+                      - img [ref=e195]
+                    - generic "Дата создания в ФИС" [ref=e198]: · 19 мая 2026
+                    - generic "Дата постановки на учёт в ЕГРН" [ref=e199]: · ЕГРН 19 мая 2026
+                  - paragraph [ref=e200]: "ОГВ: Администрация"
+                - generic [ref=e201]:
+                  - link "Открыть" [ref=e202]:
+                    - /url: /lots/1/redirect
+                    - text: Открыть
+                    - img [ref=e203]
+                  - button "Скопировать" [ref=e206]
+  - generic [ref=e208]: "Новый лот: Республика Карелия, Сортавала, 8.00 гектара."
