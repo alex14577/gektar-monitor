@@ -688,7 +688,7 @@ Scope Wave 10 расширен → 10a/10b/10c/10d/10e (см. выше). 4 ду�
 - **Linux x86_64**: `./scripts/build_release.sh` → `dist/fis-monitor-linux-x86_64-<version>.tar.gz` (~342 MB, smoke-tested локально).
 - **Windows x86_64**: `scripts\build_release.ps1` — собирается **только на Windows-runner** (PyInstaller не кросс-компилит).
 - **GitHub Actions** (`.github/workflows/release.yml`) — matrix `ubuntu-latest` / `windows-latest`, кэш Playwright Chromium по `pyproject.toml`-hash, GitHub Release на тег `v*` через `softprops/action-gh-release@v2`.
-- **Архив включает**: PyInstaller `--onedir` бинарь + bundled Playwright Chromium (~280 MB) + launcher (`run.sh` / `run.bat`) + README. Клиент распаковывает в любую папку, запускает launcher — Python и `playwright install` на клиенте не нужны.
+- **Архив включает**: PyInstaller `--onedir` бинарь + bundled Playwright Chromium (~280 MB) + launcher (`run.sh` / `run.bat`) + README. Пользователь распаковывает в любую папку, запускает launcher — Python и `playwright install` на пользователе не нужны.
 
 **Ключевые решения:** см. [[decisions/ADR-026-distribution-packaging-pyinstaller|ADR-026]] (--onedir vs --onefile, bundling browsers, build-on-target).
 

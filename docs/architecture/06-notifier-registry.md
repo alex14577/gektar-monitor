@@ -17,6 +17,6 @@
 3. **Тестируемость** — в тестах подменяется `registry.register(FakeNotifier)`. Auto-discover требует моков на pkgutil.
 4. **Однострочное добавление** — не overhead.
 
-Если в v3+ появится сторонние плагины (например, клиент пишет свой webhook на Python) — переходим на entry_points с fallback на explicit. Сейчас — overengineering.
+Если в v3+ появится сторонние плагины (например, пользователь пишет свой webhook на Python) — переходим на entry_points с fallback на explicit. Сейчас — overengineering.
 
 См. [[decisions/ADR-002-plugin-discovery-explicit-registry|ADR-002]].

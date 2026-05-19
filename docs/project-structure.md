@@ -132,7 +132,7 @@ HTTP-слой (FastAPI). Не содержит бизнес-логики — д�
 | `rate_limit.py` | Rate-limiting для отдельных эндпоинтов (login, SMTP test). |
 | `deps.py` | FastAPI dependencies (Container, ConfigSource и пр.). |
 | `feed_context.py` | Сборка контекста для главной страницы (feed). |
-| `sse_encoder.py` | Сериализация SSE-событий в JSON-фрагменты для клиента. |
+| `sse_encoder.py` | Сериализация SSE-событий в JSON-фрагменты для пользователя. |
 | `templates.py` | Jinja2 environment factory, фильтры, глобальные функции. |
 | `_helpers.py` | Вспомогательные функции для route-handlers. |
 

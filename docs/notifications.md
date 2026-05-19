@@ -46,18 +46,18 @@ CSS-состояния:
 ### Дефолтный путь («ничего не настраиваю»)
 - SMTP host/port/user/password — **все четыре** хранятся в `state.db` (таблица `smtp_credentials`, SSOT). Дефолтные значения бот-ящика (`smtp.yandex.ru:587` + login + app-password) записываются при первом запуске установщика / онбординге, **не в `config.json`** (R4-C1, ADR-020).
 - В `config.json` остаётся только флаг `use_default_smtp=true` (формальный признак «использовать дефолтный бот-ящик»). Литералы `smtp.yandex.ru:587` хранятся в коде (`infra/smtp/defaults.py`) — fallback на случай пустой таблицы при первом запуске.
-- Клиент в панели вводит **только список получателей** (свои email-адреса)
+- Пользователь в панели вводит **только список получателей** (свои email-адреса)
 - Email уходит «From: fis-monitor.alex@yandex.ru», «To: alex@gmail.com»
 
 ### Расширенный путь («хочу свой ящик»)
-Клиент в форме разворачивает «Расширенные настройки SMTP», вводит:
+Пользователь в форме разворачивает «Расширенные настройки SMTP», вводит:
 - SMTP host
 - SMTP port
 - SMTP user
 - SMTP password (app-password)
 - Адрес «От» (опционально)
 
-С этого момента email идёт через его SMTP. Это нужно если клиент:
+С этого момента email идёт через его SMTP. Это нужно если пользователь:
 - Не доверяет нашему бот-ящику
 - Хочет, чтобы письма приходили «от себя» (корпоративная почта)
 - Хочет переезд без участия разработчика
@@ -398,7 +398,7 @@ inner-декоратору `SubscribedAtFilteredNotifier`, который при
 ## Хранение секретов
 - **SMTP логин и пароль хранятся в `state.db`** (таблица user-state `smtp_credentials`), **не в `config.json`** (см. [[decisions-log]])
 - Pydantic-схема `config.json` не содержит полей `smtp_user` / `smtp_password`
-- ПК клиента — доверенная среда: файловый ACL на `{data_dir}` (Windows `%LOCALAPPDATA%\fis-monitor\`, Linux `~/.local/share/fis-monitor/`) достаточен для нашей threat model ([[decisions-log]] → Security & operations)
+- ПК пользователя — доверенная среда: файловый ACL на `{data_dir}` (Windows `%LOCALAPPDATA%\fis-monitor\`, Linux `~/.local/share/fis-monitor/`) достаточен для нашей threat model ([[decisions-log]] → Security & operations)
 - В API-ответах все пароли/токены маскируются `***`
 - В UI пустое поле = «не менять текущее значение»
 

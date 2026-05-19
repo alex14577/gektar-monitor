@@ -129,7 +129,7 @@ Decisions-log говорит «приоритет: monitor > enrichment > full_s
   - `regions changed: {1} → {1, 2}` (домен валидируется — это enum)
   - `smtp.host changed: true` (БЕЗ значения)
   - `interval_minutes: 15 → 5` (числовой scalar — это OK, не PII)
-- **Полные значения config-diff** — отдельный append-only `audit.jsonl`, **физически исключённый** из `DiagnosticsService` (как `smtp_credentials`). Файл собирается ТОЛЬКО для on-disk audit, не для отправки клиенту. См. [[decisions/ADR-012-diagnostic-zip-allowlist-redactor|ADR-012]], секция «audit.jsonl isolation».
+- **Полные значения config-diff** — отдельный append-only `audit.jsonl`, **физически исключённый** из `DiagnosticsService` (как `smtp_credentials`). Файл собирается ТОЛЬКО для on-disk audit, не для отправки пользователю. См. [[decisions/ADR-012-diagnostic-zip-allowlist-redactor|ADR-012]], секция «audit.jsonl isolation».
 - **ACL на `config.json`** ([[ops/runbook]]/installer-чеклист): Windows — `Users: read, %USERNAME%: full`; Linux — `chmod 600`. Если кто-то с правами админа пишет в config — это вне нашей threat model.
 
 ## 7.7 Pagination policy per trigger (ADR-036)

@@ -104,7 +104,7 @@
 | # | Решение |
 |---|---|
 | ✅ | В MVP — только **браузер** (Notification API + SSE) и **email** |
-| ✅ | **Email-источник: наш бот-ящик** + дефолтный SMTP в config. Клиент через панель может **переопределить** SMTP (host/port/login/password) если хочет свой |
+| ✅ | **Email-источник: наш бот-ящик** + дефолтный SMTP в config. Пользователь через панель может **переопределить** SMTP (host/port/login/password) если хочет свой |
 | ✅ | Список получателей email — задаётся в панели, можно несколько |
 | ✅ | Плагин-архитектура уведомлений — да (для будущего расширения) |
 
@@ -170,14 +170,14 @@
 | ✅ | **SSE: `sse-starlette`** — готовый `EventSourceResponse` с keep-alive |
 | ✅ | **Режим FastAPI: sync** — handlers как `def ...` (не `async def`). FastAPI сам разносит по threadpool. Цена: отказ от async-преимуществ; плюс: меньше зависимостей, проще код |
 | ✅ | **Python 3.12+** |
-| ✅ | **SMTP-пароль хранится в `state.db`** (таблица user-state, не в `config.json`). ПК клиента — доверенная среда, ACL `%LOCALAPPDATA%` достаточно. Pydantic-схема `config.json` НЕ содержит поле `smtp_password` |
+| ✅ | **SMTP-пароль хранится в `state.db`** (таблица user-state, не в `config.json`). ПК пользователя — доверенная среда, ACL `%LOCALAPPDATA%` достаточно. Pydantic-схема `config.json` НЕ содержит поле `smtp_password` |
 | ✅ | **Playwright — embedded в FastAPI threadpool**. Не subprocess. Sync API + по экземпляру `Playwright()` на поток (не шарить между потоками). Используется только для headed-логина по кнопке (раз в 3 часа), не для рутинного скрейпинга |
 | ✅ | **SSE мост sync→async**: `queue.Queue` (thread-safe) на процесс. Sync background-таски кладут события через `q.put()`. Async SSE-generator читает через `await loop.run_in_executor(None, q.get)` и `yield`-ит подписчикам. **Multi-tab fan-out**: один источник → N очередей подписчиков |
 | ✅ | **Onboarding-gate: redirect**, не overlay. Middleware на каждом GET проверяет `state.onboarded`. Не пройден → 302 на `/onboarding?step=1`. Background-задачи стартуют, но `monitor_cycle` и `full_scan` — no-op при пустом `regions`. После завершения wizard'а → 302 на `/` |
 | ✅ | **Кросс-платформенно с первого дня**: Windows + Linux. Целимся на будущий хостинг (Linux VPS). Сборка двух бинарей через CI (Nuitka не кросс-компилируется) |
 | ✅ | **`platformdirs`** для путей вместо хардкода `%LOCALAPPDATA%`. Linux → `~/.local/share/fis-monitor/`, Windows → `%LOCALAPPDATA%\fis-monitor\` |
 | ✅ | **Автостарт раздельно**: `autostart/windows.py` (Task Scheduler At-Logon) и `autostart/linux.py` (XDG Autostart `~/.config/autostart/`). В MVP реализован Windows, Linux — заглушка |
-| ✅ | **Релиз клиенту: только Windows-бинарь**. Linux-бинарь — для разработки и будущего хостинга |
+| ✅ | **Релиз пользователю: только Windows-бинарь**. Linux-бинарь — для разработки и будущего хостинга |
 
 **requirements.txt (черновой состав):**
 ```
@@ -222,7 +222,7 @@ platformdirs    # кросс-платформенные пути для данн
 
 | # | Решение |
 |---|---|
-| ✅ | **SMTP-пароль хранится plain в `state.db`**. ПК клиента считается доверенной средой (1 пользователь, локальный комп, файловый ACL на `%LOCALAPPDATA%`). Без шифрования, без keyring — security theater при нашей threat model |
+| ✅ | **SMTP-пароль хранится plain в `state.db`**. ПК пользователя считается доверенной средой (1 пользователь, локальный комп, файловый ACL на `%LOCALAPPDATA%`). Без шифрования, без keyring — security theater при нашей threat model |
 | ✅ | **«Проверить SMTP» в онбординге обязательно**. Кнопка «Далее» в step 2 заблокирована до `✓ подключено`. Исключение: «Пропустить email» → email-канал выключен, идём дальше. При выборе встроенного бот-ящика — тест запускается автоматически при попытке «Далее» |
 | ✅ | **Tier лота решает сервер**. При отправке SSE-фрагмента `lot.new` в HTML кладётся `data-tier="match\|silent\|gone"`. JS в `playNotificationSound()` читает атрибут и выбирает звук (или молчание) |
 
@@ -242,7 +242,7 @@ platformdirs    # кросс-платформенные пути для данн
 1. Реакция `/cabinet/free-lot-view?id=999999` (заведомо несуществующий) — HTTP-код и тело
 2. Возможные значения «Статус» в селекте `freelotsearch-status` живого DOM
 3. Содержит ли `/cabinet/free-lot` лоты со статусом ≠ «Свободен» если убрать дефолтный фильтр через `FreeLotSearch[freeLotStatus]=…`
-4. Реальная карточка известного «ушедшего» лота — клиент должен знать кадастр, по которому раньше можно было подать заявку
+4. Реальная карточка известного «ушедшего» лота — пользователь должен знать кадастр, по которому раньше можно было подать заявку
 5. Работает ли `X-PJAX: true` для фул-скана (может быть в 4-5× дешевле)
 
 До получения ответов на 1-4 — L2 active verification работает, но логика «hard_removed vs status_changed» может потребовать тюнинга.
