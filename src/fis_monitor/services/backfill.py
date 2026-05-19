@@ -527,9 +527,11 @@ class BackfillService:
                     lot = _parsed_row_to_lot(row, now, region_id=_subject_id_by_title(row.region))
                 except Exception:
                     logger.warning(
-                        "backfill: failed to convert row id=%s region=%s — skipping",
+                        "backfill: failed to convert row id=%s"
+                        " region_macro=%s row_region=%s — skipping",
                         getattr(row, "id", "?"),
                         region,
+                        getattr(row, "region", "?"),
                         exc_info=True,
                     )
                     continue
@@ -559,9 +561,11 @@ class BackfillService:
                             )
                 except Exception:
                     logger.warning(
-                        "backfill: upsert failed for lot id=%s region=%s — skipping",
+                        "backfill: upsert failed for lot id=%s"
+                        " region_macro=%s row_region=%s — skipping",
                         lot.id,
                         region,
+                        getattr(row, "region", "?"),
                         exc_info=True,
                     )
                     continue
