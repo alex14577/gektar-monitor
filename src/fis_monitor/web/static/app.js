@@ -379,7 +379,11 @@
       btn.dataset.notifPerm = normalised;
       btn.setAttribute('aria-label', meta.label);
       btn.setAttribute('title', meta.title);
-      btn.setAttribute('aria-disabled', normalised === 'denied' ? 'true' : 'false');
+      if (normalised === 'denied') {
+        btn.setAttribute('aria-disabled', 'true');
+      } else {
+        btn.removeAttribute('aria-disabled');
+      }
     }
 
     // Apply current permission on load.
@@ -411,7 +415,7 @@
         } else if (result === 'denied') {
           toast('Уведомления заблокированы — разрешите в настройках браузера', { timeout: 4000 });
         }
-      }).catch(() => {});
+      }).catch((e) => { console.warn('requestPermission failed', e); });
     });
   }
   initNotifPermButton();
