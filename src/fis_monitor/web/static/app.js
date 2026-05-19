@@ -350,26 +350,71 @@
     }
   });
 
-  // ---------- Notification permission — one-shot on first user gesture ----------
-  // Browsers require a user gesture before Notification.requestPermission()
-  // can be called (Permissions Policy). We attach a listener on the first
-  // qualifying click. We show a brief preview toast first so the user knows
-  // why the system dialog is about to appear. On 'granted' a confirmation
-  // toast follows. On 'denied' the denied-path in maybeBrowserNotify handles UX.
-  if ('Notification' in window && Notification.permission === 'default') {
-    document.body.addEventListener('click', function _reqPermission(e) {
-      document.body.removeEventListener('click', _reqPermission);
-      toast('Сейчас попросим разрешение на уведомления о новых лотах', { timeout: 1800 });
+  // ---------- Notification permission — persistent button in header ----------
+  // Replaces the removed one-shot body-click listener.
+  // The button (#notif-perm-btn) is rendered in base.html.jinja with
+  // data-notif-perm="default". This function syncs state on load and after
+  // requestPermission() resolves. High cohesion: all permission UX lives here.
+  function initNotifPermButton() {
+    const btn = document.getElementById('notif-perm-btn');
+    if (!btn) return;
+
+    if (!('Notification' in window)) {
+      // API unavailable (old browser / insecure context).
+      btn.hidden = true;
+      return;
+    }
+
+    // Map permission value → label + aria-label + data-notif-perm.
+    const STATE_META = {
+      default:     { label: 'Уведомления о новых лотах',   title: 'Нажмите, чтобы включить уведомления' },
+      granted:     { label: 'Уведомления включены',         title: 'Уведомления включены. Нажмите для проверки' },
+      denied:      { label: 'Уведомления заблокированы',    title: 'Браузер заблокировал уведомления — разрешите в настройках' },
+      unavailable: { label: 'Уведомления недоступны',       title: 'Уведомления недоступны в этом браузере' },
+    };
+
+    function applyState(perm) {
+      const meta = STATE_META[perm] || STATE_META.default;
+      btn.dataset.notifPerm = perm;
+      btn.setAttribute('aria-label', meta.label);
+      btn.setAttribute('title', meta.title);
+      btn.disabled = (perm === 'denied');
+    }
+
+    // Apply current permission on load.
+    applyState(Notification.permission);
+
+    btn.addEventListener('click', function handlePermClick() {
+      const perm = Notification.permission;
+      if (perm === 'denied') {
+        // Already blocked; browser dialog won't appear. Inform via toast.
+        toast('Уведомления заблокированы — разрешите в настройках браузера', { timeout: 4000 });
+        return;
+      }
+      if (perm === 'granted') {
+        // Already granted — fire a test notification so user can verify it works.
+        try {
+          new Notification('Монитор гектара', {
+            body: 'Уведомления работают.',
+            icon: '/static/icons/icon-192.png',
+            tag: 'fis-monitor-test',
+          });
+        } catch {}
+        return;
+      }
+      // perm === 'default' — request permission (requires user gesture; we are inside click).
       Notification.requestPermission().then((result) => {
+        applyState(result);
         if (result === 'granted') {
           toast('Уведомления включены');
         } else if (result === 'denied') {
-          // Handled on next lot event by maybeBrowserNotify denied-path.
-          // Nothing more to do here — browser stores the decision persistently.
+          toast('Уведомления заблокированы — разрешите в настройках браузера', { timeout: 4000 });
+          localStorage.setItem('fis_notif_denied_toast', '1');
         }
       }).catch(() => {});
     });
   }
+  initNotifPermButton();
 
   function onLotStatusChange(diff) {
     playNotificationSound(3);

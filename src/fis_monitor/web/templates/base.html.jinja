@@ -101,11 +101,18 @@
 
       <span class="header-divider" aria-hidden="true"></span>
 
-      {# Notifications icon button (32×32) #}
-      <a class="btn btn--sm btn--ghost btn--icon" href="/notifications"
-         title="Уведомления" aria-label="Уведомления">
+      {# Browser notification permission button.
+         data-notif-perm holds the current Notification.permission value
+         ('default' | 'granted' | 'denied' | 'unavailable').
+         JS (app.js initNotifPermButton) reads and updates it on load + after requestPermission. #}
+      <button id="notif-perm-btn"
+              class="btn btn--sm btn--ghost btn--icon notif-perm-btn"
+              type="button"
+              data-notif-perm="default"
+              aria-label="Включить уведомления о новых лотах"
+              title="Включить уведомления о новых лотах">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
-      </a>
+      </button>
 
       {# Settings icon button (32×32) #}
       <a class="btn btn--sm btn--ghost btn--icon" href="/settings"

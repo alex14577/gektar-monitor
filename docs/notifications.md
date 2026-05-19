@@ -6,7 +6,14 @@
 
 **Требуется user gesture.** Browsers enforce Permissions Policy: `Notification.requestPermission()` may only be called from a user-initiated event. Auto-requesting on page load is silently denied.
 
-**Реализация (app.js):** одноразовый `click`-listener на `document.body` вешается при загрузке страницы только если `Notification.permission === 'default'`. На первый клик вызывает `requestPermission()`. Если ответ `'granted'` — показывает toast «Уведомления включены». При следующих загрузках страницы permission уже `'granted'`/`'denied'` — listener не создаётся.
+**Реализация (app.js):** постоянная кнопка-колокольчик `#notif-perm-btn` в шапке (`base.html.jinja`). `initNotifPermButton()` при загрузке читает `Notification.permission` и выставляет `data-notif-perm` + `aria-label`. По клику:
+- `default` → вызывает `requestPermission()` (требует user gesture), после ответа обновляет состояние кнопки и показывает toast.
+- `granted` → запускает тестовое уведомление «Уведомления работают.»
+- `denied` → показывает toast «Разрешите в настройках браузера» (диалог браузера не откроется).
+
+Если `Notification` API недоступен — кнопка скрывается (`btn.hidden = true`).
+
+CSS-состояния: `.notif-perm-btn[data-notif-perm="granted"]` — акцентный цвет; `[data-notif-perm="denied"]` — muted + `cursor: not-allowed`.
 
 **Wiring SSE → уведомление:** htmx-sse extension (ADR-029) публикует `htmx:sseMessage` на `document.body` после каждого sse-swap. Обработчик `lot.new` читает `feed.firstElementChild` (только что вставленный `<article>`) и берёт `data-title` / `data-area` для тела уведомления. Существующая htmx-вставка в `#feed` при этом не затрагивается.
 

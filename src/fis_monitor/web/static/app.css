@@ -824,3 +824,19 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
   }
 }
 
+/* ---------- Notification permission button ---------- */
+/* data-notif-perm="default"  → neutral ghost icon (inherited .btn--ghost) */
+/* data-notif-perm="granted"  → accent tint to signal active state */
+/* data-notif-perm="denied"   → muted + disabled appearance */
+.notif-perm-btn[data-notif-perm="granted"] {
+  color: var(--accent, #1a6b3c);
+}
+.notif-perm-btn[data-notif-perm="granted"]:hover {
+  color: var(--accent, #1a6b3c);
+  background: color-mix(in oklab, var(--accent, #1a6b3c) 12%, transparent);
+}
+.notif-perm-btn[data-notif-perm="denied"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
