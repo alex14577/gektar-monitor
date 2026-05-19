@@ -15,6 +15,7 @@ from fis_monitor.domain.regions import (
     ids_to_slugs,
     slug_to_id,
     slugs_to_ids,
+    subject_id_by_title,
     subjects_for_macros,
 )
 
@@ -182,3 +183,28 @@ class TestIdsToSlugs:
 
     def test_all_unknown_returns_empty(self) -> None:
         assert ids_to_slugs([999, 1000]) == []
+
+
+class TestSubjectIdByTitle:
+    """Tests for subject_id_by_title — inverse map name → site-id (ADR-035 §I2, pc1g)."""
+
+    def test_known_name_returns_site_id(self) -> None:
+        """Canonical RF-subject name resolves to correct site-id."""
+        assert subject_id_by_title("Республика Карелия") == 27
+
+    def test_another_known_name(self) -> None:
+        assert subject_id_by_title("Приморский край") == 88
+
+    def test_unknown_name_returns_none(self) -> None:
+        assert subject_id_by_title("Несуществующий регион") is None
+
+    def test_empty_string_returns_none(self) -> None:
+        assert subject_id_by_title("") is None
+
+    def test_none_input_returns_none(self) -> None:
+        assert subject_id_by_title(None) is None
+
+    def test_inverse_roundtrip_for_all_catalog_entries(self) -> None:
+        """Every (site_id, title) pair in SUBJECT_TITLE_BY_ID round-trips correctly."""
+        for sid, title in SUBJECT_TITLE_BY_ID.items():
+            assert subject_id_by_title(title) == sid

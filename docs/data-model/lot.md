@@ -4,19 +4,21 @@
 
 ## Инвариант согласованности `region` / `region_id`
 
-> **SSOT-контракт (добавлен 2026-05-19, ADR-035 §I2):**
+> **SSOT-контракт (добавлен 2026-05-19, исправлен 2026-05-19 pc1g, ADR-035 §I2):**
 >
 > - `region` (`TEXT NOT NULL`) — display-name субъекта РФ в том виде, в котором
 >   он возвращается сайтом (`torgi.gov.ru`). Используется для отображения в UI.
 >   Значение устанавливается парсером из raw HTML; может содержать исторические
 >   неканоничные строки в legacy-лотах.
-> - `region_id` (`INTEGER NULL`) — идентификатор макрорегиона (1=ДФО, 2=Арктика),
->   устанавливаемый парсером при ingestion (`monitor_cycle._parsed_row_to_lot` →
->   `region_id=region`, где `region` — аргумент цикла). Это **SSOT для фильтрации**
->   в `RfSubjectFilterMatcher` и `SubscribedAtFilteredNotifier`.
-> - Согласованность гарантируется парсером: все новые лоты (post-v3→v4) получают
->   `region_id` из контекста цикла. Legacy-лоты с `region_id=NULL` backfill-ятся
->   migration v6→v7 по каталогу `SUBJECT_TITLE_BY_ID`.
+> - `region_id` (`INTEGER NULL`) — **site-id** субъекта РФ: ключ из
+>   `SUBJECT_TITLE_BY_ID` (например, 27 = Республика Карелия, 88 = Приморский край).
+>   **НЕ путать с macro-region ID** (1=ДФО, 2=Арктика) — это разные пространства имён.
+>   `region_id ∈ keys(SUBJECT_TITLE_BY_ID)` или `None`. Устанавливается парсером
+>   при ingestion через `subject_id_by_title(row.region)` (`domain/regions.py`).
+>   Это **SSOT для фильтрации** в `RfSubjectFilterMatcher` и `SubscribedAtFilteredNotifier`.
+> - Согласованность гарантируется парсером: все новые лоты получают site-id из
+>   каталога `SUBJECT_TITLE_BY_ID`. Legacy-лоты с macro-id в `region_id` backfill-ятся
+>   migration v7→v8 (pc1g).
 > - `region_id=None` → fail-open в фильтре (ADR-035 I2): лот проходит независимо от
 >   `rf_subjects`. Диагностируется WARNING `dispatcher.dispatch.region_id_null`.
 

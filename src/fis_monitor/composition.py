@@ -320,7 +320,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     init_db(
         conn_provider,
         schema_sql=schema_sql,
-        latest_version=7,
+        latest_version=8,
         migration_runner=default_migration_runner(),
     )
 

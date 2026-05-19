@@ -72,6 +72,7 @@ from fis_monitor.domain.models import (
 from fis_monitor.domain.models import (
     parsed_row_to_lot as _parsed_row_to_lot,
 )
+from fis_monitor.domain.regions import subject_id_by_title as _subject_id_by_title
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
@@ -566,7 +567,8 @@ class MonitorCycleService:
         try:
             for index, row in enumerate(parsed_rows):
                 try:
-                    lots.append(_parsed_row_to_lot(row, now, region_id=region))
+                    site_id = _subject_id_by_title(row.region)
+                    lots.append(_parsed_row_to_lot(row, now, region_id=site_id))
                 except ValidationError as exc:
                     raise ParseBugError(
                         selector="<list-row-conversion>",

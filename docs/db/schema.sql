@@ -32,7 +32,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 7;
+PRAGMA user_version = 8;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
@@ -49,6 +49,11 @@ PRAGMA user_version = 7;
 --   SUBJECT_TITLE_BY_ID catalog. Legacy lots whose region text was not in the
 --   catalog at v3→v4 migration time get region_id resolved now. ADR-035 I2.
 --   MigrationRunner v6→v7.
+-- user_version bumped 7→8 (pc1g): backfill lots.region_id from macro-id namespace
+--   (1=ДФО, 2=Арктика) to site-id namespace (keys of SUBJECT_TITLE_BY_ID).
+--   Fixes email filter mismatch: rf_subjects holds site-ids, region_id held macro-id.
+--   Parser fixed: parsed_row_to_lot now resolves row.region via subject_id_by_title().
+--   ADR-035 §I2 amended; ADR-NNN-region-id-namespace-canonical. MigrationRunner v7→v8.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД

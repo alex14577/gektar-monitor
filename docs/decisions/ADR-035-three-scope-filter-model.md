@@ -40,7 +40,7 @@ Addendum ADR-031 вводил UX-инвариант «≥1 subject required» д
 
 **I1. Fetch ⊇ Notify** на уровне доступности данных: уведомление может прийти только по лоту, который fetch уже вытянул. Macro-region URL — единственный knob fetch-скоупа. Субъектного сужения на уровне HTTP-запроса нет (`monitor_cycle.py:392`).
 
-**I2. Notify ⊆ SUBJECT_TITLE_BY_ID** (amended 2026-05-19): множество notify-субъектов является подмножеством полного каталога поддерживаемых субъектов (`domain/regions.py::SUBJECT_TITLE_BY_ID`). Сопоставление выполняется по `lot.region_id` (`int | None`) — целочисленному идентификатору, который парсер заполняет при ingestion из макро-региона цикла (см. `monitor_cycle.py → _parsed_row_to_lot`). Строковый lookup (`_NAME_TO_ID`) удалён. Для лотов с `region_id is None` (legacy-строки, чей `region` text не был в каталоге при v3→v4-миграции) применяется fail-open: лот проходит фильтр независимо от `rf_subjects`. Этот случай диагностируется WARNING-логом в `NotifierDispatcher.dispatch` (dispatcher.dispatch.region_id_null). Migration v6→v7 выполняет one-shot backfill для таких строк.
+**I2. Notify ⊆ SUBJECT_TITLE_BY_ID** (amended 2026-05-19, revised 2026-05-19 pc1g): множество notify-субъектов является подмножеством полного каталога поддерживаемых субъектов (`domain/regions.py::SUBJECT_TITLE_BY_ID`). Сопоставление выполняется по `lot.region_id` (`int | None`) — **site-id** (ключ `SUBJECT_TITLE_BY_ID`, например 27 для Республики Карелии). **Не путать с macro-id** (1=ДФО, 2=Арктика): это разные пространства имён. Парсер заполняет `region_id` при ingestion через `subject_id_by_title(row.region)` — функцию-хелпер в `domain/regions.py`, которая инвертирует `SUBJECT_TITLE_BY_ID`. Для лотов с `region_id is None` (неизвестный регион) применяется fail-open: лот проходит фильтр независимо от `rf_subjects`. Этот случай диагностируется WARNING-логом в `NotifierDispatcher.dispatch` (dispatcher.dispatch.region_id_null). Migration v7→v8 переводит существующие строки из macro-id в site-id namespace.
 
 **I3. View НЕЗАВИСИМ от Notify**: пользователь может фильтровать ленту по субъектам, на которые он не подписан, и наоборот. Скоупы разделены: notify-фильтр в `config.json` (`Settings.filters.rf_subjects`), view-фильтр в cookie (`view_filters`).
 
@@ -110,9 +110,10 @@ def _migrate_subject_site_ids(cls, data: dict) -> dict:
 - `src/fis_monitor/domain/models.py` — `FiltersConfig.rf_subjects` definition
 - `src/fis_monitor/domain/models.py` — `Settings.regions`, `Settings.filters`
 - `src/fis_monitor/services/filter_matcher.py` — `RfSubjectFilterMatcher.matches` (I4 source); uses `lot.region_id` directly, no `_NAME_TO_ID` string lookup
-- `src/fis_monitor/services/monitor_cycle.py` — `lot_list_url(region=region)` без subject_site_ids; `_parsed_row_to_lot(row, now, region_id=region)` устанавливает region_id для новых лотов
+- `src/fis_monitor/services/monitor_cycle.py` — `lot_list_url(region=region)` без subject_site_ids; `site_id = _subject_id_by_title(row.region)` + `_parsed_row_to_lot(row, now, region_id=site_id)` устанавливает site-id для новых лотов (pc1g)
 - `src/fis_monitor/services/notifier_dispatcher.py` — WARNING `dispatcher.dispatch.region_id_null` при `region_id=None`
-- `src/fis_monitor/infra/sqlite/migrations_v6_to_v7.py` — backfill region_id для legacy NULL строк
+- `src/fis_monitor/infra/sqlite/migrations_v6_to_v7.py` — backfill region_id для legacy NULL строк (macro-id, deprecated by v7→v8)
+- `src/fis_monitor/infra/sqlite/migrations_v7_to_v8.py` — backfill region_id macro-id → site-id для всех строк (pc1g)
 - `src/fis_monitor/web/routes/filters.py` — view-scope implementation
 - [[decisions/ADR-031-region-ssot-site-id|ADR-031]] — superseded §Q3 + Addendum
 - [[decisions/ADR-024-target-config-and-url-builder|ADR-024]] — url-builder design

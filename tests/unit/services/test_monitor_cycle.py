@@ -917,32 +917,45 @@ class TestParserPjaxFragmentCompat:
 
 
 class TestRegionIdStamping:
-    """Lots ingested by run_cycle must carry the region_id of the cycle (eov8)."""
+    """Lots ingested by run_cycle carry the site-id resolved from row.region (pc1g fix)."""
 
-    def test_run_cycle_stamps_region_id_on_upserted_lots(self) -> None:
-        region = 1
-        rows = [_make_parsed_row(1), _make_parsed_row(2)]
-        lot_repo = FakeLotRepository(was_new_for={1, 2})
+    def _make_row_with_region(self, lot_id: int, region_name: str) -> ParsedListRow:
+        return ParsedListRow(
+            id=lot_id,
+            cadastral_no=f"77:01:000{lot_id:04d}:1",
+            area_sqm=1000,
+            region=region_name,
+            municipality=None,
+            land_category=None,
+            permitted_use=None,
+            ogv=None,
+            status="PUBLISHED",
+            date_create=_NOW,
+            date_update=_NOW,
+        )
+
+    def test_run_cycle_stamps_site_id_for_known_region(self) -> None:
+        """Lot.region_id is the site-id (27) for a known RF-subject name."""
+        rows = [self._make_row_with_region(1, "Республика Карелия")]
+        lot_repo = FakeLotRepository(was_new_for={1})
 
         svc, *_ = _make_service(
             list_parser=FakeListParser(rows=rows),
             lot_repo=lot_repo,
         )
-        svc.run_cycle(region)
+        svc.run_cycle(1)
 
-        assert len(lot_repo.upsert_calls) == 2
-        for lot, _ in lot_repo.upsert_calls:
-            assert lot.region_id == region
+        assert lot_repo.upsert_calls[0][0].region_id == 27  # site-id, not macro-id
 
-    def test_run_cycle_region2_stamps_region_id_2(self) -> None:
-        region = 2
-        rows = [_make_parsed_row(10)]
+    def test_run_cycle_stamps_none_for_unknown_region(self) -> None:
+        """Lot.region_id is None when row.region does not resolve to a catalog entry."""
+        rows = [_make_parsed_row(10)]  # region="77" — not in SUBJECT_TITLE_BY_ID
         lot_repo = FakeLotRepository(was_new_for={10})
 
         svc, *_ = _make_service(
             list_parser=FakeListParser(rows=rows),
             lot_repo=lot_repo,
         )
-        svc.run_cycle(region)
+        svc.run_cycle(2)
 
-        assert lot_repo.upsert_calls[0][0].region_id == 2
+        assert lot_repo.upsert_calls[0][0].region_id is None  # fail-open per ADR-035 I2

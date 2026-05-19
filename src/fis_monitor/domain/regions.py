@@ -18,6 +18,7 @@ Design constraints
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
@@ -34,6 +35,7 @@ __all__ = [
     "region_name",
     "slug_to_id",
     "slugs_to_ids",
+    "subject_id_by_title",
     "subjects_for_macros",
 ]
 
@@ -138,6 +140,37 @@ SUBJECT_TITLE_BY_ID: Mapping[int, str] = MappingProxyType({
     95: "Еврейская автономная область",
     96: "Чукотский автономный округ",
 })
+
+
+@functools.cache
+def _build_title_to_id() -> dict[str, int]:
+    """Build an inverted map {display-name → site-id} from SUBJECT_TITLE_BY_ID.
+
+    Cached at first call (module-level singleton). Pure — no side effects.
+    """
+    return {title: sid for sid, title in SUBJECT_TITLE_BY_ID.items()}
+
+
+def subject_id_by_title(title: str | None) -> int | None:
+    """Return the site-id for a canonical RF-subject display name, or None.
+
+    Uses the inverted ``SUBJECT_TITLE_BY_ID`` catalog as the lookup source
+    (site-id namespace, ADR-035 §I2).  Strict match — no lowercasing or
+    trimming performed here; the display names on ``torgi.gov.ru`` are
+    expected to match the catalog exactly.
+
+    Args:
+        title: RF-subject display name as returned by the site parser
+               (e.g. ``"Республика Карелия"``), or ``None``.
+
+    Returns:
+        Integer site-id (key of ``SUBJECT_TITLE_BY_ID``) if found,
+        ``None`` for unknown, empty, or ``None`` input.  ``None`` triggers
+        fail-open in ``RfSubjectFilterMatcher`` (ADR-035 I2).
+    """
+    if not title:
+        return None
+    return _build_title_to_id().get(title)
 
 
 def subjects_for_macros(macro_ids: Sequence[int]) -> tuple[int, ...]:

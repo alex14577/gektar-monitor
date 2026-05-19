@@ -38,6 +38,7 @@ from fis_monitor.domain.models import (
 from fis_monitor.domain.models import (
     parsed_row_to_lot as _parsed_row_to_lot,
 )
+from fis_monitor.domain.regions import subject_id_by_title as _subject_id_by_title
 
 if TYPE_CHECKING:
     from fis_monitor.domain.interfaces import (
@@ -523,7 +524,7 @@ class BackfillService:
                 rows_processed += 1
                 now = datetime.now(UTC)
                 try:
-                    lot = _parsed_row_to_lot(row, now, region_id=region)
+                    lot = _parsed_row_to_lot(row, now, region_id=_subject_id_by_title(row.region))
                 except Exception:
                     logger.warning(
                         "backfill: failed to convert row id=%s region=%s — skipping",

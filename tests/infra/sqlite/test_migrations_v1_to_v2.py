@@ -287,8 +287,9 @@ class TestDefaultMigrationRunnerFactory:
 
         # v1→v2, v2→v3 (smtp_from_name, bd ljp), v3→v4 (region_subscriptions, nvx2),
         # v4→v5 (lots.date_registry, ADR-040), v5→v6 (drop starred, ADR-053),
-        # v6→v7 (backfill region_id NULL rows, ADR-035 I2)
-        assert len(migrations) == 6
+        # v6→v7 (backfill region_id NULL rows, ADR-035 I2),
+        # v7→v8 (region_id macro-id → site-id namespace fix, pc1g)
+        assert len(migrations) == 7
         m1 = migrations[0]
         assert m1.from_version == 1
         assert m1.to_version == 2
