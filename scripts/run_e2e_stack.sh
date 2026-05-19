@@ -26,6 +26,7 @@ Must be run from project root (where pyproject.toml lives).
 
 Options:
   --no-onboarding   Mark onboarding completed in state.db, wait for cache to expire
+  --reset           Wipe DATA_DIR (var/) before launch for a clean state.db / fresh feed
   -h, --help        Show this help and exit
 
 Environment variables:
@@ -36,15 +37,18 @@ Environment variables:
 Examples:
   run_e2e_stack.sh
   run_e2e_stack.sh --no-onboarding
+  run_e2e_stack.sh --reset --no-onboarding
   E2E_FIS_PORT=9000 run_e2e_stack.sh --no-onboarding
 EOF
 }
 
 # ── Arg parsing ──────────────────────────────────────────────────────
 FLAG_NO_ONBOARDING=0
+FLAG_RESET=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-onboarding) FLAG_NO_ONBOARDING=1 ;;
+    --reset)         FLAG_RESET=1 ;;
     --help|-h)       show_help; exit 0 ;;
     *) printf "Unknown flag: %s\n\n" "$1" >&2; show_help >&2; exit 2 ;;
   esac
@@ -103,11 +107,39 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+reset_safety_check() {
+  # Normalise FIRST so guards see the resolved path (catches `..` traversal and
+  # symlinks in $STACK_DIR — without this, /tmp/../etc/x/var would pass /tmp/* check).
+  # realpath -m works even when the path doesn't exist yet.
+  local real
+  real="$(realpath -m -- "$DATA_DIR")" \
+                                    || die "--reset: cannot normalise DATA_DIR='$DATA_DIR'."
+  # Defense-in-depth: STACK_DIR/DATA_DIR currently always non-empty/absolute via :- default,
+  # kept as a tripwire if Configuration block is ever refactored.
+  [[ -n "$STACK_DIR" ]]             || die "--reset: E2E_STACK_DIR is empty; refusing to wipe."
+  [[ "$real" == /* ]]               || die "--reset: resolved path='$real' is not absolute; refusing to wipe."
+  [[ "$real" != "/" && "$real" != "/var" && "$real" != "/tmp" && "$real" != "$HOME/var" ]] \
+                                    || die "--reset: resolved path='$real' is a dangerous system path; refusing to wipe."
+  local depth
+  depth=$(awk -F'/' '{print NF-1}' <<<"$real")
+  [[ "$depth" -ge 3 ]]              || die "--reset: resolved path='$real' is too shallow (depth=$depth); refusing to wipe."
+  [[ "$real" == /tmp/* || "$real" == "$HOME"/* ]] \
+                                    || die "--reset: resolved path='$real' is outside allowed prefixes (/tmp/ or \$HOME/); refusing to wipe."
+  # Reject if STACK_DIR itself is exactly $HOME (would resolve DATA_DIR to $HOME/var, masked by allowlist).
+  [[ "$STACK_DIR" != "$HOME" ]]     || die "--reset: E2E_STACK_DIR is \$HOME itself; refusing to wipe."
+}
+
 # ── Pre-flight checks ────────────────────────────────────────────────
 [[ -f pyproject.toml ]] || die "Run from project root (no pyproject.toml here)."
 
 if [[ "$FLAG_NO_ONBOARDING" == "1" ]]; then
   command -v python3 >/dev/null 2>&1 || die "--no-onboarding requires python3 in PATH"
+fi
+
+# Run --reset safety check BEFORE mkdir below — otherwise dangerous paths fail
+# with confusing "mkdir: Permission denied" instead of a clear "refusing to wipe" message.
+if [[ "$FLAG_RESET" == "1" ]]; then
+  reset_safety_check
 fi
 
 for port in "$FAKE_PORT" "$FIS_PORT"; do
@@ -126,6 +158,12 @@ kill_if_running "$FAKE_PID_FILE"
 # calls tolerate "no matches" (rc=1) via `|| true`.
 pkill -f fis-monitor 2>/dev/null || true
 pkill -f fake_torgi 2>/dev/null || true
+if [[ "$FLAG_RESET" == "1" ]]; then
+  # safety_check already ran in pre-flight; just wipe + recreate
+  log "--reset: wiping DATA_DIR=$DATA_DIR"
+  rm -rf "$DATA_DIR"
+  mkdir -p "$DATA_DIR"
+fi
 rm -f "$DATA_DIR/app.lock"
 
 # ── Auth bypass (always on for local dev) ────────────────────────────
