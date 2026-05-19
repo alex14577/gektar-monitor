@@ -61,9 +61,9 @@ def v6_to_v7(conn: sqlite3.Connection) -> None:
     cur.close()
 
     for region_name in regions_in_db:
-        macro_id = name_to_macro.get(region_name)
-        if macro_id is not None:
+        mapped_macro_id = name_to_macro.get(region_name)
+        if mapped_macro_id is not None:
             conn.execute(
                 "UPDATE lots SET region_id = ? WHERE region = ? AND region_id IS NULL",
-                (macro_id, region_name),
+                (mapped_macro_id, region_name),
             )
