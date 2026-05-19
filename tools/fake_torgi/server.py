@@ -28,15 +28,20 @@ from urllib.parse import quote, urlparse
 
 import uvicorn
 from fastapi import FastAPI, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
 _LOTS_FILE = _HERE / "lots.json"
 
 _STATUSES = ["Свободен", "Зарезервирован", "Оформляется"]
+
+# Canonical region names (values of SUBJECT_TITLE_BY_ID) — used for validation.
+_CANONICAL_REGIONS: frozenset[str] = frozenset(SUBJECT_TITLE_BY_ID.values())
 
 _SESSIONS: dict[str, float] = {}  # token → created_at (epoch seconds)
 _SESSIONS_LOCK = Lock()
@@ -304,6 +309,16 @@ async def admin_add_lot(
     lon: str = Form(""),
 ) -> RedirectResponse:
     """Add a lot via admin form.  PRG pattern: redirect to /admin after POST."""
+    if region and region not in _CANONICAL_REGIONS:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": (
+                    f"Unknown region '{region}'. "
+                    "Must be a canonical RF-subject name from SUBJECT_TITLE_BY_ID."
+                )
+            },
+        )
     lots = _load_lots()
     if any(lo["id"] == id for lo in lots):
         return RedirectResponse(f"/admin?msg=ID+{id}+already+exists", status_code=303)

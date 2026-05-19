@@ -1,8 +1,8 @@
 """Unit tests for FilterMatcher implementations.
 
 Covers:
-  - ``RfSubjectFilterMatcher``: empty filter → True; matching region → True;
-    non-matching region → False; unknown region name → True (fail-open).
+  - ``RfSubjectFilterMatcher``: empty filter → True; region_id in list → True;
+    region_id not in list → False; region_id=None → True (fail-open).
   - ``AllFiltersMatcher``: empty list → True; all-True → True; one-False → False.
 """
 
@@ -22,13 +22,13 @@ from fis_monitor.services.filter_matcher import AllFiltersMatcher, RfSubjectFilt
 _NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
-def _make_lot(region_name: str) -> LotPublicDTO:
-    """Return a minimal ``LotPublicDTO`` for the given region name string."""
+def _make_lot(region_id: int | None) -> LotPublicDTO:
+    """Return a minimal ``LotPublicDTO`` for the given region_id."""
     return LotPublicDTO(
         id=1,
         cadastral_no="77:01:0000001:1",
         area_sqm=1000,
-        region=region_name,
+        region="Тестовый регион",
         municipality="Тест",
         land_category="Земли населённых пунктов",
         permitted_use="ИЖС",
@@ -53,6 +53,7 @@ def _make_lot(region_name: str) -> LotPublicDTO:
         age_seconds=0,
         tier="match",
         freshness="hot",
+        region_id=region_id,
     )
 
 
@@ -61,56 +62,50 @@ def _make_lot(region_name: str) -> LotPublicDTO:
 # ---------------------------------------------------------------------------
 
 class TestRfSubjectFilterMatcher:
-    """Parametrised and edge-case tests for RfSubjectFilterMatcher."""
+    """Tests for RfSubjectFilterMatcher using region_id directly."""
 
     def setup_method(self) -> None:
         self.matcher = RfSubjectFilterMatcher()
 
     def test_empty_filter_passes_all(self) -> None:
-        """Empty rf_subjects → no filter set → pass everything through."""
-        lot = _make_lot("Хабаровский край")  # site-id=89
+        """Empty rf_subjects → no filter set → pass everything through (I4)."""
+        lot = _make_lot(region_id=89)
         filters = FiltersConfig(rf_subjects=[])
         assert self.matcher.matches(lot, filters) is True
 
-    def test_matching_region_passes(self) -> None:
-        """Lot whose region name maps to a site-id in rf_subjects → True."""
-        lot = _make_lot("Хабаровский край")  # site-id=89
+    def test_region_id_in_filter_passes(self) -> None:
+        """Lot whose region_id is in rf_subjects → True."""
+        lot = _make_lot(region_id=89)
         filters = FiltersConfig(rf_subjects=[89, 88])
         assert self.matcher.matches(lot, filters) is True
 
-    def test_non_matching_region_blocked(self) -> None:
-        """Lot whose region maps to a site-id NOT in rf_subjects → False."""
-        lot = _make_lot("Хабаровский край")  # site-id=89
-        filters = FiltersConfig(rf_subjects=[88, 90])  # Приморский + Амурская
+    def test_region_id_not_in_filter_blocked(self) -> None:
+        """Lot whose region_id is NOT in rf_subjects → False."""
+        lot = _make_lot(region_id=89)
+        filters = FiltersConfig(rf_subjects=[88, 90])
         assert self.matcher.matches(lot, filters) is False
 
-    def test_unknown_region_name_passes(self) -> None:
-        """Region name not in the SSOT map → fail-open (True).
+    def test_region_id_none_fails_open(self) -> None:
+        """region_id=None (unresolved) → fail-open → True (ADR-035 I2).
 
-        This ensures new upstream regions are never silently dropped
+        Ensures lots from new/unrecognised regions are never silently dropped
         when the SSOT lags behind site updates.
         """
-        lot = _make_lot("Несуществующий край")
+        lot = _make_lot(region_id=None)
         filters = FiltersConfig(rf_subjects=[88, 89, 90])
         assert self.matcher.matches(lot, filters) is True
 
-    @pytest.mark.parametrize("region_name,region_id", [
-        ("Приморский край", 88),
-        ("Хабаровский край", 89),
-        ("Амурская область", 90),
-        ("Республика Саха (Якутия)", 87),
-        ("Республика Карелия", 27),
-        ("Мурманская область", 34),
-    ])
-    def test_known_regions_correct_id_mapping(
-        self, region_name: str, region_id: int
-    ) -> None:
-        """Spot-check that known site-id region names map to their correct IDs."""
-        lot = _make_lot(region_name)
-        # Filter includes only the correct id → should pass.
+    @pytest.mark.parametrize("region_id", [88, 89, 90, 87, 27, 34])
+    def test_single_id_in_filter(self, region_id: int) -> None:
+        """Spot-check: lot with a given region_id passes when that id is in filter."""
+        lot = _make_lot(region_id=region_id)
         assert self.matcher.matches(lot, FiltersConfig(rf_subjects=[region_id])) is True
-        # Filter excludes the id → should block.
+
+    @pytest.mark.parametrize("region_id", [88, 89, 90, 87, 27, 34])
+    def test_single_id_not_in_filter(self, region_id: int) -> None:
+        """Spot-check: lot with a given region_id is blocked when that id is absent."""
         other_id = region_id + 1 if region_id < 96 else region_id - 1
+        lot = _make_lot(region_id=region_id)
         assert self.matcher.matches(lot, FiltersConfig(rf_subjects=[other_id])) is False
 
 
@@ -136,7 +131,7 @@ class TestAllFiltersMatcher:
     """Tests for AllFiltersMatcher composite AND semantics."""
 
     def _lot(self) -> LotPublicDTO:
-        return _make_lot("Москва")
+        return _make_lot(region_id=89)
 
     def _filters(self) -> FiltersConfig:
         return FiltersConfig()
