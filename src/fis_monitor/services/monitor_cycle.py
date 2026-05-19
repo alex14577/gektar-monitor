@@ -408,9 +408,9 @@ class MonitorCycleService:
         )
         cycle_id = self._cycles_repo.open(region=region, at=started_at)
 
-        # hiq3 (ADR-050): publish cycle.started so the pulse-dot switches to
-        # "checking" state before any I/O.  Best-effort — failures must not
-        # prevent the cycle from running.
+        # hiq3 (ADR-050): publish cycle.started before any I/O for telemetry
+        # and any future SSE consumers (UI pulse-dot consumer removed in lw5s).
+        # Best-effort — failures must not prevent the cycle from running.
         try:
             self._event_bus.publish(
                 SseCycleStarted(timestamp=started_at, cycle_id=cycle_id)
@@ -483,7 +483,7 @@ class MonitorCycleService:
             # Defensive: list_parser.parse() currently raises only
             # SessionExpiredError / ParseBugError, but treat UpstreamError as a
             # first-class close path so a future parser change can never strand
-            # the pulse-dot in «checking» state (y38m).
+            # a cycle without its matching cycle.done event (y38m).
             return self._close_with_upstream_error(
                 exc, cycle_id=cycle_id, region=region, started_at=started_at
             )
@@ -728,7 +728,8 @@ class MonitorCycleService:
         events (``SseSessionExpired``) — this event covers the cycle path.
 
         Countdown fields removed by hiq3 (ADR-050 supersedes ADR-048):
-        the pulse-dot pattern (SseCycleStarted / SseCycleDone) replaces them.
+        replaced by binary cycle.started / cycle.done events (the UI pulse-dot
+        consumer was later removed in lw5s; events stay on the stream).
 
         Errors in repo or settings access are logged and swallowed: the
         widget refresh is best-effort and must not break the consumer loop.
