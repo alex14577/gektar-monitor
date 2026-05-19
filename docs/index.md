@@ -35,6 +35,7 @@
 - [[config-reference]] — таблица всех ключей config.json
 - [[glossary]] — словарь терминов: ЕСИА, ФИС, ВРИ, ПКК, lazy/mirror, …
 - [[ops/dev-environment]] — разработка из Linux, Windows VM минимально
+- [[ops/browser-feedback-mcp]] — Playwright + Chrome DevTools MCP для визуальной обратной связи Claude Code
 - [[ops/cost-estimate]] — оценка 150–180к ₽ / 7–9 дней
 
 ## Артефакты от дизайнера
