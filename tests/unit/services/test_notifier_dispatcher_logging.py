@@ -47,3 +47,21 @@ def test_dispatch_channels_emits_channel_invoked_debug(caplog: pytest.LogCapture
     assert rec.__dict__.get("lot_id") == 55
     assert rec.__dict__.get("channel_id") == "browser"
     assert "recipients_count" in rec.__dict__
+
+
+def test_region_id_null_warning_emitted_once_per_lot(caplog: pytest.LogCaptureFixture) -> None:
+    """dispatcher.dispatch.region_id_null WARNING is logged at most once per lot_id."""
+    dispatcher = make_dispatcher()
+    lot = make_lot_dto(lot_id=99, region_id=None)
+
+    with caplog.at_level(logging.WARNING, logger=DISPATCHER_LOGGER):
+        dispatcher.dispatch(lot)
+        dispatcher.dispatch(lot)
+
+    null_warnings = [
+        r for r in caplog.records
+        if r.getMessage() == "dispatcher.dispatch.region_id_null"
+    ]
+    assert len(null_warnings) == 1, (
+        f"expected exactly 1 region_id_null warning, got {len(null_warnings)}"
+    )

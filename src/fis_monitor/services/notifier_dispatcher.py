@@ -310,6 +310,7 @@ class NotifierDispatcher:
         self.recovery_age = recovery_age
 
         self._queue: queue.Queue[LotPublicDTO] = queue.Queue(maxsize=max_queue_size)
+        self._warned_null_region_lot_ids: set[int] = set()
 
     # ------------------------------------------------------------------
     # Public producer interface
@@ -328,7 +329,8 @@ class NotifierDispatcher:
         identify legacy rows in state.db whose ``region`` text was not in the
         domain catalog at v3→v4 migration time.
         """
-        if lot.region_id is None:
+        if lot.region_id is None and lot.id not in self._warned_null_region_lot_ids:
+            self._warned_null_region_lot_ids.add(lot.id)
             logger.warning(
                 "dispatcher.dispatch.region_id_null",
                 extra={

@@ -145,7 +145,7 @@ def make_dispatcher(
     )
 
 
-def make_lot_dto(lot_id: int = 42, region_id: int = 77) -> LotPublicDTO:
+def make_lot_dto(lot_id: int = 42, region_id: int | None = 77) -> LotPublicDTO:
     lot = make_lot(id=lot_id, region_id=region_id)
     from fis_monitor.domain.models import lot_to_public_dto
     return lot_to_public_dto(lot)
