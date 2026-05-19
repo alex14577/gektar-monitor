@@ -822,11 +822,8 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
   background: var(--accent);
   animation: pulseDot 1.2s ease-in-out infinite;
 }
-.check-status[data-state="idle"] .check-label::before { content: "Жду"; }
 .check-status[data-state="checking"] .check-label::before { content: "Проверяю"; }
-/* Hides the hardcoded text inside .check-label when CSS is active */
-.check-label { font-size: 0; }
-.check-label::before { font-size: 0.8125rem; }
+.check-label { font-size: 0.8125rem; }
 
 /* ---------- lot-card--new (was_new accent) ---------- */
 /* Use inset box-shadow so the accent overlays the ::before freshness strip
