@@ -50,11 +50,17 @@
     </div>
 
     <div class="lot__actions-col">
-      <a class="btn btn--primary btn--sm" href="{{ lot.url }}" target="_blank" rel="noopener"
-         {% if session.expired %}aria-disabled="true" tabindex="-1" style="pointer-events:none; opacity:0.5"{% endif %}>
+      {% if session.expired %}
+      <span class="btn btn--primary btn--sm btn--disabled" role="link" tabindex="0" aria-disabled="true">
+        Открыть
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+      </span>
+      {% else %}
+      <a class="btn btn--primary btn--sm" href="{{ lot.url }}" target="_blank" rel="noopener">
         Открыть
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
       </a>
+      {% endif %}
       <button class="btn btn--sm" type="button"
               data-copy="{{ lot.cadastral_no }} · {{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %} · {{ lot.area_ha | replace('.', ',') }} га">
         Скопировать

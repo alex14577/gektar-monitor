@@ -17,7 +17,7 @@
   --line-strong:  #cfcec6;
   --ink:          #14161a;        /* primary text */
   --ink-2:        #3a3d44;        /* secondary text */
-  --muted:        #6b6f78;        /* tertiary */
+  --muted:        #636770;        /* tertiary */
   --code-bg:      #f1f1ec;
 
   /* accent (green) — calm forest, 4.5:1 on white */
@@ -259,7 +259,10 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .btn--sm  { min-height: 28px; padding: 0 10px; font-size: 0.8125rem; }
 .btn--lg  { min-height: 44px; padding: 0 18px; font-size: 1rem; }
 .btn--icon { padding: 0; width: 36px; }
-.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+/* native <button disabled> — browser blocks events */
+.btn[disabled]  { opacity: 0.5; cursor: not-allowed; }
+/* non-button disabled stand-in (e.g. <span role="link" aria-disabled="true">) — pointer-events suppresses activation */
+.btn--disabled  { opacity: 0.5; pointer-events: none; cursor: not-allowed; }
 .btn--full { width: 100%; }
 
 /* ---------- pills / chips ---------- */
@@ -394,14 +397,15 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .lot--poster .lot__meta  { color: var(--ink-2); font-size: 0.9375rem; margin: 0 0 1px; }
 .lot--poster .lot__vri   { color: var(--muted); font-size: 0.8125rem; margin: 0; }
 .lot--poster .lot__cad   {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
   margin-top: 6px;
   font-family: var(--font-mono); font-size: 0.875rem;
   background: var(--code-bg); padding: 4px 8px; border-radius: var(--r-sm);
   color: var(--ink);
 }
 .lot--poster .lot__ogv     { color: var(--muted); font-size: 0.8125rem; margin-top: 4px; }
-.lot--poster .lot__appeared { color: var(--muted); font-size: 0.8125rem; }
+.lot--poster .lot__appeared  { color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
+.lot--poster .lot__registry  { color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
 
 .lot--poster .lot__cta {
   display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center;
@@ -410,7 +414,7 @@ code, kbd, .mono { font-family: var(--font-mono); }
 /* copy button (inline) */
 .copy {
   border: 0; background: transparent; color: var(--muted);
-  width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 4px;
+  width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 4px;
   cursor: pointer;
 }
 .copy:hover { background: var(--surface-2); color: var(--ink); }
