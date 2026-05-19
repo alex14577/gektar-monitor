@@ -490,13 +490,17 @@ async def test_redirect_uri_rejects_traversal_and_backslash(
 
 
 def test_server_does_not_import_fis_monitor() -> None:
-    """tools/fake_torgi/server.py must NOT import from fis_monitor.
+    """tools/fake_torgi/server.py may only import fis_monitor.domain.regions.
 
-    Enforces the isolation contract (ADR-006 spirit): tools/ is a dev utility,
-    not part of the application package.  A violation would mean the staging
-    server silently depends on internal implementation details.
+    ADR-054 explicitly allows this one import (read-only canonical region catalog
+    SUBJECT_TITLE_BY_ID) to keep seed-data validation in sync with the parser.
+    Any other fis_monitor import remains forbidden: services, infra, web must not
+    be reachable from this staging tool.
     """
     import ast
+
+    # The one permitted fis_monitor import (ADR-054).
+    _ALLOWED_MODULES = {"fis_monitor.domain.regions"}
 
     source = (_REPO_ROOT / "tools" / "fake_torgi" / "server.py").read_text()
     tree = ast.parse(source)
@@ -510,7 +514,7 @@ def test_server_does_not_import_fis_monitor() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(
             "fis_monitor"
         ):
-            raise AssertionError(
-                f"tools/fake_torgi/server.py must not import fis_monitor, "
-                f"found: from {node.module} import ..."
+            assert node.module in _ALLOWED_MODULES, (
+                f"tools/fake_torgi/server.py may only import fis_monitor.domain.regions "
+                f"(ADR-054), found: from {node.module} import ..."
             )

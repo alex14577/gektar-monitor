@@ -65,6 +65,7 @@
 - [[decisions/ADR-051-login-succeeded-sse-event|ADR-051]] — `login.succeeded` SSE event for post-login UI recovery: clears stale auth-chip and cycle-error without waiting for next cycle; `make_login_success_callback` factory extracted for testability (bd fplb)
 - [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] — SSE view-filter propagation: per-connection predicate `make_sse_view_filter(vf)` injected into `SseStreamer.stream(event_filter=...)` at connection time; cookie snapshot; cookie-change-while-connected requires F5 (deferred) (bd gektar_monitor-10t5)
 - [[decisions/ADR-053-remove-favorites-feature|ADR-053]] — Remove favorites feature (starred / Избранное): product decision 2026-05-18; SQLite v5→v6 migration drops `lot_user_state.starred` column + `idx_lus_starred`; `ViewFilters.only_stars` removed; no UI/route/service for starred remains (bd gektar_monitor-qhw8)
+- [[decisions/ADR-054-fake-torgi-domain-dependency|ADR-054]] — Разрешённая зависимость tools/fake_torgi → fis_monitor.domain.regions (read-only SUBJECT_TITLE_BY_ID catalog); snapshot-дублирование отклонено; import из services/infra/web запрещён
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

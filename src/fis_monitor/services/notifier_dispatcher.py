@@ -321,7 +321,25 @@ class NotifierDispatcher:
         On queue overflow the lot is silently dropped and a warning is
         logged — monitor-cycle throughput takes priority over notifications.
         subscribed_at filtering is applied per-channel by SubscribedAtFilteredNotifier.
+
+        Lots with ``region_id=None`` are enqueued with fail-open semantics
+        (ADR-035 I2): they pass through ``RfSubjectFilterMatcher`` regardless of
+        ``filters.rf_subjects``.  A WARNING is logged here so operators can
+        identify legacy rows in state.db whose ``region`` text was not in the
+        domain catalog at v3→v4 migration time.
         """
+        if lot.region_id is None:
+            logger.warning(
+                "dispatcher.dispatch.region_id_null",
+                extra={
+                    "lot_id": lot.id,
+                    "region": lot.region,
+                    "note": (
+                        "lot has region_id=None; rf_subjects filter will fail-open "
+                        "(ADR-035 I2). Run backfill or check SUBJECT_TITLE_BY_ID catalog."
+                    ),
+                },
+            )
         logger.debug(
             "dispatcher.dispatch.entry",
             extra={

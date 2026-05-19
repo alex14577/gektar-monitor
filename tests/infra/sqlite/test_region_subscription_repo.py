@@ -215,7 +215,7 @@ class TestMigrationDataIntegrity:
         # We do this by creating a fresh DB with the v3 schema.
         v3_schema = (
             schema_sql.replace(
-                "PRAGMA user_version = 6",
+                "PRAGMA user_version = 7",
                 "PRAGMA user_version = 3",
             )
             .replace(

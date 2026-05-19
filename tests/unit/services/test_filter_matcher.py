@@ -165,3 +165,17 @@ class TestAllFiltersMatcher:
         """Single False matcher → False."""
         matcher = AllFiltersMatcher([_AlwaysFalse()])
         assert matcher.matches(self._lot(), self._filters()) is False
+
+    def test_rf_subject_matcher_false_path_via_composite(self) -> None:
+        """AllFiltersMatcher wrapping RfSubjectFilterMatcher blocks excluded region_id.
+
+        Per project CLAUDE.md: Protocol tests must invoke every method of fake-impls.
+        Here we verify the real RfSubjectFilterMatcher is reached through the composite
+        and that the false-branch (region_id excluded) propagates correctly.
+        """
+        rf_matcher = RfSubjectFilterMatcher()
+        composite = AllFiltersMatcher([rf_matcher])
+        # Lot has region_id=88 (Приморский край) but filter allows only region_id=27.
+        lot = _make_lot(region_id=88)
+        filters = FiltersConfig(rf_subjects=[27])
+        assert composite.matches(lot, filters) is False

@@ -35,7 +35,7 @@ MigrationRunner = Callable[[sqlite3.Connection, int, int], None]
 
 # Single source of truth for the current schema version.
 # Matches PRAGMA user_version in docs/db/schema.sql.
-LATEST_SCHEMA_VERSION: Final[int] = 6
+LATEST_SCHEMA_VERSION: Final[int] = 7
 
 
 def init_db(

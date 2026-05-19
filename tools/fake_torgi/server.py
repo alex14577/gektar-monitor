@@ -146,6 +146,25 @@ def _load_lots() -> list[dict[str, Any]]:
     return json.loads(_LOTS_FILE.read_text(encoding="utf-8"))
 
 
+def _validate_lots_on_startup(lots: list[dict[str, Any]]) -> None:
+    """Fail-fast startup check: every lot region must be a canonical RF-subject name.
+
+    Raises ``ValueError`` with a clear message listing all offending (id, region)
+    pairs so seed-data typos are caught before the server accepts any traffic.
+    """
+    bad: list[tuple[int, str]] = [
+        (lo["id"], lo["region"])
+        for lo in lots
+        if lo.get("region") and lo["region"] not in _CANONICAL_REGIONS
+    ]
+    if bad:
+        detail = "; ".join(f"id={i} region={r!r}" for i, r in bad)
+        raise ValueError(
+            f"lots.json contains non-canonical region names — fix before starting: {detail}. "
+            "Valid names are values of fis_monitor.domain.regions.SUBJECT_TITLE_BY_ID."
+        )
+
+
 def _save_lots(lots: list[dict[str, Any]]) -> None:
     """Persist lots to lots.json."""
     _LOTS_FILE.write_text(json.dumps(lots, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -392,6 +411,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args(sys.argv[1:])
+    _validate_lots_on_startup(_load_lots())
     if _auth_bypass_enabled():
         print(
             "fake-torgi: FAKE_TORGI_NO_AUTH=1 — /cabinet/* auth bypass ENABLED "

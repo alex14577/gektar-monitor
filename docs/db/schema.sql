@@ -32,7 +32,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
@@ -45,6 +45,10 @@ PRAGMA user_version = 6;
 --   дата постановки на учет в ЕГРН с detail-страницы. ADR-040. MigrationRunner v4→v5.
 -- user_version bumped 5→6 (qhw8): удалена колонка lot_user_state.starred + индекс
 --   idx_lus_starred. Фича «Избранное» удалена. ADR-053. MigrationRunner v5→v6.
+-- user_version bumped 6→7: backfill lots.region_id IS NULL rows using
+--   SUBJECT_TITLE_BY_ID catalog. Legacy lots whose region text was not in the
+--   catalog at v3→v4 migration time get region_id resolved now. ADR-035 I2.
+--   MigrationRunner v6→v7.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
