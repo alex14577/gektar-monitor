@@ -38,17 +38,6 @@
 - [[ops/browser-feedback-mcp]] — Playwright + Chrome DevTools MCP для визуальной обратной связи Claude Code
 - [[ops/cost-estimate]] — оценка 150–180к ₽ / 7–9 дней
 
-## Артефакты от дизайнера
-
-Распакованный архив `monitor.zip` в `/home/alex/dev/gektar_monitor/claude-design/`. Готовые шаблоны Jinja2, CSS, JS — не редизайн, а финальные файлы под FastAPI + HTMX + SSE.
-
-- `claude-design/HANDOFF.md` — инструкция бэкенду: что готово, что дописать, таблица эндпоинтов
-- `claude-design/README.md` — контракты данных Jinja, карта SSE-событий, JS-API
-- `claude-design/templates/` — feed + onboarding (4 шага)
-- `claude-design/static/` — app.css + app.js
-- `claude-design/Monitor - main feed.html`, `Monitor - onboarding.html` — demo для визуальной сверки
-- `claude-design/Wireframes.html` — низкоточные варианты (history)
-
 ## Юридические/безопасность
 
 - [[product/risks-legal]] — ЕСИА-риски, 152-ФЗ, что фиксировать в договоре

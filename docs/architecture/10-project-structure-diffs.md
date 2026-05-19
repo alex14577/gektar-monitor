@@ -97,7 +97,7 @@ src/fis_monitor/
 **Дополнительно:**
 - `web/onboarding_gate.py` — middleware из [[decisions-log]] (redirect на `/onboarding?step=1`).
 - `web/deps.py` — `Depends()`-фабрики над Container.
-- `web/templates/` и `web/static/` — взять из `claude-design/`.
+- `web/templates/` и `web/static/` — live в `src/fis_monitor/web/`.
 
 ## 10.6 Итоговое дерево
 
@@ -145,8 +145,8 @@ src/fis_monitor/
     onboarding_gate.py
     sse.py
     routes/{lots,settings,auth,notifications,diagnostics,onboarding,cycle,filters,history}.py
-    templates/...           # из claude-design/
-    static/...              # из claude-design/
+    templates/...
+    static/...
 
   utils/
     logging.py
