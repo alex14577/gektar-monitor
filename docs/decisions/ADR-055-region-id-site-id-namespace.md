@@ -57,6 +57,22 @@ Keeping it in domain also means backfill (infra) and monitor (service) share one
 
 ---
 
+## Alternatives Considered
+
+### 1. Resolve macro-id → site-ids at query time in `RfSubjectFilterMatcher`
+
+Instead of storing site-id at ingest, keep macro-id in `lots.region_id` and expand the filter's `rf_subjects` set to include all site-ids for the matching macro-region on each filter evaluation.
+
+**Rejected**: `RfSubjectFilterMatcher.matches()` is called every monitor cycle × every lot in the result page. Computing the inverse map and expanding sets on every call adds overhead that scales with lot volume. Ingest-time resolution pays the cost once per lot and stores the correct identifier directly — O(1) lookup at filter time.
+
+### 2. Store both `region_macro_id` and `region_site_id` as separate columns
+
+Preserve the macro-id for display/grouping purposes alongside the site-id used for filtering.
+
+**Rejected**: Redundant storage risks drift (a migration updates one column but not the other). The macro-id is derivable from `SUBJECTS_BY_MACRO` if ever needed for display — it does not need to be persisted. Adding a column to `lots` widens the schema and every INSERT/SELECT unnecessarily.
+
+---
+
 ## References
 
 - [[decisions/ADR-035-three-scope-filter-model|ADR-035]] §I2 — filter invariant

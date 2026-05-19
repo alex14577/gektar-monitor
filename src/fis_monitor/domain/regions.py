@@ -18,7 +18,6 @@ Design constraints
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
@@ -142,13 +141,11 @@ SUBJECT_TITLE_BY_ID: Mapping[int, str] = MappingProxyType({
 })
 
 
-@functools.cache
-def _build_title_to_id() -> dict[str, int]:
-    """Build an inverted map {display-name → site-id} from SUBJECT_TITLE_BY_ID.
-
-    Cached at first call (module-level singleton). Pure — no side effects.
-    """
-    return {title: sid for sid, title in SUBJECT_TITLE_BY_ID.items()}
+#: Inverted catalog: display name → site-id (immutable module-level constant).
+#: Mirrors SUBJECT_TITLE_BY_ID exactly — built once at import, no lazy init needed.
+_TITLE_TO_SUBJECT_ID: Mapping[str, int] = MappingProxyType(
+    {title: sid for sid, title in SUBJECT_TITLE_BY_ID.items()}
+)
 
 
 def subject_id_by_title(title: str | None) -> int | None:
@@ -170,7 +167,7 @@ def subject_id_by_title(title: str | None) -> int | None:
     """
     if not title:
         return None
-    return _build_title_to_id().get(title)
+    return _TITLE_TO_SUBJECT_ID.get(title)
 
 
 def subjects_for_macros(macro_ids: Sequence[int]) -> tuple[int, ...]:

@@ -35,7 +35,7 @@ MUST NOT issue BEGIN/COMMIT/ROLLBACK or PRAGMA user_version.
 
 See:
     docs/decisions/ADR-035-three-scope-filter-model.md §I2
-    docs/decisions/ADR-NNN-region-id-namespace-canonical.md (pc1g)
+    docs/decisions/ADR-055-region-id-site-id-namespace.md (pc1g)
     docs/decisions/ADR-016-repository-invariants-begin-immediate.md
 """
 
@@ -53,7 +53,8 @@ def v7_to_v8(conn: sqlite3.Connection) -> None:
     # Import inside the function to avoid circular imports at module load.
     from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 
-    # Build display-name → site-id map (inverse of SUBJECT_TITLE_BY_ID).
+    # Intentionally build inverse map locally — migration must not depend on
+    # domain.regions.subject_id_by_title module-level cache (already-imported state).
     name_to_site_id: dict[str, int] = {
         title: sid for sid, title in SUBJECT_TITLE_BY_ID.items()
     }
