@@ -19,6 +19,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify pyproject.toml version matches tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          file_version=$(grep -E '^version\s*=' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME implies version '$tag_version' but pyproject.toml has '$file_version'. Bump pyproject.toml before tagging." >&2
+            exit 1
+          fi
+          echo "Version check OK: $file_version == $tag_version"
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -56,7 +68,7 @@ jobs:
         with:
           name: fis-monitor-${{ runner.os }}
           path: dist/*
-          retention-days: 90
+          retention-days: 7
 
   release:
     name: Publish GitHub Release
