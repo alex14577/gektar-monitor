@@ -367,18 +367,19 @@
 
     // Map permission value → label + aria-label + data-notif-perm.
     const STATE_META = {
-      default:     { label: 'Уведомления о новых лотах',   title: 'Нажмите, чтобы включить уведомления' },
-      granted:     { label: 'Уведомления включены',         title: 'Уведомления включены. Нажмите для проверки' },
-      denied:      { label: 'Уведомления заблокированы',    title: 'Браузер заблокировал уведомления — разрешите в настройках' },
-      unavailable: { label: 'Уведомления недоступны',       title: 'Уведомления недоступны в этом браузере' },
+      default:     { label: 'Включить браузерные уведомления о новых лотах',                    title: 'Нажмите, чтобы включить уведомления' },
+      granted:     { label: 'Уведомления включены. Нажмите для тестовой проверки',              title: 'Уведомления включены. Нажмите для проверки' },
+      denied:      { label: 'Уведомления заблокированы. Разрешите их в настройках браузера',    title: 'Браузер заблокировал уведомления — разрешите в настройках' },
+      unavailable: { label: 'Уведомления недоступны в этом браузере',                           title: 'Уведомления недоступны в этом браузере' },
     };
 
     function applyState(perm) {
-      const meta = STATE_META[perm] || STATE_META.default;
-      btn.dataset.notifPerm = perm;
+      const normalised = Object.prototype.hasOwnProperty.call(STATE_META, perm) ? perm : 'default';
+      const meta = STATE_META[normalised];
+      btn.dataset.notifPerm = normalised;
       btn.setAttribute('aria-label', meta.label);
       btn.setAttribute('title', meta.title);
-      btn.disabled = (perm === 'denied');
+      btn.setAttribute('aria-disabled', normalised === 'denied' ? 'true' : 'false');
     }
 
     // Apply current permission on load.
@@ -399,7 +400,7 @@
             icon: '/static/icons/icon-192.png',
             tag: 'fis-monitor-test',
           });
-        } catch {}
+        } catch (e) { console.warn('test notification failed', e); }
         return;
       }
       // perm === 'default' — request permission (requires user gesture; we are inside click).
@@ -409,7 +410,6 @@
           toast('Уведомления включены');
         } else if (result === 'denied') {
           toast('Уведомления заблокированы — разрешите в настройках браузера', { timeout: 4000 });
-          localStorage.setItem('fis_notif_denied_toast', '1');
         }
       }).catch(() => {});
     });

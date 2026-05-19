@@ -826,17 +826,23 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
 
 /* ---------- Notification permission button ---------- */
 /* data-notif-perm="default"  → neutral ghost icon (inherited .btn--ghost) */
-/* data-notif-perm="granted"  → accent tint to signal active state */
-/* data-notif-perm="denied"   → muted + disabled appearance */
+/* data-notif-perm="granted"  → accent tint + underline (WCAG 1.4.1: non-color indicator) */
+/* data-notif-perm="denied"   → muted appearance; aria-disabled="true" keeps it in tab-order */
 .notif-perm-btn[data-notif-perm="granted"] {
   color: var(--accent, #1a6b3c);
+  /* Underline via box-shadow — non-color indicator for granted state (WCAG 1.4.1) */
+  box-shadow: inset 0 -2px 0 var(--accent, #1a6b3c);
 }
 .notif-perm-btn[data-notif-perm="granted"]:hover {
   color: var(--accent, #1a6b3c);
   background: color-mix(in oklab, var(--accent, #1a6b3c) 12%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent, #1a6b3c);
 }
-.notif-perm-btn[data-notif-perm="denied"] {
+/* aria-disabled keeps element in tab-order and fires click events (unlike [disabled]).
+   pointer-events: auto overrides any potential suppression so toast fires on click. */
+.notif-perm-btn[aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
+  pointer-events: auto;
 }
 

@@ -13,7 +13,7 @@
 
 Если `Notification` API недоступен — кнопка скрывается (`btn.hidden = true`).
 
-CSS-состояния: `.notif-perm-btn[data-notif-perm="granted"]` — акцентный цвет; `[data-notif-perm="denied"]` — muted + `cursor: not-allowed`.
+CSS-состояния: `.notif-perm-btn[data-notif-perm="granted"]` — акцентный цвет + `box-shadow: inset 0 -2px 0 var(--accent)` (non-color indicator, WCAG 1.4.1); `[aria-disabled="true"]` — muted + `cursor: not-allowed`, но `pointer-events: auto` — кнопка остаётся в tab-order и генерирует click (toast «разрешите в настройках» доступен с клавиатуры). Кнопка никогда не выставляет `disabled` — используется `aria-disabled` для a11y-доступности denied-состояния.
 
 **Wiring SSE → уведомление:** htmx-sse extension (ADR-029) публикует `htmx:sseMessage` на `document.body` после каждого sse-swap. Обработчик `lot.new` читает `feed.firstElementChild` (только что вставленный `<article>`) и берёт `data-title` / `data-area` для тела уведомления. Существующая htmx-вставка в `#feed` при этом не затрагивается.
 
