@@ -48,3 +48,9 @@ monitor.zip
 .DS_Store
 Thumbs.db
 data
+
+# Local session/tooling artifacts (not for git)
+.claude/scheduled_tasks.lock
+.beads/interactions.jsonl
+beads-dump.jsonl
+data.save
