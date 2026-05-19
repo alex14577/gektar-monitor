@@ -157,10 +157,17 @@ code, kbd, .mono { font-family: var(--font-mono); }
   font-family: var(--font-mono); font-size: 14px; font-weight: 700;
 }
 .header__center {
-  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
   font-size: 0.875rem; color: var(--ink-2);
 }
-.header__right { display: flex; gap: 8px; align-items: center; }
+.header__right { display: flex; gap: 10px; align-items: center; }
+
+/* ---------- header actions group (notif + settings icons) ---------- */
+/* Grouping two icon-buttons into one logical zone: easier to extend,
+   single responsibility, visual cohesion. */
+.header__actions {
+  display: flex; gap: 2px; align-items: center;
+}
 
 /* status chip in header */
 .status {
@@ -256,9 +263,9 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .btn--ghost  { background: transparent; border-color: transparent; color: var(--ink-2); }
 .btn--ghost:hover { background: var(--surface-2); color: var(--ink); }
 .btn--danger { background: var(--hot); color: #fff; border-color: var(--hot); }
-.btn--sm  { min-height: 28px; padding: 0 10px; font-size: 0.8125rem; }
+.btn--sm  { min-height: 32px; padding: 0 10px; font-size: 0.8125rem; }
 .btn--lg  { min-height: 44px; padding: 0 18px; font-size: 1rem; }
-.btn--icon { padding: 0; width: 36px; }
+.btn--icon { padding: 0; width: 32px; }
 /* native <button disabled> — browser blocks events */
 .btn[disabled]  { opacity: 0.5; cursor: not-allowed; }
 /* non-button disabled stand-in (e.g. <span role="link" aria-disabled="true">) — pointer-events suppresses activation */
@@ -476,7 +483,16 @@ code, kbd, .mono { font-family: var(--font-mono); }
 @keyframes toastIn { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- cycle-result inline feedback ---------- */
-.cycle-result-host { font-size: 0.8125rem; }
+.cycle-result-host {
+  font-size: 0.8125rem;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  flex-shrink: 1;
+  align-self: center;
+}
 .cycle-result { display: inline-block; }
 .cycle-result--ok  { color: var(--ok); }
 .cycle-result--err { color: var(--err); }
@@ -587,6 +603,52 @@ code, kbd, .mono { font-family: var(--font-mono); }
   .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
 }
 
+/* ---------- header responsive — narrower desktop / tablet ---------- */
+/* At ≤960px: hide cycle-result text (ephemeral feedback),
+   keep status chip + check-status + actions + CTA. Prevents right zone overflow. */
+@media (max-width: 960px) {
+  .header__inner { gap: 10px; }
+  .cycle-result-host { display: none; }
+  .header__right { gap: 6px; }
+}
+
+/* At ≤768px: status + check-status only in center; compress right */
+@media (max-width: 768px) {
+  .header__inner { gap: 8px; }
+  .cycle-result-host { display: none; }
+  /* Hide "Последний новый" span (4th child in center) */
+  .header__center > span:nth-child(3),
+  .header__center > span:nth-child(4) { display: none; }
+  .header__right { gap: 4px; }
+  .btn--sm { min-height: 32px; padding: 0 8px; font-size: 0.75rem; }
+  .btn--icon { width: 32px; }
+}
+
+/* At ≤520px: 2-row layout — brand+actions / status row */
+@media (max-width: 520px) {
+  .header__inner {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "brand  actions"
+      "status status";
+    gap: 6px 8px;
+  }
+  .header__left  { grid-area: brand; }
+  .header__right { grid-area: actions; }
+  .header__center {
+    grid-area: status;
+    font-size: 0.75rem;
+    gap: 8px;
+  }
+  /* On mobile hide "Последний новый" and check-status to keep status area compact */
+  .header__center > span:nth-child(2),
+  .header__center > span:nth-child(3),
+  .header__center > span:nth-child(4) { display: none; }
+  /* "Проверить сейчас" button — hide label, keep icon */
+  .header__right .btn:not(.btn--ghost) { padding: 0; width: 32px; font-size: 0; }
+  .header__right .btn:not(.btn--ghost) svg { display: block; }
+}
+
 /* ---------- skeleton ---------- */
 .skel { background: linear-gradient(90deg, var(--surface-2) 0%, color-mix(in oklab, var(--surface-2) 70%, var(--line)) 50%, var(--surface-2) 100%); background-size: 200% 100%; animation: skel 1.2s ease-in-out infinite; border-radius: 4px; }
 @keyframes skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
@@ -654,8 +716,9 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
 }
 
 /* Sticky "↑ N new above" jump pill — overrides earlier rule for fixed positioning */
+/* top: 56px matches the header height (53px content + 3px buffer) after header redesign */
 .jump-new {
-  position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+  position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
   z-index: 50;
   background: var(--hot); color: #fff;
   border: 0;
@@ -729,14 +792,16 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
    ===================================================================== */
 
 /* ---------- header-divider ---------- */
-/* Vertical separator between header zones (CSS class, NOT inline style). */
+/* Vertical separator between header zones (CSS class, NOT inline style).
+   margin: 0 — spacing is handled by the parent flex gap, not the divider itself. */
 .header-divider {
   width: 1px; height: 20px;
   background: var(--color-border, var(--line));
-  margin: 0 12px;
+  margin: 0;
   display: inline-block;
   vertical-align: middle;
   flex: none;
+  align-self: center;
 }
 
 /* ---------- .header__left ---------- */
