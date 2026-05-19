@@ -485,12 +485,12 @@ code, kbd, .mono { font-family: var(--font-mono); }
 /* ---------- cycle-result inline feedback ---------- */
 .cycle-result-host {
   font-size: 0.8125rem;
-  max-width: 220px;
+  min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink-2);
-  flex-shrink: 1;
   align-self: center;
 }
 .cycle-result { display: inline-block; }
