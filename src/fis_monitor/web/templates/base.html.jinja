@@ -101,24 +101,30 @@
 
       <span class="header-divider" aria-hidden="true"></span>
 
-      {# Browser notification permission button.
-         data-notif-perm holds the current Notification.permission value
-         ('default' | 'granted' | 'denied' | 'unavailable').
-         JS (app.js initNotifPermButton) reads and updates it on load + after requestPermission. #}
-      <button id="notif-perm-btn"
-              class="btn btn--sm btn--ghost btn--icon notif-perm-btn"
-              type="button"
-              data-notif-perm="default"
-              aria-label="Включить браузерные уведомления о новых лотах"
-              title="Нажмите, чтобы включить уведомления">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
-      </button>
+      {# Actions group: notification + settings icon buttons.
+         Grouped for visual cohesion and easy extension (SRP). #}
+      <div class="header__actions" role="group" aria-label="Действия">
 
-      {# Settings icon button (32×32) #}
-      <a class="btn btn--sm btn--ghost btn--icon" href="/settings"
-         title="Настройки" aria-label="Настройки">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
-      </a>
+        {# Browser notification permission button.
+           data-notif-perm holds the current Notification.permission value
+           ('default' | 'granted' | 'denied' | 'unavailable').
+           JS (app.js initNotifPermButton) reads and updates it on load + after requestPermission. #}
+        <button id="notif-perm-btn"
+                class="btn btn--sm btn--ghost btn--icon notif-perm-btn"
+                type="button"
+                data-notif-perm="default"
+                aria-label="Включить браузерные уведомления о новых лотах"
+                title="Нажмите, чтобы включить уведомления">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+        </button>
+
+        {# Settings icon button #}
+        <a class="btn btn--sm btn--ghost btn--icon" href="/settings"
+           title="Настройки" aria-label="Настройки">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        </a>
+
+      </div>{# /.header__actions #}
 
       <button class="btn btn--sm" type="button"
               hx-post="/cycle/run"

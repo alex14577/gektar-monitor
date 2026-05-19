@@ -54,3 +54,4 @@ data
 .beads/interactions.jsonl
 beads-dump.jsonl
 data.save
+.playwright-mcp/

@@ -961,13 +961,13 @@ class SseCycleStarted(BaseModel):
     """Normal event: monitor cycle began execution (hiq3).
 
     Published once at the very start of ``MonitorCycleService.run_cycle``,
-    before any I/O, so the UI pulse-dot can switch from «idle» to «checking»
-    state.  Pair with ``SseCycleDone``: one ``cycle.started`` per run, one
-    ``cycle.done`` per run (emitted from ``_publish_cycle_done`` in every
-    ``_close_with_*`` helper).
+    before any I/O. Pair with ``SseCycleDone``: one ``cycle.started`` per
+    run, one ``cycle.done`` per run (emitted from ``_publish_cycle_done``
+    in every ``_close_with_*`` helper).
 
-    SSE name: ``cycle.started``.
-    JS handler: ``data-state="checking"`` on the ``.check-status`` span.
+    SSE name: ``cycle.started``. The header pulse-dot UI consumer was
+    removed in lw5s; events stay on the stream for telemetry / future
+    re-use.
 
     No PII: timestamp and numeric cycle id only.
     """

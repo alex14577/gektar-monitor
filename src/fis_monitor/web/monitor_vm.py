@@ -53,7 +53,8 @@ def build_monitor_vm(
         now: injected wallclock (UTC-aware) so tests don't drift.
 
     Countdown fields (``next_cycle_mmss``, ``next_fire_at_iso``) are removed
-    by hiq3 — superseded by the pulse-dot pattern (ADR-050).
+    by hiq3 — superseded by binary cycle.started / cycle.done events
+    (ADR-050; UI pulse-dot consumer further removed in lw5s).
     """
     last_new = lot_repo.latest_new_first_seen()
     last_new_human = (

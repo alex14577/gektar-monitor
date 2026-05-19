@@ -4,7 +4,6 @@
    - SSE-listener stub (with comment markers)
    - IntersectionObserver "seen" reporter for [NEW] badge
    - aria-live announcements
-   - pulse-dot status indicator
    - star, expand/collapse toggles (UI only)
    - lot freshness flash, sticky "N new above" pill, scroll persistence
    - escalation progress, since-arrived counter
@@ -177,25 +176,6 @@
       (cta || lot).appendChild(area);
     }
     area.focus();
-  });
-
-  // ---------- pulse-dot: SSE cycle.started / cycle.done (hiq3, ADR-050) ----------
-  // Replaces the countdown setInterval removed by hiq3.
-  // .check-status[data-state] is toggled by SSE events:
-  //   cycle.started → data-state="checking"  (JS triggers this via htmx:sseMessage)
-  //   cycle.done    → data-state="idle"
-  //
-  // #header-status is replaced by sse-swap="status" so we re-resolve .check-status
-  // on every event (same pattern the old countdown used for [data-countdown]).
-  document.body.addEventListener('htmx:sseMessage', (e) => {
-    const type = e.detail && e.detail.type;
-    if (type === 'cycle.started') {
-      const dot = document.querySelector('.check-status');
-      if (dot) dot.dataset.state = 'checking';
-    } else if (type === 'cycle.done') {
-      const dot = document.querySelector('.check-status');
-      if (dot) dot.dataset.state = 'idle';
-    }
   });
 
   // ---------- SSE live-reconnect on view-filter change (m72b, ADR-052 resolved) ----------

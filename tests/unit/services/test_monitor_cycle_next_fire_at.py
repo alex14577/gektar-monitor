@@ -5,8 +5,9 @@ FakeEventBus per docs/architecture/09-test-strategy.md.
 
 Context: Replaces the countdown (bd r82m, ADR-048) tests now that ADR-050
 supersedes ADR-048. The countdown fields (next_fire_at, next_cycle_mmss)
-are removed from SseStatus. The pulse-dot pattern uses SseCycleStarted /
-SseCycleDone binary signals.
+are removed from SseStatus. Replaced by SseCycleStarted / SseCycleDone
+binary signals (UI pulse-dot consumer was further removed in lw5s; the
+events stay on the stream for telemetry and future consumers).
 
 Covered invariants:
 - ``SseCycleStarted`` is published at the start of ``run_cycle``.
@@ -106,7 +107,7 @@ class TestSseCycleStartedOnErrorPath:
     def test_cycle_started_and_done_published_on_parser_upstream_error(self) -> None:
         """SseCycleStarted AND SseCycleDone are published when parse() raises UpstreamError.
 
-        Invariant (y38m): the pulse-dot must never strand in «checking» state.
+        Invariant (y38m): every cycle.started MUST be paired with a cycle.done.
         Even if list_parser.parse raises UpstreamError (defensive path — current
         parser raises only ParseBugError/SessionExpiredError) — run_cycle must
         gracefully close the cycle with cycle.done, not re-raise.
@@ -123,9 +124,9 @@ class TestSseCycleStartedOnErrorPath:
         done = _done_events(bus.published)
         assert started, (
             "SseCycleStarted must be published on upstream error path so the "
-            "pulse-dot enters 'checking' state before the cycle fails"
+            "cycle boundary is visible to telemetry / SSE consumers"
         )
         assert done, (
-            "SseCycleDone must be published so the pulse-dot exits 'checking' "
-            "state — bug y38m regression guard"
+            "SseCycleDone must be published to close the cycle.started → "
+            "cycle.done pair — bug y38m regression guard"
         )
