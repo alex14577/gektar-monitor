@@ -17,7 +17,7 @@
 <span class="header-divider" aria-hidden="true"></span>
 <span style="font-size: 0.8125rem; color: var(--ink-2);">
   Последний новый:
-  <b title="{{ monitor.last_new_human }}{% if monitor.last_new_at_hhmm %} ({{ monitor.last_new_at_hhmm }}){% endif %}">{{ monitor.last_new_human }}</b>
+  <b>{{ monitor.last_new_human }}</b>
 </span>
 {# bd-bi7i: чип «Громче через ...» убран из UI — пользователю смысл непонятен,
    плюс он триггерился на backfilled-лотах (исторический догон). После

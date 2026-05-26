@@ -22,6 +22,7 @@
 - [[web/authentication]] — авторизация через ЕСИА, минимальный набор cookies
 - [[parser/cabinet-free-lot]] — структура страницы реестра, поля таблицы, фильтры
 - [[parser/donor-site-urls]] — карта URL сайта-донора, отсутствие публичного API
+- [[parser/pkk-deeplink]] — deep-link на кадастровую карту по кадастровому номеру (ПКК Росреестра + зеркало roscadastres.com)
 - [[parser/anti-bot]] — защит нет
 - [[ops/server-performance]] — измерения скорости, режим техработ
 

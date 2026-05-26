@@ -37,6 +37,7 @@ import threading
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Protocol
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -76,7 +77,7 @@ from fis_monitor.domain.regions import subject_id_by_title as _subject_id_by_tit
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
-from fis_monitor.services.humanize import humanize_relative_age as _humanize_relative_age
+from fis_monitor.services.humanize import format_local_time as _format_local_time
 
 if TYPE_CHECKING:
     from fis_monitor.services.notifier_dispatcher import NotifierDispatcher
@@ -737,11 +738,13 @@ class MonitorCycleService:
         try:
             now = self._clock.now()
             settings = self._config_source.current()
+            tz = ZoneInfo(settings.timezone)
+            now_local = now.astimezone(tz)
             last_new = self._lot_repo.latest_new_first_seen()
-            last_new_human = "—" if last_new is None else _humanize_relative_age(
-                now - last_new
+            last_new_human = (
+                "—" if last_new is None
+                else _format_local_time(last_new, tz, now_local)
             )
-            last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
             interval = int(settings.interval_minutes)
             state: Literal["active", "error"] = "error" if result.status == "error" else "active"
             self._event_bus.publish(
@@ -750,7 +753,6 @@ class MonitorCycleService:
                     state=state,
                     interval_minutes=interval,
                     last_new_human=last_new_human,
-                    last_new_at_hhmm=last_new_at_hhmm,
                     expires_at_hhmm="",
                 )
             )

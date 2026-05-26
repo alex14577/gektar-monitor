@@ -750,6 +750,34 @@ def test_lot_message_body_contains_url():
     assert "42" in content
     # Plain-text only — must not be multipart
     assert not msg.is_multipart(), "Message must remain plain-text, not multipart"
+    # T26b — cadastral_no present → map line included (colons literal, not URL-encoded)
+    cadastral_no = lot.cadastral_no
+    assert cadastral_no, "fixture must have a non-empty cadastral_no"
+    expected_map_line = f"Карта: https://ik5map.roscadastres.com/map.html?cn={cadastral_no}"
+    assert expected_map_line in content, (
+        f"Map line not found in body: {content!r}"
+    )
+
+
+def test_lot_message_body_no_map_line_when_no_cadastral_no():
+    """T26c — cadastral_no='' → no 'Карта:' line in email body."""
+    lot = _make_lot(id=5, cadastral_no="")
+    notifier, _, _ = _make_notifier()
+    m = _mock_starttls_smtp()
+    captured: list[EmailMessage] = []
+    m.send_message.side_effect = captured.append
+    with patch("smtplib.SMTP", return_value=m), \
+         patch("ssl.create_default_context") as mssl:
+        mssl.return_value.wrap_socket.return_value = MagicMock()
+        notifier.send(lot, _RECIPIENT)
+    assert captured
+    msg = captured[0]
+    body = msg.get_body()
+    assert body is not None
+    content = body.get_content()
+    assert "Карта:" not in content, (
+        f"'Карта:' line must be absent when cadastral_no is empty, got: {content!r}"
+    )
 
 
 def test_quit_failure_calls_close():

@@ -62,6 +62,92 @@ class TestLotViewModelWasNew:
         assert vm.was_new is True
 
 
+class TestLotViewModelUrlCadMap:
+    """url_cad_map property invariants on LotViewModel."""
+
+    def test_url_cad_map_format_with_colons(self) -> None:
+        """url_cad_map returns ?cn= URL with literal colons for a valid cadastral_no."""
+        dto = _make_lot_dto()
+        vm = LotViewModel(dto)
+        assert vm.url_cad_map == "https://ik5map.roscadastres.com/map.html?cn=01:02:000000:1"
+        assert "%3A" not in (vm.url_cad_map or ""), "Colons must not be URL-encoded"
+
+    def test_url_cad_map_none_when_empty_cadastral_no(self) -> None:
+        """url_cad_map is None when cadastral_no is empty — button must be suppressed."""
+        lot = Lot(
+            id=2,
+            cadastral_no="",
+            area_sqm=None,
+            region="R",
+            municipality=None,
+            land_category=None,
+            permitted_use=None,
+            ogv=None,
+            status="active",
+            date_create=_TS,
+            date_update=None,
+            lat=55.7,
+            lon=37.6,
+            has_boundaries=None,
+            raw_json={},
+            first_seen=_TS,
+            last_seen=_TS,
+            detail_fetched_at=None,
+            enrichment_status=None,
+            last_seen_at=None,
+        )
+        dto = LotPublicDTO(**lot.model_dump(), age_seconds=0, tier="match", freshness="hot")
+        vm = LotViewModel(dto)
+        assert vm.url_cad_map is None
+
+    def test_url_cad_map_ignores_lat_lon(self) -> None:
+        """url_cad_map must not depend on lat/lon — only on cadastral_no."""
+        lot = Lot(
+            id=3,
+            cadastral_no="77:01:0006004:14",
+            area_sqm=None,
+            region="R",
+            municipality=None,
+            land_category=None,
+            permitted_use=None,
+            ogv=None,
+            status="active",
+            date_create=_TS,
+            date_update=None,
+            lat=None,
+            lon=None,
+            has_boundaries=None,
+            raw_json={},
+            first_seen=_TS,
+            last_seen=_TS,
+            detail_fetched_at=None,
+            enrichment_status=None,
+            last_seen_at=None,
+        )
+        dto = LotPublicDTO(**lot.model_dump(), age_seconds=0, tier="match", freshness="hot")
+        vm = LotViewModel(dto)
+        assert vm.url_cad_map == "https://ik5map.roscadastres.com/map.html?cn=77:01:0006004:14"
+
+    def test_rendered_html_contains_cad_map_link(self) -> None:
+        """SSE-rendered poster must include the Роскадастр deep-link and label."""
+        templates = build_templates()
+        encoder = make_html_sse_encoder(templates.env)
+
+        dto = _make_lot_dto()
+        event = SseLotNew(lot=dto, fragment_template="poster")
+        payload = encoder(event).decode()
+
+        assert "ik5map.roscadastres.com" in payload, (
+            f"Expected roscadastres deep-link in rendered HTML.\nGot:\n{payload}"
+        )
+        assert "На карту Роскадастр" in payload, (
+            f"Expected label 'На карту Роскадастр' in rendered HTML.\nGot:\n{payload}"
+        )
+        assert "pkk.rosreestr.ru" not in payload, (
+            f"Old PKK URL must be gone from rendered HTML.\nGot:\n{payload}"
+        )
+
+
 class TestSseLotNewRenderedHtml:
     """make_html_sse_encoder renders lot-card--new class for SseLotNew events."""
 
@@ -85,14 +171,14 @@ class TestSseLotNewRenderedHtml:
         )
 
 
-class TestSseStatusTooltip:
-    """SseStatus tooltip invariant: last_new_at_hhmm must appear in rendered title."""
+class TestSseStatusAbsoluteTime:
+    """SseStatus absolute-time invariant: last_new_human is rendered verbatim in the chip."""
 
-    def test_status_event_renders_hhmm_tooltip(self) -> None:
-        """SseStatus with last_new_at_hhmm='14:23' must render title containing '(14:23)'.
+    def test_status_event_renders_last_new_human(self) -> None:
+        """SseStatus.last_new_human must appear verbatim in the rendered header chip.
 
-        Invariant: the absolute-time tooltip must survive SSE status updates,
-        not only the initial page render (regression for hiq3 fix).
+        Invariant: the absolute local-time string (e.g. '17:35') must survive
+        SSE status updates, not only the initial page render.
         """
         templates = build_templates()
         encoder = make_html_sse_encoder(templates.env)
@@ -101,15 +187,14 @@ class TestSseStatusTooltip:
             timestamp=_TS,
             state="active",
             interval_minutes=5,
-            last_new_human="47 мин назад",
-            last_new_at_hhmm="14:23",
+            last_new_human="17:35",
             expires_at_hhmm="",
         )
 
         payload = encoder(event).decode()
 
-        assert "(14:23)" in payload, (
-            f"Expected '(14:23)' in SSE-rendered header-status HTML for SseStatus.\n"
+        assert "17:35" in payload, (
+            f"Expected '17:35' (last_new_human) in SSE-rendered header-status HTML.\n"
             f"Got payload:\n{payload}"
         )
 

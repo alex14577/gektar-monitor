@@ -51,6 +51,7 @@ from fis_monitor.domain.interfaces import (
     ConfigSource,
     SmtpCredentialsRepository,
 )
+from fis_monitor.domain.map_links import roscadastres_map_url
 from fis_monitor.domain.models import (
     LotPublicDTO,
     NotifierConfig,
@@ -258,11 +259,14 @@ class SmtpEmailNotifier:
         msg["Subject"] = f"FIS Monitor — лот #{lot.id} обновлён"
         msg["Message-ID"] = self._make_message_id(lot.id, recipient)
         url = self._url_builder.lot_detail_url(lot_id=lot.id)
+        map_url = roscadastres_map_url(lot.cadastral_no)
+        map_line = f"Карта: {map_url}\n" if map_url is not None else ""
         msg.set_content(
             f"Лот #{lot.id} изменил статус.\n\n"
             f"Регион: {lot.region}\n"
             f"Статус: {lot.status}\n"
             f"Ссылка: {url}\n"
+            f"{map_line}"
         )
         return msg
 

@@ -1015,8 +1015,6 @@ class SseStatus(BaseModel):
     state: Literal["active", "warning", "error", "paused"]
     interval_minutes: StrictInt
     last_new_human: str = "—"
-    last_new_at_hhmm: str = ""
-    """Absolute HH:MM for tooltip (alongside `last_new_human`). Empty if no lot seen yet."""
     expires_at_hhmm: str = ""
 
 

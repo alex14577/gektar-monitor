@@ -83,7 +83,13 @@ _NBSP = chr(0xa0)
 
 
 def _parse_date(s: str | None) -> datetime | None:
-    """Parse DD.MM.YYYY string to UTC-aware datetime (midnight UTC)."""
+    """Parse DD.MM.YYYY string to UTC-aware datetime (midnight UTC).
+
+    Invariant: the returned value is ALWAYS UTC-aware with microsecond=0 (midnight).
+    Do NOT introduce naive or sub-second ``date_create`` values here — the composite
+    keyset cursor in ``lot_query.py`` relies on a byte-stable ``isoformat()`` round-trip
+    between this value and the TEXT stored in the DB column.
+    """
     if not s:
         return None
     s = s.strip()

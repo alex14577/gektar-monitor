@@ -14,9 +14,17 @@ than in a new ``LotRepository.list_filtered()`` method.  Rationale:
   repo method is straightforward when needed (mark as "TODO: extract to
   LotRepository.list_filtered when FTS is added").
 
-**Pagination:** cursor = opaque base64(str(lot_id)).  ``id ASC`` order gives
-stable keyset pagination — inserting new lots at higher IDs never shifts
-pages already consumed.
+**Pagination:** cursor = opaque base64(``<date_create_iso>:<lot_id>``).
+The sort key is ``(date_create, id)``; the composite keyset cursor carries
+both values so pages remain correct even when many lots share the same
+``date_create``.
+
+- DESC: ``WHERE (date_create < ?) OR (date_create = ? AND id < ?)``
+- ASC:  ``WHERE (date_create > ?) OR (date_create = ? AND id > ?)``
+
+``date_create`` is stored as ISO-8601 text (via ``_iso()`` in the
+repository), which makes lexicographic and chronological order equivalent.
+The column is ``NOT NULL`` in the schema, so no sentinel handling is needed.
 
 **FTS:** ``LotFilters.fts_query`` raises ``NotImplementedError``.
 Full-text search is deferred to a follow-up task (P2).
@@ -29,6 +37,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -53,9 +62,9 @@ _PAGE_SIZE_MIN = 1
 _PAGE_SIZE_MAX = 200
 
 # Age thresholds for freshness/tier computation.
-_AGE_HOT_SECS = 3_600  # < 1 hour  → hot
-_AGE_WARM_SECS = 86_400  # < 1 day   → warm
-# ≥ 1 day → cold
+_AGE_HOT_SECS = 3_600  # < 1 hour  -> hot
+_AGE_WARM_SECS = 86_400  # < 1 day   -> warm
+# >= 1 day -> cold
 
 # Lot status whitelist (matches known values in the ``lots`` table).
 _KNOWN_STATUSES: frozenset[str] = frozenset({"Свободен", "Зарезервирован"})
@@ -69,7 +78,7 @@ _KNOWN_STATUSES: frozenset[str] = frozenset({"Свободен", "Зарезер
 class LotFilters:
     """Server-side filter criteria for ``LotQueryService.search``.
 
-    All fields are optional — omitting them means "no restriction on this
+    All fields are optional -- omitting them means "no restriction on this
     dimension".
 
     ``regions``: whitelist of integer region codes.  The ``lots.region``
@@ -86,7 +95,7 @@ class LotFilters:
     ``status``: must be one of the known status strings or ``None``.
     Pass ``None`` to show all statuses.
 
-    ``fts_query``: raises ``NotImplementedError`` — deferred to P2.
+    ``fts_query``: raises ``NotImplementedError`` -- deferred to P2.
     """
 
     regions: tuple[int, ...] = ()
@@ -133,24 +142,46 @@ class Page[T]:
 # ---------------------------------------------------------------------------
 
 
-def _encode_cursor(lot_id: int) -> str:
-    """Encode a lot_id into an opaque base64 cursor string."""
-    return base64.urlsafe_b64encode(str(lot_id).encode()).decode()
+def _encode_cursor(date_create: datetime, lot_id: int) -> str:
+    """Encode a ``(date_create, lot_id)`` pair into an opaque base64 cursor string.
+
+    The payload format is ``<date_create_iso>:<lot_id>`` -- both components are
+    needed for the composite keyset cursor (sort key is ``(date_create, id)``).
+
+    Invariant: ``date_create.isoformat()`` must be byte-identical to the TEXT
+    stored in the ``lots.date_create`` column; the tie-branch comparison
+    ``date_create = ?`` silently skips boundary rows otherwise.  This holds
+    because ``list_parser._parse_date`` always produces UTC-aware midnight values
+    (microsecond=0).  See that function's docstring before adding new write paths.
+    """
+    payload = f"{date_create.isoformat()}:{lot_id}"
+    return base64.urlsafe_b64encode(payload.encode()).decode()
 
 
-def _decode_cursor(cursor: str) -> int:
-    """Decode an opaque cursor back to a lot_id.
+def _decode_cursor(cursor: str) -> tuple[str, int]:
+    """Decode an opaque cursor back to ``(date_create_iso, lot_id)``.
 
-    Raises ``ValueError`` if the cursor is malformed.
+    Returns a ``(date_create_iso, lot_id)`` pair where ``date_create_iso`` is the
+    ISO-8601 string as stored in the DB (lexicographically sortable).
+
+    Raises ``ValueError`` if the cursor is malformed or the payload format is invalid.
     """
     try:
-        return int(base64.urlsafe_b64decode(cursor.encode()).decode())
+        payload = base64.urlsafe_b64decode(cursor.encode()).decode()
+        # Split on the LAST colon so the ISO datetime part (which may contain '+')
+        # is preserved intact.
+        sep = payload.rfind(":")
+        if sep == -1:
+            raise ValueError("missing separator")
+        date_iso = payload[:sep]
+        lot_id = int(payload[sep + 1 :])
+        return date_iso, lot_id
     except Exception as exc:
         raise ValueError(f"Invalid page cursor: {cursor!r}") from exc
 
 
 # ---------------------------------------------------------------------------
-# Lot → DTO helpers
+# Lot -> DTO helpers
 # ---------------------------------------------------------------------------
 
 _LOT_SELECT = (
@@ -218,7 +249,7 @@ class LotQueryService:
     All writes are done by other services (``MonitorCycleService``, etc.).
     This service only reads.
 
-    Dependencies (all injected via constructor — DI, SOLID-D):
+    Dependencies (all injected via constructor -- DI, SOLID-D):
     - ``lot_repo``: used as a fallback for ``get()`` calls (currently unused
       in the hot path; kept for future single-lot enrichment).
     - ``user_state_repo``: per-lot user state merged into ``LotUserDTO``.
@@ -289,8 +320,8 @@ class LotQueryService:
                 "Leave fts_query=None for MVP filtering."
             )
 
-        last_id = _decode_cursor(cursor) if cursor is not None else None
-        sql, params = self._build_query(filters, last_id=last_id, limit=page_size + 1)
+        last_cursor = _decode_cursor(cursor) if cursor is not None else None
+        sql, params = self._build_query(filters, last_cursor=last_cursor, limit=page_size + 1)
 
         conn = self._conn_provider.get()
         cur = conn.execute(sql, params)
@@ -302,18 +333,21 @@ class LotQueryService:
 
         lots = [row_to_lot(r) for r in page_rows]
 
-        # Single get_many() call — eliminates N+1 query per lot.
+        # Single get_many() call -- eliminates N+1 query per lot.
         lot_ids = [lot.id for lot in lots]
         user_states: dict[int, LotUserState] = (
             self._user_state_repo.get_many(lot_ids) if lot_ids else {}
         )
 
         now_ts = self._clock.now().timestamp()
-        items = tuple(_lot_to_user_dto(lot, user_states.get(lot.id), now_ts=now_ts) for lot in lots)
+        items = tuple(
+            _lot_to_user_dto(lot, user_states.get(lot.id), now_ts=now_ts) for lot in lots
+        )
 
         next_cursor: str | None = None
         if has_more and lots:
-            next_cursor = _encode_cursor(lots[-1].id)
+            last_lot = lots[-1]
+            next_cursor = _encode_cursor(last_lot.date_create, last_lot.id)
 
         return Page(items=items, next_cursor=next_cursor, has_more=has_more)
 
@@ -325,7 +359,7 @@ class LotQueryService:
         self,
         filters: LotFilters,
         *,
-        last_id: int | None,
+        last_cursor: tuple[str, int] | None,
         limit: int,
     ) -> tuple[str, list[Any]]:
         """Build the parameterised SELECT statement for ``search``.
@@ -333,12 +367,14 @@ class LotQueryService:
         Returns ``(sql, params)`` ready for ``conn.execute(sql, params)``.
 
         Filter mapping:
-        - ``regions``: ``lots.region IN (?, ...)`` — region codes cast to str.
-        - ``subject_display_names``: ``lots.region IN (?, ...)`` — display names
+        - ``regions``: ``lots.region IN (?, ...)`` -- region codes cast to str.
+        - ``subject_display_names``: ``lots.region IN (?, ...)`` -- display names
           matched directly against the TEXT ``lots.region`` column.
         - ``area_sqm_min`` / ``area_sqm_max``: mapped to ``lots.area_sqm``.
         - ``status``: exact ``lots.status = ?`` match.
-        - ``cursor``: ``lots.id > ?`` keyset condition.
+        - ``cursor``: composite keyset on ``(date_create, id)``:
+            DESC: ``(date_create < ?) OR (date_create = ? AND id < ?)``
+            ASC:  ``(date_create > ?) OR (date_create = ? AND id > ?)``
         """
         conditions: list[str] = ["is_active = 1"]
         params: list[Any] = []
@@ -365,15 +401,23 @@ class LotQueryService:
             conditions.append("status = ?")
             params.append(filters.status)
 
-        if last_id is not None:
-            conditions.append("id > ?")
-            params.append(last_id)
+        if last_cursor is not None:
+            last_date_iso, last_id = last_cursor
+            if filters.sort_dir == "desc":
+                conditions.append(
+                    "(date_create < ? OR (date_create = ? AND id < ?))"
+                )
+            else:
+                conditions.append(
+                    "(date_create > ? OR (date_create = ? AND id > ?))"
+                )
+            params.extend([last_date_iso, last_date_iso, last_id])
 
         where = " AND ".join(conditions)
         order_dir = filters.sort_dir.upper()  # "DESC" or "ASC"
         sql = (
             f"SELECT {_LOT_SELECT} FROM lots WHERE {where} "
-            f"ORDER BY first_seen {order_dir}, id {order_dir} LIMIT ?"
+            f"ORDER BY date_create {order_dir}, id {order_dir} LIMIT ?"
         )
         params.append(limit)
 

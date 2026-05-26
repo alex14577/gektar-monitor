@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from fis_monitor.domain.models import Settings
@@ -62,61 +62,16 @@ def test_last_new_human_dash_when_db_empty() -> None:
     assert vm.last_new_human == "—"
 
 
-def test_last_new_human_real_age_from_repo() -> None:
-    """bd 47uh acceptance: chip reflects actual MAX(first_seen)."""
+def test_last_new_human_shows_local_time_from_repo() -> None:
+    """build_monitor_vm shows absolute local time (Europe/Moscow) from MAX(first_seen)."""
     from fis_monitor.domain.models import Lot
 
     repo = FakeLotRepository()
-    five_min_ago = _NOW - timedelta(minutes=5)
+    # 14:35 UTC = 17:35 Europe/Moscow (UTC+3)
+    ts = datetime(2026, 5, 18, 14, 35, 0, tzinfo=UTC)
     lot = Lot.model_construct(
         id=1,
         cadastral_no="00:00:000000:1",
-        area_sqm=None,
-        region="Test",
-        municipality=None,
-        land_category=None,
-        permitted_use=None,
-        ogv=None,
-        status="active",
-        date_create=_NOW,
-        date_update=None,
-        date_registry=None,
-        lat=None,
-        lon=None,
-        has_boundaries=None,
-        raw_json={},
-        parser_version=1,
-        first_seen=five_min_ago,
-        last_seen=_NOW,
-        detail_fetched_at=None,
-        enrichment_status="pending",
-        last_seen_at=_NOW,
-        is_active=True,
-        inactive_reason=None,
-        inactive_since=None,
-        inactive_confirmed_at=None,
-        region_id=None,
-    )
-    repo._lots[1] = lot
-
-    vm = build_monitor_vm(
-        settings=Settings(),
-        session=_session(),
-        lot_repo=repo,
-        now=_NOW,
-    )
-    assert vm.last_new_human == "5 мин назад"
-
-
-def test_last_new_at_hhmm_when_lot_exists() -> None:
-    """build_monitor_vm computes last_new_at_hhmm as HH:MM from first_seen (m1)."""
-    from fis_monitor.domain.models import Lot
-
-    repo = FakeLotRepository()
-    ts = datetime(2026, 5, 18, 14, 35, 0, tzinfo=UTC)  # 14:35 UTC
-    lot = Lot.model_construct(
-        id=2,
-        cadastral_no="00:00:000000:2",
         area_sqm=None,
         region="Test",
         municipality=None,
@@ -143,28 +98,21 @@ def test_last_new_at_hhmm_when_lot_exists() -> None:
         inactive_confirmed_at=None,
         region_id=None,
     )
-    repo._lots[2] = lot
+    repo._lots[1] = lot
 
+    # _NOW = 2026-05-18 12:00 UTC = 15:00 Moscow; same date → HH:MM only
     vm = build_monitor_vm(
-        settings=Settings(),
+        settings=Settings(),  # timezone="Europe/Moscow" default
         session=_session(),
         lot_repo=repo,
         now=_NOW,
     )
-    assert vm.last_new_at_hhmm == "14:35", (
-        f"Expected '14:35' from first_seen 14:35 UTC, got {vm.last_new_at_hhmm!r}"
+    assert vm.last_new_human == "17:35", (
+        f"Expected '17:35' (14:35 UTC → Europe/Moscow +3), got {vm.last_new_human!r}"
     )
-
-
-def test_last_new_at_hhmm_empty_when_db_empty() -> None:
-    """build_monitor_vm returns last_new_at_hhmm='' when no lots in DB (m1)."""
-    vm = build_monitor_vm(
-        settings=Settings(),
-        session=_session(),
-        lot_repo=FakeLotRepository(),
-        now=_NOW,
+    assert not hasattr(vm, "last_new_at_hhmm"), (
+        "last_new_at_hhmm removed from monitor_vm; last_new_human carries the absolute time"
     )
-    assert vm.last_new_at_hhmm == ""
 
 
 # ---------------------------------------------------------------------------

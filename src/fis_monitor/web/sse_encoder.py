@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment
 
+from fis_monitor.domain.map_links import roscadastres_map_url
 from fis_monitor.domain.models import (
     LotPublicDTO,
     LotUserDTO,
@@ -151,15 +152,9 @@ class LotViewModel:
         return f"/lots/{self._dto.id}/redirect"
 
     @property
-    def url_pkk(self) -> str | None:
-        """PKK Росреестр map link — requires lat/lon."""
-        lat = self._dto.lat
-        lon = self._dto.lon
-        if lat is None or lon is None:
-            return None
-        return (
-            f"https://pkk.rosreestr.ru/#/search/{lat},{lon}/17?text={self._dto.cadastral_no}&type=1"
-        )
+    def url_cad_map(self) -> str | None:
+        """Роскадастр deep-link — requires only cadastral_no (no lat/lon needed)."""
+        return roscadastres_map_url(self._dto.cadastral_no)
 
     @property
     def coords_decimal(self) -> str:

@@ -17,10 +17,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from fis_monitor.domain.interfaces import LotRepository
 from fis_monitor.domain.models import Settings
-from fis_monitor.services.humanize import humanize_relative_age
+from fis_monitor.services.humanize import format_local_time
 
 
 def _state_from_session(session: SimpleNamespace) -> str:
@@ -45,7 +46,8 @@ def build_monitor_vm(
     """Build the header-status view-model for an initial template render.
 
     Args:
-        settings: live ``Settings`` snapshot — supplies ``interval_minutes``.
+        settings: live ``Settings`` snapshot — supplies ``interval_minutes``
+            and ``timezone`` (used to convert UTC lot timestamps to local time).
         session: the same ``session`` namespace that the layout uses for
             expiry rendering. Provides ``expires_at_hhmm`` (best-effort,
             may be empty until ``HttpSessionProbe`` is wired).
@@ -56,16 +58,16 @@ def build_monitor_vm(
     by hiq3 — superseded by binary cycle.started / cycle.done events
     (ADR-050; UI pulse-dot consumer further removed in lw5s).
     """
+    tz = ZoneInfo(settings.timezone)
+    now_local = now.astimezone(tz)
     last_new = lot_repo.latest_new_first_seen()
     last_new_human = (
-        "—" if last_new is None else humanize_relative_age(now - last_new)
+        "—" if last_new is None else format_local_time(last_new, tz, now_local)
     )
-    last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
 
     return SimpleNamespace(
         state=_state_from_session(session),
         interval_minutes=settings.interval_minutes,
         last_new_human=last_new_human,
-        last_new_at_hhmm=last_new_at_hhmm,
         expires_at_hhmm=getattr(session, "expires_at_hhmm", ""),
     )

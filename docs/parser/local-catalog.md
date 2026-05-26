@@ -19,7 +19,7 @@
 
 ### Расчётные поля (вычисляются у нас)
 - **Десятичные координаты** из ДМС
-- **Ссылка на ПКК Росреестра**: `https://pkk.rosreestr.ru/#/search/56.0,90.0/16?text={кадастр}&type=1`
+- **Ссылка на ПКК Росреестра**: `https://pkk.rosreestr.ru/#/search/56.0,90.0/16?text={кадастр}&type=1` (форматы и зеркало — см. [[parser/pkk-deeplink]])
 - **Ссылка на Яндекс.Карты**: `https://yandex.ru/maps/?ll={lon},{lat}&z=16&pt={lon},{lat}`
 - **Ссылка на OpenStreetMap**: `https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=16`
 - **Площадь в гектарах**: округление до 2 знаков для UX

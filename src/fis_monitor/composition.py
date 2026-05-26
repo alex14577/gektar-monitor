@@ -32,6 +32,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -78,7 +79,7 @@ from fis_monitor.services.dnd import DndService
 from fis_monitor.services.enrichment import EnrichmentService
 from fis_monitor.services.filter_matcher import RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
-from fis_monitor.services.humanize import humanize_relative_age as _humanize_relative_age
+from fis_monitor.services.humanize import format_local_time as _format_local_time
 from fis_monitor.services.login import LoginService
 from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.lot_user_state import LotUserStateService
@@ -155,16 +156,19 @@ def make_login_success_callback(
         try:
             now = _clock.now()
             settings_for_status = _config.current()
+            tz = ZoneInfo(settings_for_status.timezone)
+            now_local = now.astimezone(tz)
             last_new = _repo.latest_new_first_seen()
-            last_new_human = "—" if last_new is None else _humanize_relative_age(now - last_new)
-            last_new_at_hhmm = "" if last_new is None else last_new.strftime("%H:%M")
+            last_new_human = (
+                "—" if last_new is None
+                else _format_local_time(last_new, tz, now_local)
+            )
             _bus.publish(
                 SseStatus(
                     timestamp=now,
                     state="active",
                     interval_minutes=int(settings_for_status.interval_minutes),
                     last_new_human=last_new_human,
-                    last_new_at_hhmm=last_new_at_hhmm,
                     expires_at_hhmm="",
                 )
             )

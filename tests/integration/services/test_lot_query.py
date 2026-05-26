@@ -66,13 +66,13 @@ def _make_db_row(
     first_seen: datetime = _FIRST_SEEN_HOT,
     is_active: int = 1,
     region_id: int | None = None,
+    date_create: datetime = _NOW,
 ) -> sqlite3.Row:
     """Build an in-memory sqlite3.Row matching the lots SELECT column list."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.execute(f"CREATE TABLE lots ({_LOT_COLS})")
     ts = first_seen.isoformat()
-    now_ts = _NOW.isoformat()
     conn.execute(
         "INSERT INTO lots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
@@ -85,7 +85,7 @@ def _make_db_row(
             None,  # permitted_use
             None,  # ogv
             status,
-            now_ts,  # date_create
+            date_create.isoformat(),  # date_create
             None,  # date_update
             None,  # date_registry
             None,
@@ -298,9 +298,15 @@ def test_fake_connection_provider_all_methods_called() -> None:
 
 
 def test_encode_decode_cursor_round_trip() -> None:
-    for lot_id in (1, 42, 999_999):
-        encoded = _encode_cursor(lot_id)
-        assert _decode_cursor(encoded) == lot_id
+    for lot_id, dt in [
+        (1, _NOW),
+        (42, _FIRST_SEEN_HOT),
+        (999_999, _FIRST_SEEN_COLD),
+    ]:
+        encoded = _encode_cursor(dt, lot_id)
+        date_iso, decoded_id = _decode_cursor(encoded)
+        assert decoded_id == lot_id
+        assert date_iso == dt.isoformat()
 
 
 def test_decode_cursor_malformed_raises_value_error() -> None:
@@ -309,8 +315,8 @@ def test_decode_cursor_malformed_raises_value_error() -> None:
 
 
 def test_decode_cursor_non_integer_content_raises_value_error() -> None:
-    # Valid base64 but not an integer
-    bad = base64.urlsafe_b64encode(b"abc").decode()
+    # Valid base64 but missing the colon separator → rfind returns -1 → ValueError
+    bad = base64.urlsafe_b64encode(b"nodatecreate").decode()
     with pytest.raises(ValueError, match="Invalid page cursor"):
         _decode_cursor(bad)
 
@@ -367,16 +373,20 @@ def _make_service(rows: list[sqlite3.Row] | None = None) -> LotQueryService:
     )
 
 
+_CURSOR_42 = (_NOW.isoformat(), 42)  # (date_create_iso, lot_id) for cursor tests
+_CURSOR_99 = (_NOW.isoformat(), 99)
+
+
 @pytest.mark.parametrize(
-    "filters,last_id,limit,expected_fragments,not_expected",
+    "filters,last_cursor,limit,expected_fragments,not_expected",
     [
-        # No filters — only is_active + LIMIT; default sort is first_seen DESC (hiq3)
+        # No filters — only is_active + LIMIT; default sort is date_create DESC
         (
             LotFilters(),
             None,
             10,
-            ["is_active = 1", "ORDER BY first_seen DESC", "LIMIT ?"],
-            ["region IN", "area_sqm >=", "area_sqm <=", "status =", "id >"],
+            ["is_active = 1", "ORDER BY date_create DESC", "LIMIT ?"],
+            ["region IN", "area_sqm >=", "area_sqm <=", "status =", "date_create <", "id <"],
         ),
         # Regions filter
         (
@@ -384,7 +394,7 @@ def _make_service(rows: list[sqlite3.Row] | None = None) -> LotQueryService:
             None,
             5,
             ["region IN (?, ?, ?)"],
-            ["area_sqm >=", "area_sqm <=", "id >"],
+            ["area_sqm >=", "area_sqm <=", "date_create <", "id <"],
         ),
         # area_sqm_min
         (
@@ -392,7 +402,7 @@ def _make_service(rows: list[sqlite3.Row] | None = None) -> LotQueryService:
             None,
             5,
             ["area_sqm >= ?"],
-            ["area_sqm <=", "id >"],
+            ["area_sqm <=", "date_create <", "id <"],
         ),
         # area_sqm_max
         (
@@ -418,15 +428,23 @@ def _make_service(rows: list[sqlite3.Row] | None = None) -> LotQueryService:
             ["status = ?"],
             [],
         ),
-        # Cursor (last_id)
+        # Cursor (desc) — composite keyset condition
         (
             LotFilters(),
-            42,
+            _CURSOR_42,
             5,
-            ["id > ?"],
-            [],
+            ["date_create < ?", "date_create = ? AND id < ?"],
+            ["date_create > ?", "id > ?"],
         ),
-        # All filters combined
+        # Cursor (asc) — composite keyset condition
+        (
+            LotFilters(sort_dir="asc"),
+            _CURSOR_42,
+            5,
+            ["date_create > ?", "date_create = ? AND id > ?"],
+            ["date_create < ?", "id < ?"],
+        ),
+        # All filters combined (desc cursor)
         (
             LotFilters(
                 regions=(7,),
@@ -434,22 +452,29 @@ def _make_service(rows: list[sqlite3.Row] | None = None) -> LotQueryService:
                 area_sqm_max=Decimal("1000"),
                 status="Зарезервирован",
             ),
-            99,
+            _CURSOR_99,
             20,
-            ["region IN (?)", "area_sqm >= ?", "area_sqm <= ?", "status = ?", "id > ?"],
+            [
+                "region IN (?)",
+                "area_sqm >= ?",
+                "area_sqm <= ?",
+                "status = ?",
+                "date_create < ?",
+                "date_create = ? AND id < ?",
+            ],
             [],
         ),
     ],
 )
 def test_build_query_sql_fragments(
     filters: LotFilters,
-    last_id: int | None,
+    last_cursor: tuple[str, int] | None,
     limit: int,
     expected_fragments: list[str],
     not_expected: list[str],
 ) -> None:
     svc = _make_service()
-    sql, params = svc._build_query(filters, last_id=last_id, limit=limit)
+    sql, params = svc._build_query(filters, last_cursor=last_cursor, limit=limit)
     for fragment in expected_fragments:
         assert fragment in sql, f"Expected {fragment!r} in SQL: {sql!r}"
     for fragment in not_expected:
@@ -460,7 +485,7 @@ def test_build_query_sql_fragments(
 
 def test_build_query_regions_params() -> None:
     svc = _make_service()
-    _sql, params = svc._build_query(LotFilters(regions=(10, 20)), last_id=None, limit=5)
+    _sql, params = svc._build_query(LotFilters(regions=(10, 20)), last_cursor=None, limit=5)
     assert "10" in params
     assert "20" in params
 
@@ -469,7 +494,7 @@ def test_build_query_area_sqm_params() -> None:
     svc = _make_service()
     _, params = svc._build_query(
         LotFilters(area_sqm_min=Decimal("100.9"), area_sqm_max=Decimal("500.1")),
-        last_id=None,
+        last_cursor=None,
         limit=5,
     )
     assert 100 in params  # truncated to int
@@ -531,10 +556,11 @@ def test_search_lot_with_user_state() -> None:
 
 
 def test_search_has_more_true_when_extra_row() -> None:
-    """Fetch page_size+1 rows → has_more=True, next_cursor set to last returned id.
+    """Fetch page_size+1 rows → has_more=True, next_cursor encodes (date_create, id).
 
-    hiq3: default sort is first_seen DESC, id DESC. With 6 rows having equal first_seen
-    the order is id DESC: 6,5,4,3,2,1. First page (5 items): 6,5,4,3,2. Last item id=2.
+    Default sort is date_create DESC, id DESC. All 6 rows share the same date_create
+    (NOW), so order is id DESC: 6,5,4,3,2,1. First page (5 items): 6,5,4,3,2.
+    Last item id=2. Cursor must encode (date_create_iso, 2).
     """
     rows = [_make_db_row(lot_id=i) for i in range(1, 7)]  # 6 rows
     svc = _make_service(rows=rows)
@@ -542,9 +568,11 @@ def test_search_has_more_true_when_extra_row() -> None:
     assert page.has_more is True
     assert page.next_cursor is not None
     assert len(page.items) == 5
-    # next_cursor encodes the last item id on the first page
-    # With equal first_seen values, ORDER BY id DESC → first page = [6,5,4,3,2], last=2
-    assert _decode_cursor(page.next_cursor) == 2
+    # next_cursor encodes the last item on the first page
+    # With equal date_create values, ORDER BY id DESC → first page = [6,5,4,3,2], last=2
+    date_iso, decoded_id = _decode_cursor(page.next_cursor)
+    assert decoded_id == 2
+    assert date_iso == _NOW.isoformat()
 
 
 def test_search_has_more_false_exact_page() -> None:
@@ -558,12 +586,21 @@ def test_search_has_more_false_exact_page() -> None:
 
 
 def test_search_cursor_decoding_used() -> None:
-    """Passing a cursor adds id > ? to the query and fetches from there."""
+    """Passing a cursor adds composite keyset condition and fetches correctly.
+
+    We construct a cursor at (future_date, 99) in DESC direction, meaning we want
+    rows with date_create < future_date OR (date_create = future_date AND id < 99).
+    The row at id=10 with date_create=NOW satisfies date_create < future_date → returned.
+    """
+    from datetime import timedelta
+
+    future = _NOW + timedelta(days=1)
     rows = [_make_db_row(lot_id=10)]
     svc = _make_service(rows=rows)
-    cursor = _encode_cursor(5)
+    # DESC cursor with date_create=future means: WHERE date_create < future OR ...
+    # Row with date_create=NOW satisfies date_create < future → returned
+    cursor = _encode_cursor(future, 99)
     page = svc.search(LotFilters(), cursor=cursor)
-    # Row with id=10 > 5, so it should be returned
     assert len(page.items) == 1
     assert page.items[0].id == 10
 
@@ -628,3 +665,84 @@ def test_search_region_id_propagates_to_dto() -> None:
     page = svc.search(LotFilters())
     assert len(page.items) == 1
     assert page.items[0].region_id == 1
+
+
+# ---------------------------------------------------------------------------
+# Cursor-correctness regression tests (composite keyset on date_create, id)
+# ---------------------------------------------------------------------------
+
+
+def _walk_all_pages(
+    svc: LotQueryService,
+    filters: LotFilters,
+    page_size: int = 3,
+) -> list[int]:
+    """Walk all pages using next_cursor and return the list of lot IDs in order."""
+    all_ids: list[int] = []
+    cursor: str | None = None
+    while True:
+        page = svc.search(filters, page_size=page_size, cursor=cursor)
+        all_ids.extend(dto.id for dto in page.items)
+        if not page.has_more:
+            break
+        cursor = page.next_cursor
+    return all_ids
+
+
+@pytest.mark.parametrize("sort_dir", ["desc", "asc"])
+def test_cursor_no_duplicates_no_gaps_distinct_dates(sort_dir: str) -> None:
+    """Walk > page_size rows with DISTINCT date_create — every row appears exactly once.
+
+    Invariant: unique == total and dupes == 0 for both sort directions.
+    """
+    from datetime import timedelta
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    # 10 rows each with a distinct date_create, 1 day apart; id = 1..10
+    rows = [
+        _make_db_row(lot_id=i, date_create=base + timedelta(days=i))
+        for i in range(1, 11)
+    ]
+    svc = _make_service(rows=rows)
+    ids = _walk_all_pages(svc, LotFilters(sort_dir=sort_dir), page_size=3)
+
+    assert len(ids) == 10, f"Expected 10 ids, got {len(ids)}: {ids}"
+    assert len(set(ids)) == 10, f"Duplicates found: {ids}"
+
+
+@pytest.mark.parametrize("sort_dir", ["desc", "asc"])
+def test_cursor_monotonic_order_distinct_dates(sort_dir: str) -> None:
+    """Concatenated pages are monotonically ordered by date_create."""
+    from datetime import timedelta
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = [
+        _make_db_row(lot_id=i, date_create=base + timedelta(days=i))
+        for i in range(1, 11)
+    ]
+    svc = _make_service(rows=rows)
+    ids = _walk_all_pages(svc, LotFilters(sort_dir=sort_dir), page_size=3)
+
+    # Recover date_create values for each id in returned order
+    # date_create for id=i is base + timedelta(days=i)
+    dates = [base + timedelta(days=i) for i in ids]
+    if sort_dir == "desc":
+        assert dates == sorted(dates, reverse=True), f"Not monotone DESC: {dates}"
+    else:
+        assert dates == sorted(dates), f"Not monotone ASC: {dates}"
+
+
+@pytest.mark.parametrize("sort_dir", ["desc", "asc"])
+def test_cursor_no_duplicates_no_gaps_tied_dates(sort_dir: str) -> None:
+    """Walk > page_size rows where ALL rows share the SAME date_create.
+
+    Invariant: no row skipped or duplicated across page boundaries.
+    The tie-breaking column is id, so pagination relies entirely on id ordering.
+    """
+    tied_date = datetime(2026, 3, 15, tzinfo=UTC)
+    rows = [_make_db_row(lot_id=i, date_create=tied_date) for i in range(1, 11)]
+    svc = _make_service(rows=rows)
+    ids = _walk_all_pages(svc, LotFilters(sort_dir=sort_dir), page_size=3)
+
+    assert len(ids) == 10, f"Expected 10 ids, got {len(ids)}: {ids}"
+    assert len(set(ids)) == 10, f"Duplicates found: {ids}"
