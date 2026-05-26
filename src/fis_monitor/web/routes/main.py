@@ -29,7 +29,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -56,8 +56,14 @@ from fis_monitor.web.deps import (
     get_user_state_repo,
     get_view_filters_service,
 )
-from fis_monitor.web.feed_context import build_feed_context
+from fis_monitor.web.feed_context import (
+    _FEED_PAGE_SIZE,
+    _view_filters_to_lot_filters,
+    build_feed_context,
+    lot_passes_only_new,
+)
 from fis_monitor.web.monitor_vm import build_monitor_vm
+from fis_monitor.web.sse_encoder import LotUserViewModel
 
 router = APIRouter(prefix="", tags=["main"])
 
@@ -250,3 +256,69 @@ def feed_page(
     }
 
     return templates.TemplateResponse(request, "feed.html.jinja", ctx)
+
+
+# ---------------------------------------------------------------------------
+# Load-more endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/feed/more", response_class=HTMLResponse, include_in_schema=False)
+def feed_more(
+    request: Request,
+    cursor: str = Query(..., description="Opaque keyset cursor from previous page"),
+    shown: int = Query(0, description="Running count of lots shown before this page"),
+    filters_svc: ViewFiltersService = Depends(get_view_filters_service),
+    lot_query: LotQueryService = Depends(get_lot_query),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """Return the next page of lot cards as an HTML partial.
+
+    Reads the same ``view_filters`` cookie as ``feed_page`` so filters never
+    diverge between the initial render and load-more pages.  Uses the shared
+    ``_view_filters_to_lot_filters`` adapter (DRY — no filter logic here).
+
+    Applies the same ``only_new`` post-filter via ``lot_passes_only_new``
+    (the single source of truth for that predicate).
+
+    ``shown`` is a stateless running counter threaded through the cursor URL by
+    each ``#load-more-trigger``.  The response template uses it to update the
+    ``#feed-lot-count`` OOB span so the filter-bar counter stays accurate as
+    lots accumulate.
+
+    Returns ``partials/_feed_more.html.jinja`` which loops lot cards and,
+    when ``next_cursor`` is not None, injects a fresh ``#load-more-trigger``
+    div so the user can continue paging.
+
+    Raises:
+        HTTPException(422): when the cursor is malformed (``lot_query.search``
+            raises ``ValueError``).  Consistent with the project convention
+            for invalid client-supplied input (see ``filters.py``).
+    """
+    # Read view_filters cookie — same logic as feed_page (DRY via shared svc).
+    cookie_value = request.cookies.get(_VIEW_FILTERS_COOKIE, "")
+    parsed_filters = filters_svc.deserialize(cookie_value) or ViewFilters()
+
+    lot_filters = _view_filters_to_lot_filters(parsed_filters)
+    try:
+        page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE, cursor=cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid cursor: {exc}") from exc
+
+    # Apply only_new post-filter (same predicate as _assemble_feed_zones).
+    visible: list[LotUserViewModel] = [
+        LotUserViewModel(dto)
+        for dto in page.items
+        if lot_passes_only_new(dto, only_new=parsed_filters.only_new)
+    ]
+
+    # shown_total = lots rendered before this page + lots on this page.
+    # Threaded through the &shown= param so the server stays stateless.
+    shown_total = shown + len(visible)
+
+    ctx = {
+        "lots": visible,
+        "next_cursor": page.next_cursor,
+        "shown_total": shown_total,
+    }
+    return templates.TemplateResponse(request, "partials/_feed_more.html.jinja", ctx)

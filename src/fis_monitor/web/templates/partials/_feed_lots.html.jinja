@@ -28,7 +28,7 @@
   </div>
   <div class="filter-bar__right">
     {% if zones.today %}
-    <span class="filter-bar__count">
+    <span id="feed-lot-count" class="filter-bar__count">
       {{ zones.today|length }} лот{{ 'а' if zones.today|length in [2,3,4] else ('' if zones.today|length == 1 else 'ов') }}
     </span>
     {% endif %}
@@ -65,6 +65,28 @@
       {% for lot in zones.today %}
         {% include "partials/_lot_poster.html.jinja" %}
       {% endfor %}
+
+      {# Load-more trigger — INSIDE <section class="zone"> so appended cards land
+         inside the same section.  outerHTML swap on #load-more-trigger replaces it
+         with (new cards + fresh trigger) — all siblings of the existing cards,
+         thus remaining inside the zone section. #}
+      {# SSE coexistence: SSE prepends at afterbegin (top of #feed), load-more sits
+         at the bottom of the zone section — the two DOM regions never collide. #}
+      {% if next_cursor %}
+      <div id="load-more-trigger"
+           hx-get="/feed/more?cursor={{ next_cursor | urlencode }}&amp;shown={{ zones.today | length }}"
+           hx-target="#load-more-trigger"
+           hx-swap="outerHTML"
+           hx-trigger="click from:#load-more-btn">
+        <button id="load-more-btn" class="btn btn--ghost btn--full" type="button"
+                style="justify-content: center; padding: 12px 16px;">
+          <span style="display:inline-flex; gap:8px; align-items:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            Показать ещё
+          </span>
+        </button>
+      </div>
+      {% endif %}
     </section>
   {% endif %}
 
@@ -80,22 +102,6 @@
     <p style="margin:0; color: var(--ink-2);">Загружаем первую партию лотов…</p>
     <p style="margin:6px 0 0; color: var(--muted); font-size:0.875rem;">Сервис обращается к сайту, это может занять до минуты.</p>
   </div>
-  {% endif %}
-
-  {# ARCHIVE (older + reveal-on-demand) — скрыто пока нечего показывать (archive_count stub=0). #}
-  {% if archive_count and archive_count > 0 %}
-  <section class="zone zone--archive" aria-label="Архив">
-    <button class="btn btn--ghost btn--full" type="button"
-            hx-get="/lots?page=2"
-            hx-target="closest .zone" hx-swap="outerHTML"
-            style="justify-content: space-between; padding: 12px 16px;">
-      <span style="display:inline-flex; gap:10px; align-items:center;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-        Показать ещё <b style="margin-left: 4px;">{{ archive_count }}</b> старых лотов из базы
-      </span>
-      <span style="color: var(--muted); font-size: 0.8125rem;">пагинация по 50</span>
-    </button>
-  </section>
   {% endif %}
 
   {# Empty state for active filters #}

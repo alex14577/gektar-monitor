@@ -187,8 +187,35 @@ Header разделён на три зоны через CSS flex:
 
 Отдельный `<div class="filter-bar">` между header и лентой лотов (`_feed_lots.html.jinja`).
 - Слева: sort select («по дате ↓ / ↑»), `name="sort_dir"`, вызывает `hx-post="/filters/view"`.
-- Справа: счётчик лотов.
+- Справа: счётчик лотов (`<span id="feed-lot-count">`).
 - Sort field: `first_seen DESC/ASC` (момент обнаружения парсером). `LotFilters.sort_dir: Literal["desc","asc"] = "desc"`.
+
+### Пагинация ленты — кнопка «Показать ещё»
+
+Начальный рендер (`GET /`) загружает не более `_FEED_PAGE_SIZE=200` лотов. Если лотов больше, контекст содержит `next_cursor` (opaque base64 keyset cursor), и шаблон `_feed_lots.html.jinja` рендерит `#load-more-trigger`.
+
+**Кнопка `#load-more-btn`** внутри `#load-more-trigger`:
+```html
+<div id="load-more-trigger"
+     hx-get="/feed/more?cursor=<next_cursor>"
+     hx-target="#load-more-trigger"
+     hx-swap="outerHTML"
+     hx-trigger="click from:#load-more-btn">
+  <button id="load-more-btn">Показать ещё</button>
+</div>
+```
+
+**Endpoint `GET /feed/more?cursor=<opaque>`** (в `routes/main.py`):
+- Читает тот же cookie `view_filters`, что и `GET /` — фильтры никогда не расходятся.
+- Применяет тот же `only_new` пост-фильтр через `lot_passes_only_new()` (единственный SSOT).
+- Рендерит `partials/_feed_more.html.jinja`: карточки лотов + опциональный свежий `#load-more-trigger` для следующей страницы.
+- Малformed cursor → 422.
+
+**Cursor chain:** каждый ответ `_feed_more.html.jinja` содержит следующий `next_cursor` в атрибуте `hx-get`. Цепочка заканчивается когда `next_cursor is None` — тогда trigger не рендерится.
+
+**Сосуществование с SSE:** SSE добавляет карточки в начало `#feed` (`afterbegin`), load-more добавляет в конец через outerHTML на `#load-more-trigger`. Пересечений нет — keyset cursor `(date_create DESC, id DESC)` никогда не переиспускает лоты из следующей страницы.
+
+**Что НЕ меняется:** `archive_count` остаётся в контексте (= 0, deprecated) для совместимости шаблонов; будет удалён в отдельном bd.
 
 #### UX-улучшения фильтров
 

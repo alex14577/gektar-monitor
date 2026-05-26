@@ -1,0 +1,61 @@
+{# Load-more partial — rendered by GET /feed/more?cursor=<opaque>&shown=<N>.
+   htmx target: hx-target="#load-more-trigger" hx-swap="outerHTML"
+   Variables: lots (list[LotUserViewModel]), next_cursor (str|None), shown_total (int)
+
+   Behaviour:
+   - Emits lot cards via _lot_poster.html.jinja (same template as the initial feed).
+   - When next_cursor is present: injects a fresh #load-more-trigger div (inside the
+     existing <section class="zone">) so the user can keep paging.  outerHTML on
+     #load-more-trigger replaces only the trigger — the new cards become its siblings
+     inside the same zone section, matching the initial-page DOM nesting.
+   - When absent (last page): emits a hidden sentinel so outerHTML still removes the
+     trigger cleanly (empty body would be a no-op swap in HTMX 1.9).
+   - OOB span (#feed-lot-count) is updated here to reflect the running total of
+     visible lots (initial shown_total + len(lots) on this page).  Stateless: the
+     shown count is threaded through the cursor URL (&shown=N).
+
+   Session context: mirrors SessionStubForFilter from filters.py (expired=False by
+   default; the user is actively browsing so the session is considered active).
+   Matches the stub used by POST /filters/view so gating logic is consistent.
+
+   SSE coexistence: SSE swaps arrive on #feed with afterbegin (prepend at top);
+   load-more fragments are appended here at the bottom via outerHTML on
+   #load-more-trigger.  The two operations target disjoint DOM regions and never
+   collide.
+#}
+
+{# Session stub mirrors SessionStubForFilter in filters.py: expired=False so that
+   "Открыть" buttons render the same way on loaded pages as on the initial render. #}
+{% set session = namespace(expired=false, expires_soon=false, expires_at_hhmm="") %}
+
+{% for lot in lots %}
+  {% include "partials/_lot_poster.html.jinja" %}
+{% endfor %}
+
+{% if next_cursor %}
+<div id="load-more-trigger"
+     hx-get="/feed/more?cursor={{ next_cursor | urlencode }}&amp;shown={{ shown_total }}"
+     hx-target="#load-more-trigger"
+     hx-swap="outerHTML"
+     hx-trigger="click from:#load-more-btn">
+  <button id="load-more-btn" class="btn btn--ghost btn--full" type="button"
+          style="justify-content: center; padding: 12px 16px;">
+    <span style="display:inline-flex; gap:8px; align-items:center;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      Показать ещё
+    </span>
+  </button>
+</div>
+{% else %}
+{# Last page: emit a hidden sentinel so outerHTML swap cleanly removes the trigger
+   even when no cards were produced (empty body would be a no-op in HTMX 1.9). #}
+<span hidden></span>
+{% endif %}
+
+{# OOB counter update: replace #feed-lot-count span with the running total.
+   shown_total already includes all lots on this page (route computed it as
+   shown_before + len(visible)).  hx-swap-oob requires the element to be a
+   top-level sibling of the primary response fragment (which it is here). #}
+<span id="feed-lot-count" class="filter-bar__count" hx-swap-oob="true">
+  {{ shown_total }} лот{{ 'а' if shown_total % 10 in [2,3,4] and shown_total % 100 not in [12,13,14] else ('' if shown_total % 10 == 1 and shown_total % 100 != 11 else 'ов') }}
+</span>

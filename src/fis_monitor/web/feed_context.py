@@ -19,7 +19,7 @@ from fis_monitor.services.lot_query import LotFilters, LotQueryService
 from fis_monitor.services.view_filters import ViewFilters
 from fis_monitor.web.sse_encoder import LotUserViewModel
 
-__all__ = ["build_feed_context"]
+__all__ = ["_view_filters_to_lot_filters", "build_feed_context", "lot_passes_only_new"]
 
 # Single-page feed cap: at most this many active lots are loaded into the
 # initial HTML.  Lots beyond this fall into the archive count only.
@@ -69,6 +69,24 @@ def _filters_are_active(filters: ViewFilters) -> bool:
     )
 
 
+def lot_passes_only_new(dto: object, *, only_new: bool) -> bool:
+    """Return True when *dto* should appear in a feed with ``only_new`` active.
+
+    This is the single source of truth for the ``only_new`` post-filter.
+    Used by both ``_assemble_feed_zones`` (initial page) and the
+    ``GET /feed/more`` handler (subsequent pages) — extracted so neither
+    caller duplicates the predicate.
+
+    ``only_new=False`` (filter off): every lot passes.
+    ``only_new=True`` (filter on): lot passes only when ``seen_at`` is None
+    (i.e. the user has not yet seen this lot).
+    """
+    if not only_new:
+        return True
+    seen_at = getattr(dto, "seen_at", None)
+    return seen_at is None
+
+
 def _assemble_feed_zones(
     items: tuple,
     *,
@@ -83,13 +101,13 @@ def _assemble_feed_zones(
     results at ``_FEED_PAGE_SIZE`` — there is nothing left over.
 
     Applies the user-state post-filter (``only_new``) that the SQL layer
-    cannot express.  Each surfaced lot is wrapped in ``LotUserViewModel``
-    so it can be consumed by the existing partials.
+    cannot express via ``lot_passes_only_new``.  Each surfaced lot is wrapped
+    in ``LotUserViewModel`` so it can be consumed by the existing partials.
     """
     today: list[LotUserViewModel] = []
 
     for dto in items:
-        if view_filters.only_new and dto.seen_at is not None:
+        if not lot_passes_only_new(dto, only_new=view_filters.only_new):
             continue
 
         today.append(LotUserViewModel(dto))
@@ -132,10 +150,17 @@ def build_feed_context(
     a pure computation with no FastAPI Depends coupling.
 
     Returns a dict ready to merge into a TemplateResponse context; keys:
-    ``zones``, ``archive_count``, ``filters_active``, ``health``,
-    ``filters`` (sidebar filter state), ``scope`` (subjects count).
-    The ``health`` entry uses ``active_lot_count`` so the caller need not
-    compute it again.
+    ``zones``, ``archive_count``, ``next_cursor``, ``filters_active``,
+    ``health``, ``filters`` (sidebar filter state), ``scope`` (subjects
+    count).
+
+    ``next_cursor`` is ``None`` when the result set fits in one page (no
+    load-more trigger needed).  The ``_feed_lots.html.jinja`` template uses
+    it to conditionally render ``#load-more-trigger``.
+
+    ``archive_count`` is kept at 0 and marked deprecated — the load-more
+    button supersedes the old stub.  It will be removed once no template
+    references it.
     """
     lot_filters = _view_filters_to_lot_filters(filters)
     page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE)
@@ -145,7 +170,8 @@ def build_feed_context(
     )
     return {
         "zones": zones,
-        "archive_count": archive_count,
+        "archive_count": archive_count,  # deprecated: always 0; kept for template compat
+        "next_cursor": page.next_cursor,
         "filters_active": _filters_are_active(filters),
         "health": SimpleNamespace(
             last_cycle_human="—",

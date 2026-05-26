@@ -32,6 +32,23 @@
 - **Integration:** `TestClient` + контейнер с **fake-infra**. CSRF, onboarding-gate, корректность Jinja-фрагментов для HTMX-роутов.
 - **SSE:** `TestClient.stream()` + публикация в `FakeEventBus`, проверка что фрагмент HTML соответствует контракту из `claude-design/README.md`.
 
+### Layer 4 — load-more invariants (`tests/integration/web/test_feed_more.py`)
+
+Инварианты, покрытые для `GET /feed/more`:
+
+| ID | Инвариант |
+|----|-----------|
+| T1 | Walk all pages: все лоты в датасете > page_size отдаются ровно по одному разу (нет дублей, нет пропусков). |
+| T2 | Filters preserved: region-фильтр из cookie применяется на каждой странице, посторонние лоты не попадают. |
+| T3 | Exhaustion: датасет ≤ одной страницы → `next_cursor=None` → `#load-more-trigger` не рендерится. |
+| T4 | Invalid cursor → 422 (HTTP, malformed base64 или отсутствует разделитель). |
+| T5 | `only_new` preserved: увиденные лоты (`seen_at` ≠ None) исключаются на load-more страницах; невидимые включаются. |
+| T6 | `sort_dir` preserved: значение из cookie передаётся в `LotFilters.sort_dir` при каждом вызове `search()`. |
+
+**Фейки:** `_PagedFakeLotQueryService` — in-memory список лотов с реальной cursor-логикой encode/decode (тест проверяет именно cursor-контракт, не сигнатуру). Настоящие `ViewFiltersService` + `build_templates()` (реальные шаблоны).
+
+**Не покрывается:** Playwright headed-flow, реальная SQLite, SSE fan-out (Layer 3/5).
+
 ## Layer 5 — End-to-end (smoke)
 
 - **Один тест:** lifespan up → подменить `HttpClient` на fixture-mode → выполнить 1 цикл → проверить что лот в БД, event в bus, нотификация в `notifications`.
