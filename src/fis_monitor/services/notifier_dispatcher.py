@@ -53,6 +53,7 @@ from fis_monitor.domain.models import (
 from fis_monitor.domain.models import (
     lot_to_public_dto as _lot_to_public_dto,
 )
+from fis_monitor.domain.subscription_cutoff import passes_subscription_cutoff
 from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
 from fis_monitor.services.dnd import DndService
 
@@ -126,12 +127,12 @@ class SubscribedAtFilteredNotifier:
         log level is intentional — onboarding-time suppression can be high
         volume during backfill and must not flood INFO/WARNING streams.
         """
-        if lot.region_id is None:
-            return False
-        subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
-        if subscribed_at is None:
-            return False
-        if lot.date_create.date() >= subscribed_at.date():
+        subscribed_at = (
+            self._region_sub_repo.get_subscribed_at(lot.region_id)
+            if lot.region_id is not None
+            else None
+        )
+        if passes_subscription_cutoff(lot.date_create, subscribed_at, region_id=lot.region_id):
             return False
         logger.debug(
             "notification.subscribed_at_dropped",
@@ -139,7 +140,10 @@ class SubscribedAtFilteredNotifier:
                 "region_id": lot.region_id,
                 "lot_id": lot.id,
                 "lot_date_create": lot.date_create.isoformat(),
-                "subscribed_at": subscribed_at.isoformat(),
+                # Reaching here means passes_subscription_cutoff returned False,
+                # which is only possible when subscribed_at is not None; the guard
+                # keeps mypy happy without changing behaviour.
+                "subscribed_at": subscribed_at.isoformat() if subscribed_at else None,
                 "decision": "dropped_subscribed_at",
             },
         )

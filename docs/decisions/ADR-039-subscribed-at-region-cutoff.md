@@ -1,6 +1,6 @@
 # ADR-039 — subscribed_at region cutoff: per-region filter для подавления старых лотов
 
-**Status**: Accepted (amended 2026-05-18, gn89: day-precision compare + pre-reserve hook)
+**Status**: Accepted (amended 2026-05-18, gn89: day-precision compare + pre-reserve hook; amended 2026-05-27: shared predicate SSOT + SQL-level feed cutoff)
 **Date**: 2026-05-15
 **Deciders**: Backend Architect
 **Tags**: notifications, suppression, region_subscriptions, filter, backfill, delta-trigger
@@ -57,10 +57,48 @@ class RegionSubscriptionRepository(Protocol):
 
 `WatchdogConfigSource` получает `RegionSubscriptionRepository` и `Clock` через конструктор.
 
-### Точка фильтра
+### Shared predicate SSOT (amendment 2026-05-27)
+
+Логика day-precision compare вынесена в **единственный источник правды**:
+`domain/subscription_cutoff.py` — `passes_subscription_cutoff(date_create, subscribed_at, *, region_id)`.
+
+Функция импортируется везде, где нужна suppression-логика:
+- `SubscribedAtFilteredNotifier.should_suppress` — email-канал, pre-reserve hook.
+- `LotQueryService._build_query` — SQL-уровень (`apply_subscription_cutoff=True`).
+
+SQL-выражение и Python-предикат разойтись не могут: Layer-3 equivalence-тест
+(`tests/integration/services/test_lot_query_cutoff.py::test_sql_predicate_equivalence`)
+сравнивает множества lot_id, возвращённые SQL-запросом и предикатом на одном датасете.
+
+### SQL-level feed cutoff (amendment 2026-05-27)
+
+Веб-страница «новые лоты» (feed, `/feed`) применяет cutoff на уровне SQL через
+`LotFilters(apply_subscription_cutoff=True)`, которое устанавливается в
+`_view_filters_to_lot_filters` (`web/feed_context.py`).
+
+Механизм: `LotQueryService._build_query` при `apply_subscription_cutoff=True` добавляет:
+```sql
+LEFT JOIN region_subscriptions rs ON lots.region_id = rs.region_id
+WHERE (lots.region_id IS NULL OR rs.subscribed_at IS NULL
+       OR date(lots.date_create) >= date(rs.subscribed_at))
+```
+
+Ключевые инварианты:
+- SELECT-список квалифицируется `lots.` при активном JOIN (column-name ambiguity:
+  `region_id` существует и в `lots`, и в `region_subscriptions`).
+- При `apply_subscription_cutoff=False` (путь `/lots` API) SQL-запрос структурно идентичен
+  pre-cutoff версии — никаких изменений для внешних клиентов.
+- Load-more пагинация (`/feed/more`) корректна: cursor-based keyset строится на qualified
+  `lots.date_create`/`lots.id`; строки не дублируются при переходе страниц.
+
+**BrowserSseNotifier (live SSE push)** — остаётся без фильтрации по дизайну.
+Real-time уведомления в браузере должны отражать все новые события, не только «новые» из
+subscription-window. Ограничение будет пересмотрено в отдельной задаче при необходимости.
+
+### Точка фильтра (email-канал)
 
 `SubscribedAtFilteredNotifier` — decorator-класс в `notifier_dispatcher.py`, оборачивает `SmtpEmailNotifier`.
-Применяет subscribed_at check **только для email-канала**.
+Применяет subscribed_at check **только для email-канала** через `passes_subscription_cutoff`.
 
 **Сравнение — day-precision** (amendment 2026-05-18, gn89):
 
@@ -153,6 +191,13 @@ Recovery-promotion suppressed `pending` → `permanent_fail` (см. §«Точк
   migration-логику (set-if-absent + delete).
 - **`composition.py`**: `SqliteRegionSubscriptionRepository` создаётся и инжектируется в оба места.
 - **Tests**: unit-тесты на `dispatch()` suppression + `WatchdogConfigSource` diff-логику.
+- **`domain/subscription_cutoff.py`** (2026-05-27): новый модуль-SSOT с `passes_subscription_cutoff`.
+  Импортируется `SubscribedAtFilteredNotifier` и `LotQueryService._build_query`.
+- **`LotFilters.apply_subscription_cutoff`** (2026-05-27): bool-флаг (default=False) в `LotFilters`.
+  Web-feed устанавливает `True`; `/lots` API-путь оставляет `False`.
+- **`tests/unit/domain/test_subscription_cutoff.py`**: Layer-1 тест предиката (5 случаев).
+- **`tests/integration/services/test_lot_query_cutoff.py`**: Layer-3 equivalence-тест SQL vs Python
+  на реальном SQLite (all 5 scenarios + gn89 regression guard).
 
 ---
 

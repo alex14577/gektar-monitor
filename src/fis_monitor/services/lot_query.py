@@ -105,6 +105,7 @@ class LotFilters:
     status: str | None = None
     fts_query: str | None = None
     sort_dir: Literal["desc", "asc"] = "desc"
+    apply_subscription_cutoff: bool = False
 
     def __post_init__(self) -> None:
         if self.regions and self.subject_display_names:
@@ -192,6 +193,17 @@ _LOT_SELECT = (
     "enrichment_last_error, last_seen_at, last_status, last_status_at, "
     "is_active, inactive_reason, inactive_since, inactive_confirmed_at, "
     "region_id"
+)
+
+# Table-qualified version of _LOT_SELECT used when a JOIN is active.
+# Required because region_id also exists in region_subscriptions; without
+# qualification SQLite raises "ambiguous column name: region_id".
+# Column order is preserved byte-for-byte so row_to_lot() positional mapping
+# is unaffected. Unqualified _LOT_SELECT is kept for the JOIN-free path so
+# the /lots API path is unchanged.
+_LOT_SELECT_QUALIFIED = ", ".join(
+    f"lots.{col.strip()}"
+    for col in _LOT_SELECT.split(",")
 )
 
 
@@ -375,50 +387,96 @@ class LotQueryService:
         - ``cursor``: composite keyset on ``(date_create, id)``:
             DESC: ``(date_create < ?) OR (date_create = ? AND id < ?)``
             ASC:  ``(date_create > ?) OR (date_create = ? AND id > ?)``
+        - ``apply_subscription_cutoff``: when True, LEFT JOIN region_subscriptions
+            and add WHERE predicate mirroring ``passes_subscription_cutoff``
+            (ADR-039 day-precision rule).  When False, query is unchanged.
         """
-        conditions: list[str] = ["is_active = 1"]
+        join_clause, cutoff_condition = self._subscription_cutoff_fragment(filters)
+
+        conditions: list[str] = ["lots.is_active = 1"] if join_clause else ["is_active = 1"]
         params: list[Any] = []
+
+        # Table-qualify column references when a JOIN is present to avoid ambiguity.
+        col = "lots." if join_clause else ""
+        # SELECT list: use qualified form when JOIN is active (region_id is
+        # ambiguous between lots and region_subscriptions without it).
+        select_cols = _LOT_SELECT_QUALIFIED if join_clause else _LOT_SELECT
 
         if filters.regions:
             placeholders = ", ".join("?" * len(filters.regions))
-            conditions.append(f"region IN ({placeholders})")
+            conditions.append(f"{col}region IN ({placeholders})")
             params.extend(str(r) for r in filters.regions)
 
         if filters.subject_display_names:
             placeholders = ", ".join("?" * len(filters.subject_display_names))
-            conditions.append(f"region IN ({placeholders})")
+            conditions.append(f"{col}region IN ({placeholders})")
             params.extend(filters.subject_display_names)
 
         if filters.area_sqm_min is not None:
-            conditions.append("area_sqm >= ?")
+            conditions.append(f"{col}area_sqm >= ?")
             params.append(int(filters.area_sqm_min))
 
         if filters.area_sqm_max is not None:
-            conditions.append("area_sqm <= ?")
+            conditions.append(f"{col}area_sqm <= ?")
             params.append(int(filters.area_sqm_max))
 
         if filters.status is not None:
-            conditions.append("status = ?")
+            conditions.append(f"{col}status = ?")
             params.append(filters.status)
+
+        if cutoff_condition:
+            conditions.append(cutoff_condition)
 
         if last_cursor is not None:
             last_date_iso, last_id = last_cursor
             if filters.sort_dir == "desc":
                 conditions.append(
-                    "(date_create < ? OR (date_create = ? AND id < ?))"
+                    f"({col}date_create < ? OR ({col}date_create = ? AND {col}id < ?))"
                 )
             else:
                 conditions.append(
-                    "(date_create > ? OR (date_create = ? AND id > ?))"
+                    f"({col}date_create > ? OR ({col}date_create = ? AND {col}id > ?))"
                 )
             params.extend([last_date_iso, last_date_iso, last_id])
 
         where = " AND ".join(conditions)
         order_dir = filters.sort_dir.upper()  # "DESC" or "ASC"
+        from_clause = f"lots{join_clause}"
         sql = (
-            f"SELECT {_LOT_SELECT} FROM lots WHERE {where} "
-            f"ORDER BY date_create {order_dir}, id {order_dir} LIMIT ?"
+            f"SELECT {select_cols} FROM {from_clause} WHERE {where} "
+            f"ORDER BY {col}date_create {order_dir}, {col}id {order_dir} LIMIT ?"
         )
         params.append(limit)
 
         return sql, params
+
+    @staticmethod
+    def _subscription_cutoff_fragment(filters: LotFilters) -> tuple[str, str]:
+        """Return ``(join_clause, where_condition)`` for the subscription cutoff.
+
+        When ``filters.apply_subscription_cutoff`` is False both strings are
+        empty — the query is structurally identical to the pre-cutoff version.
+
+        When True:
+        - ``join_clause``: ``" LEFT JOIN region_subscriptions rs ON lots.region_id = rs.region_id"``
+        - ``where_condition``: SQL mirror of ``passes_subscription_cutoff`` predicate
+          (ADR-039 day-precision rule):
+          ``(lots.region_id IS NULL OR rs.subscribed_at IS NULL
+          OR date(lots.date_create) >= date(rs.subscribed_at))``
+
+        SQLite ``date()`` semantics: ``date('2026-05-15T00:00:00+00:00')`` →
+        ``'2026-05-15'`` — SQLite truncates at the ``T`` boundary, so ISO-8601
+        UTC isoformat strings stored in both columns are handled correctly.
+        Same-day comparison is non-strict (``>=``), matching the Python predicate.
+        """
+        if not filters.apply_subscription_cutoff:
+            return "", ""
+        join_clause = (
+            " LEFT JOIN region_subscriptions rs"
+            " ON lots.region_id = rs.region_id"
+        )
+        where_condition = (
+            "(lots.region_id IS NULL OR rs.subscribed_at IS NULL"
+            " OR date(lots.date_create) >= date(rs.subscribed_at))"
+        )
+        return join_clause, where_condition
