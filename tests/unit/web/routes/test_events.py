@@ -239,27 +239,21 @@ class TestOriginCheck:
         """#2 — Origin in whitelist → 200."""
         streamer = _DriftTrackingStreamer([])
         client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
-        with client.stream(
-            "GET", "/events", headers={"Origin": "http://127.0.0.1:8080"}
-        ) as resp:
+        with client.stream("GET", "/events", headers={"Origin": "http://127.0.0.1:8080"}) as resp:
             assert resp.status_code == 200
 
     def test_bad_origin_returns_421(self) -> None:
         """#3 / #14 — Bad Origin → 421 before stream opens."""
         streamer = _DriftTrackingStreamer([])
         client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
-        resp = client.get(
-            "/events", headers={"Origin": "http://evil.example.com"}
-        )
+        resp = client.get("/events", headers={"Origin": "http://evil.example.com"})
         assert resp.status_code == 421
 
     def test_bad_origin_body_is_not_sse(self) -> None:
         """#4 — 421 response is plain text, not an SSE stream."""
         streamer = _DriftTrackingStreamer([])
         client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
-        resp = client.get(
-            "/events", headers={"Origin": "http://evil.example.com"}
-        )
+        resp = client.get("/events", headers={"Origin": "http://evil.example.com"})
         assert resp.status_code == 421
         assert "text/event-stream" not in resp.headers.get("content-type", "")
 
@@ -267,18 +261,14 @@ class TestOriginCheck:
         """#9 — Loopback origin is in whitelist → 200."""
         streamer = _DriftTrackingStreamer([])
         client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
-        with client.stream(
-            "GET", "/events", headers={"Origin": "http://localhost:8080"}
-        ) as resp:
+        with client.stream("GET", "/events", headers={"Origin": "http://localhost:8080"}) as resp:
             assert resp.status_code == 200
 
     def test_origin_case_insensitive(self) -> None:
         """#12 — Origin matching is case-insensitive."""
         streamer = _DriftTrackingStreamer([])
         client = TestClient(_build_app(streamer=streamer), raise_server_exceptions=True)
-        with client.stream(
-            "GET", "/events", headers={"Origin": "HTTP://127.0.0.1:8080"}
-        ) as resp:
+        with client.stream("GET", "/events", headers={"Origin": "HTTP://127.0.0.1:8080"}) as resp:
             assert resp.status_code == 200
 
     def test_empty_whitelist_rejects_all_origins(self) -> None:
@@ -288,9 +278,7 @@ class TestOriginCheck:
             _build_app(streamer=streamer, whitelist=frozenset()),
             raise_server_exceptions=True,
         )
-        resp = client.get(
-            "/events", headers={"Origin": "http://127.0.0.1:8080"}
-        )
+        resp = client.get("/events", headers={"Origin": "http://127.0.0.1:8080"})
         assert resp.status_code == 421
 
     def test_empty_whitelist_no_origin_still_ok(self) -> None:
@@ -369,18 +357,14 @@ class TestDIOverrides:
             assert resp.status_code == 200
 
         # 127.0.0.1:8080 is NOT in custom whitelist → 421
-        resp2 = client.get(
-            "/events", headers={"Origin": "http://127.0.0.1:8080"}
-        )
+        resp2 = client.get("/events", headers={"Origin": "http://127.0.0.1:8080"})
         assert resp2.status_code == 421
 
 
 class TestSchemaDrift:
     """#7: Unknown event type → dropped, sse.schema_drift logged."""
 
-    def test_unknown_event_dropped_and_drift_logged(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_unknown_event_dropped_and_drift_logged(self, caplog: pytest.LogCaptureFixture) -> None:
         """#7 -- Schema drift: unknown event type is dropped, not streamed;
         audit log contains 'sse.schema_drift'.
 
@@ -407,9 +391,7 @@ class TestSchemaDrift:
             chunks = list(resp.iter_bytes(chunk_size=1024))
 
         all_bytes = b"".join(chunks)
-        assert b"ghost.event" not in all_bytes, (
-            "Drifted event must be dropped from the stream"
-        )
+        assert b"ghost.event" not in all_bytes, "Drifted event must be dropped from the stream"
         assert streamer.drift_logged == ["ghost.event"]
 
     def test_production_streamer_drops_drift_event_and_logs(
@@ -469,9 +451,7 @@ class TestFakeInterfaces:
 
     def test_fake_subscription_all_methods_called(self) -> None:
         """All _FakeSubscription methods are exercised (anti-mock invariant)."""
-        events: list[SseEvent] = [
-            SseLotStatus(lot_id=1, new_status="gone", event_type="gone")
-        ]
+        events: list[SseEvent] = [SseLotStatus(lot_id=1, new_status="gone", event_type="gone")]
         sub = _FakeSubscription(events)
 
         # wait_one: returns event then None (sets alive=False)
@@ -588,8 +568,7 @@ class TestHtmlSseEncoding:
         )
         # Warning must be logged by the encoder.
         warning_records = [
-            r for r in caplog.records
-            if r.message == "sse_encoder.unknown_fragment_template"
+            r for r in caplog.records if r.message == "sse_encoder.unknown_fragment_template"
         ]
         assert warning_records, "Encoder must log a warning for unsupported fragment_template"
 
@@ -646,7 +625,7 @@ class TestSseCycleDoneHtmlEncoding:
             chunks = list(resp.iter_bytes(chunk_size=4096))
         return b"".join(chunks).decode()
 
-    def test_cycle_done_ok_renders_ok_span_with_counters(self) -> None:
+    def test_cycle_done_ok_renders_ok_span_with_hhmm(self) -> None:
         from fis_monitor.domain.models import SseCycleDone
 
         evt = SseCycleDone(
@@ -656,16 +635,16 @@ class TestSseCycleDoneHtmlEncoding:
             lots_fetched=12,
             new_lots=3,
             duration_ms=1400,
+            finished_at_hhmm="15:00",
         )
 
         payload = self._emit(evt)
 
         assert "event: cycle.done" in payload
         assert "cycle-result--ok" in payload
-        # Counters in the rendered fragment so the user sees a concrete result.
-        assert "12" in payload and "3" in payload
-        # Duration rendered in seconds with one decimal (1400 ms → 1.4 с).
-        assert "1.4" in payload
+        # ok-branch now shows local completion time, not counters (bd nq5g).
+        assert "Проверка завершена в 15:00" in payload
+        assert "лотов" not in payload
         # No JSON envelope leakage.
         assert '"event":"cycle.done"' not in payload
 

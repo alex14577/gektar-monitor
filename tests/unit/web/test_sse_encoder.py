@@ -13,7 +13,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fis_monitor.domain.models import Lot, LotPublicDTO, SseLoginSucceeded, SseLotNew, SseStatus
+from fis_monitor.domain.models import (
+    Lot,
+    LotPublicDTO,
+    SseCycleDone,
+    SseLoginSucceeded,
+    SseLotNew,
+    SseStatus,
+)
 from fis_monitor.web.sse_encoder import LotViewModel, _SseLotNewViewModel, make_html_sse_encoder
 from fis_monitor.web.templates import build_templates
 
@@ -231,10 +238,61 @@ class TestSseLoginSucceededEncoder:
         payload = encoder(event).decode()
 
         assert "hx-swap-oob" in payload, (
-            f"Expected 'hx-swap-oob' in login.succeeded SSE fragment.\n"
-            f"Got payload:\n{payload}"
+            f"Expected 'hx-swap-oob' in login.succeeded SSE fragment.\nGot payload:\n{payload}"
         )
         assert "cycle-result" in payload, (
-            f"Expected '#cycle-result' target in login.succeeded fragment.\n"
-            f"Got payload:\n{payload}"
+            f"Expected '#cycle-result' target in login.succeeded fragment.\nGot payload:\n{payload}"
+        )
+
+
+class TestSseCycleDoneRenderedHtml:
+    """cycle.done ok-branch renders 'Проверка завершена в HH:MM', not counters (bd nq5g)."""
+
+    def test_ok_fragment_renders_finished_at_hhmm_and_no_counters(self) -> None:
+        """Invariant: ok-branch shows local time; lots/duration counters must NOT appear."""
+        templates = build_templates()
+        encoder = make_html_sse_encoder(templates.env)
+
+        event = SseCycleDone(
+            timestamp=_TS,
+            cycle_id=1,
+            status="ok",
+            lots_fetched=12,
+            new_lots=3,
+            duration_ms=1400,
+            finished_at_hhmm="14:05",
+        )
+
+        payload = encoder(event).decode()
+
+        assert "Проверка завершена в 14:05" in payload, (
+            f"Expected 'Проверка завершена в 14:05' in ok-branch fragment.\nGot:\n{payload}"
+        )
+        assert "лотов" not in payload, (
+            f"Counter text ('лотов') must not appear in ok-branch fragment.\nGot:\n{payload}"
+        )
+
+    def test_ok_fragment_drops_dangling_preposition_when_hhmm_empty(self) -> None:
+        """Regression: empty finished_at_hhmm (error-branch fallback / old payload)
+        must render 'Проверка завершена', never a dangling 'Проверка завершена в '."""
+        templates = build_templates()
+        encoder = make_html_sse_encoder(templates.env)
+
+        event = SseCycleDone(
+            timestamp=_TS,
+            cycle_id=1,
+            status="ok",
+            lots_fetched=0,
+            new_lots=0,
+            duration_ms=0,
+            finished_at_hhmm="",
+        )
+
+        payload = encoder(event).decode()
+
+        assert "Проверка завершена в" not in payload, (
+            f"Dangling preposition 'в' must not render when HH:MM is empty.\nGot:\n{payload}"
+        )
+        assert "Проверка завершена" in payload, (
+            f"Expected 'Проверка завершена' fallback in ok-branch fragment.\nGot:\n{payload}"
         )

@@ -8,11 +8,16 @@
   #cycle-result with hx-swap="innerHTML".
 
   Context: ``event`` is the SseCycleDone instance (NOT a Lot — no PII).
-  Available fields: ``status``, ``lots_fetched``, ``new_lots``,
-  ``duration_ms`` (StrictInt non-negative), ``cycle_id``.
+  Available fields: ``status``, ``finished_at_hhmm`` (local HH:MM, ok-branch
+  UI), ``lots_fetched``, ``new_lots``, ``duration_ms`` (StrictInt non-negative,
+  kept for logging/telemetry), ``cycle_id``.
 -#}
 {%- if event.status == "ok" -%}
-<span class="cycle-result cycle-result--ok">Проверка завершена: {{ event.lots_fetched }} лотов, {{ event.new_lots }} новых ({{ (event.duration_ms / 1000) | round(1) }} с)</span>
+{%- if event.finished_at_hhmm -%}
+<span class="cycle-result cycle-result--ok">Проверка завершена в {{ event.finished_at_hhmm }}</span>
+{%- else -%}
+<span class="cycle-result cycle-result--ok">Проверка завершена</span>
+{%- endif -%}
 {%- else -%}
 <span class="cycle-result cycle-result--err">Проверка завершена с ошибкой</span>
 {%- endif -%}

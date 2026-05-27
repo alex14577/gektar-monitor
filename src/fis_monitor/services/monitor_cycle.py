@@ -693,14 +693,34 @@ class MonitorCycleService:
             0,
             int((result.finished_at - result.started_at).total_seconds() * 1000),
         )
+        now = self._clock.now()
+        # Compute local HH:MM for the ok-branch UI ("Проверка завершена в HH:MM").
+        # Guard: if settings access raises, fall back to "" rather than letting
+        # _publish_cycle_done raise — this is the terminal spinner-clear signal and
+        # MUST complete on both happy path and all error branches (see docstring).
+        try:
+            settings = self._config_source.current()
+            tz = ZoneInfo(settings.timezone)
+            finished_at_hhmm = now.astimezone(tz).strftime("%H:%M")
+        except Exception:
+            # Log so a misconfiguration (e.g. an invalid IANA timezone that
+            # never self-heals) is observable instead of silently rendering an
+            # empty HH:MM forever. The event still publishes — see docstring.
+            logger.warning(
+                "monitor_cycle.cycle_done.hhmm_failed",
+                exc_info=True,
+                extra={"cycle_id": result.id},
+            )
+            finished_at_hhmm = ""
         self._event_bus.publish(
             SseCycleDone(
-                timestamp=self._clock.now(),
+                timestamp=now,
                 cycle_id=result.id,
                 status=result.status,
                 lots_fetched=result.lots_fetched,
                 new_lots=result.new_lots,
                 duration_ms=duration_ms,
+                finished_at_hhmm=finished_at_hhmm,
             )
         )
         # bd 47uh: header-status refresh — keeps the "Последний новый" chip

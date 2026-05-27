@@ -934,14 +934,18 @@ class SseCycleDone(BaseModel):
 
     Published exactly once per ``run_cycle`` invocation, regardless of
     outcome — both happy path and every ``_close_with_*`` error helper.
-    Carries summary counters so the UI can replace the "Идёт проверка"
-    spinner with a concrete result ("12 лотов, 3 новых, 1.4с").
+
+    On the ok-branch the UI renders "Проверка завершена в HH:MM" using
+    ``finished_at_hhmm`` (local time in the configured timezone).  The
+    counters ``lots_fetched``, ``new_lots``, and ``duration_ms`` remain on
+    the model for logging and telemetry but are no longer rendered in the
+    UI ok-branch fragment.
 
     On error paths, ``SseCycleError`` (critical) is published first to
     drive the error UX; ``SseCycleDone(status="error")`` is the secondary
     terminal signal so the spinner clears regardless of branch.
 
-    No PII vectors: counters and a numeric cycle id only.
+    No PII vectors: counters, a numeric cycle id, and a local HH:MM only.
     """
 
     model_config = _DOMAIN_MODEL_CONFIG
@@ -955,6 +959,7 @@ class SseCycleDone(BaseModel):
     lots_fetched: StrictInt
     new_lots: StrictInt
     duration_ms: StrictInt
+    finished_at_hhmm: str = ""  # local HH:MM of cycle completion; "" = backward-compat
 
 
 class SseCycleStarted(BaseModel):

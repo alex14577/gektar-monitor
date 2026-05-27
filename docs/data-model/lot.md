@@ -57,8 +57,8 @@ class Lot(BaseModel):
     parser_version: int = 1
 
     # Жизненный цикл
-    first_seen: datetime
-    last_seen: datetime
+    first_seen: datetime    # время первого обнаружения лота; set on INSERT, IMMUTABLE — не перезаписывается при повторном наблюдении. MAX(first_seen) = "Последний новый" chip.
+    last_seen: datetime     # время последнего наблюдения; updated every cycle on UPDATE
     detail_fetched_at: datetime | None
     enrichment_status: Literal["pending", "done", "failed", "permanent_fail"] | None
 

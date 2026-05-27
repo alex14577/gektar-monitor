@@ -375,7 +375,8 @@ class SqliteLotRepository:
                         _bool_to_int(lot.has_boundaries),
                         json.dumps(lot.raw_json, ensure_ascii=False),
                         lot.parser_version,
-                        _iso(lot.first_seen),
+                        # immutable discovery time; last_seen tracks re-observation
+                        _iso(old_lot.first_seen),
                         _iso(lot.last_seen),
                         _iso(lot.detail_fetched_at),
                         lot.enrichment_status,

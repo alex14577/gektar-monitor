@@ -12,12 +12,16 @@ The frontend listens for ``cycle.done`` SSE events to replace the static
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from fis_monitor.domain.errors import ParseBugError, SessionExpiredError, UpstreamError
-from fis_monitor.domain.models import SseCycleDone, SseCycleError, SseSessionExpired
+from fis_monitor.domain.models import Settings, SseCycleDone, SseCycleError, SseSessionExpired
 from tests.unit.services.test_monitor_cycle import (
     _REGION,
+    FakeClock,
+    FakeConfigSource,
     FakeEnrichmentService,
     FakeHttpClient,
     FakeListParser,
@@ -51,9 +55,7 @@ class TestCycleDoneHappyPath:
         result = svc.run_cycle(_REGION)
 
         done = _cycle_done_events(bus.published)
-        assert len(done) == 1, (
-            "exactly one SseCycleDone expected per run_cycle invocation"
-        )
+        assert len(done) == 1, "exactly one SseCycleDone expected per run_cycle invocation"
         evt = done[0]
         assert evt.status == "ok"
         assert evt.cycle_id == result.id
@@ -104,9 +106,7 @@ class TestCycleDoneOnErrorBranches:
         assert len(done) == 1
         assert done[0].status == "error"
         # Ordering: cycle.error before cycle.done.
-        idx_err = next(
-            i for i, e in enumerate(bus.published) if isinstance(e, SseCycleError)
-        )
+        idx_err = next(i for i, e in enumerate(bus.published) if isinstance(e, SseCycleError))
         idx_done = bus.published.index(done[0])
         assert idx_err < idx_done
 
@@ -171,3 +171,40 @@ class TestCycleDoneDurationNonNegative:
         done = _cycle_done_events(bus.published)
         assert len(done) == 1
         assert done[0].duration_ms == 0
+
+
+# ---------------------------------------------------------------------------
+# finished_at_hhmm invariant
+# ---------------------------------------------------------------------------
+
+
+class TestCycleDoneFinishedAtHhmm:
+    """finished_at_hhmm must equal the cycle-completion time in the configured timezone.
+
+    Invariant (bd nq5g): the ok-branch UI renders "Проверка завершена в HH:MM";
+    HH:MM is the local time derived from clock.now() converted to settings.timezone.
+    """
+
+    def test_finished_at_hhmm_reflects_local_timezone(self) -> None:
+        # UTC 12:00 → Europe/Moscow (UTC+3) = 15:00
+        fixed_utc = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)
+        clock = FakeClock(fixed=fixed_utc)
+
+        config = FakeConfigSource()
+        config._settings = Settings(timezone="Europe/Moscow")
+
+        svc, _, _, _, _, _, _, bus, _ = _make_service(
+            list_parser=FakeListParser(rows=[_make_parsed_row(1)]),
+            enrichment=FakeEnrichmentService(lots=[_make_lot(1)]),
+            lot_repo=FakeLotRepository(was_new_for={1}),
+            clock=clock,
+            config_source=config,
+        )
+
+        svc.run_cycle(_REGION)
+
+        done = _cycle_done_events(bus.published)
+        assert len(done) == 1
+        assert done[0].finished_at_hhmm == "15:00", (
+            "UTC 12:00 in Europe/Moscow (UTC+3) must render as '15:00'"
+        )

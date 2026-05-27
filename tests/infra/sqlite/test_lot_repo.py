@@ -230,6 +230,40 @@ def test_upsert_toctou_second_writer_reads_committed_state(
         provider2.close_all()
 
 
+def test_upsert_preserves_first_seen_on_re_observation(
+    tmp_db: ConnectionProvider,
+) -> None:
+    """UPDATE branch must NOT overwrite first_seen (immutable discovery time).
+
+    Invariant (bd dj9f): first_seen is set once on INSERT and must remain
+    unchanged across subsequent upserts.  last_seen is updated to the new
+    cycle's timestamp so the two fields correctly represent "когда впервые
+    замечен" and "когда последний раз замечен" respectively.
+
+    MAX(first_seen) = latest_new_first_seen() — the "Последний новый" chip —
+    must equal the original discovery time, not the re-observation time.
+    """
+    t1 = _BASE_TIME
+    t2 = _BASE_TIME + timedelta(hours=1)
+
+    repo = _make_repo(tmp_db)
+
+    # INSERT: lot discovered at T1.
+    lot_v1 = make_lot(id=99, first_seen=t1, last_seen=t1)
+    repo.upsert(lot_v1, tracked=["status"])
+
+    # UPDATE: same lot re-observed at T2 (later cycle supplies T2 as its now()).
+    lot_v2 = make_lot(id=99, first_seen=t2, last_seen=t2)
+    repo.upsert(lot_v2, tracked=["status"])
+
+    stored = repo.get(99)
+    assert stored is not None
+    assert stored.first_seen == t1, (
+        "first_seen must be preserved from the INSERT (original discovery time)"
+    )
+    assert stored.last_seen == t2, "last_seen must be updated to the re-observation time"
+
+
 # ---------------------------------------------------------------------------
 # Tests: get / list_active
 # ---------------------------------------------------------------------------
