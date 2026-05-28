@@ -84,6 +84,7 @@ from fis_monitor.domain.models import Settings
 from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.thread_supervisor import ThreadSupervisor
+from fis_monitor.infra.uvicorn_shutdown import UvicornShutdownRequester
 from fis_monitor.utils.log import setup_logging
 from fis_monitor.utils.log_filters import StackPIIFilter
 from fis_monitor.utils.log_level import default_log_level
@@ -181,6 +182,7 @@ async def _lifespan_impl(
     sse_executor = None
     enrichment_pool = None
     supervisor = None
+    _license_expiry_triggered = threading.Event()
 
     # Wrap ALL of startup + yield + shutdown in a try/finally keyed on the lock.
     # This guarantees the lock is released even if build_container or executor
@@ -261,10 +263,37 @@ async def _lifespan_impl(
             "session-expired-email",
             lambda _stop_event: container.services.session_expired_email.consumer_loop(),
         )
+
+        # License expiry supervisor: bind real ShutdownRequester now that the
+        # uvicorn.Server (stored in app.state._uvicorn_server by main()) is live.
+        # Invariant: bind() MUST be called BEFORE supervisor.start("license-expiry", ...)
+        # so the cell is bound before the background thread can run _check_once().
+        import asyncio as _asyncio
+
+        _lic_server = getattr(app.state, "_uvicorn_server", None)
+        if _lic_server is not None:
+            _loop = _asyncio.get_running_loop()
+            container.services.license_expiry_shutdown_cell.bind(
+                UvicornShutdownRequester(
+                    loop=_loop,
+                    server=_lic_server,
+                    triggered_event=_license_expiry_triggered,
+                )
+            )
+        else:
+            # Dev / test path: no uvicorn server (e.g. lifespan called directly).
+            # Cell remains unbound — any shutdown request will fail-closed (os._exit).
+            # This is intentional: dev tests must not reach this path via expiry.
+            logger.warning(
+                "lifespan: _uvicorn_server not found — license_expiry cell not bound (fail-closed)"
+            )
+
+        supervisor.start("license-expiry", container.services.license_expiry.run_forever)
+
         app.state.supervisor = supervisor
         logger.info(
             "lifespan: supervisor started "
-            "(full-scan, monitor-cycle, notifier, session-expired-email)"
+            "(full-scan, monitor-cycle, notifier, session-expired-email, license-expiry)"
         )
 
         # Wire supervisor into the on_login_success backfill-trigger closure (f5u fix).
@@ -380,9 +409,40 @@ async def _lifespan_impl(
                 logger.info("lifespan: lock released")
             except Exception:
                 logger.exception("lifespan: lock release failed — manual cleanup may be required")
+            # License-expiry triggered: cancel watchdog BEFORE logging.shutdown()
+            # so any watchdog log messages are still captured by open handlers.
+            # (If watchdog fires between here and sys.exit, its stderr banner
+            # guarantees a forensic trace even after logging is closed.)
+            if _license_expiry_triggered.is_set():
+                _lic_svc = (
+                    container.services.license_expiry
+                    if container is not None
+                    else None
+                )
+                if _lic_svc is not None:
+                    with contextlib.suppress(Exception):
+                        _lic_svc.cancel_watchdog()
+
             # Flush and close all logging handlers (SLO-L2: zero loss on shutdown).
             with contextlib.suppress(Exception):
                 logging.shutdown()
+
+            # License-expiry path: exit 1 (fail-closed, ADR-056).
+            # Placed AFTER logging.shutdown() so all log messages are flushed.
+            if _license_expiry_triggered.is_set():
+                import os as _os_lic
+                import sys as _sys_lic
+
+                print(
+                    "License expired or invalid — exiting with code 1",
+                    file=_sys_lic.stderr,
+                )
+                # Third legitimate os._exit site (ADR-014): force termination on
+                # license expiry path.  sys.exit(1) raises SystemExit inside an
+                # async generator; uvicorn's LifespanOn._main catches BaseException
+                # and may swallow it, letting the process continue.  os._exit(1)
+                # bypasses all exception handlers and guarantees termination.
+                _os_lic._exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -623,7 +683,10 @@ def main() -> None:
         host=args.host,
         port=args.port,
     )
-    uvicorn.run(application, host=args.host, port=args.port)
+    config = uvicorn.Config(application, host=args.host, port=args.port)
+    server = uvicorn.Server(config)
+    application.state._uvicorn_server = server
+    server.run()
 
 
 if __name__ == "__main__":

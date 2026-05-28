@@ -84,6 +84,8 @@ def mock_container() -> Container:
             dnd=Mock(name="dnd"),
             catchup_dismiss=Mock(name="catchup_dismiss"),
             session_expired_email=Mock(name="session_expired_email"),
+            license_expiry=Mock(name="license_expiry"),
+            license_expiry_shutdown_cell=Mock(name="license_expiry_shutdown_cell"),
         )
 
     return Container(infra=_mock_infra(), services=_mock_services())

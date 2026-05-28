@@ -46,6 +46,7 @@ from fis_monitor.domain.interfaces import (
     StateRepository,
     UserStateRepository,
 )
+from fis_monitor.infra.shutdown_cell import ShutdownRequesterCell
 from fis_monitor.infra.sqlite.connection import (
     ConnectionProvider as ThreadLocalConnectionProvider,
 )
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from fis_monitor.services.dnd import DndService
     from fis_monitor.services.enrichment import EnrichmentService
     from fis_monitor.services.full_scan import FullScanService
+    from fis_monitor.services.license_expiry import LicenseExpirySupervisor
     from fis_monitor.services.login import LoginService
     from fis_monitor.services.lot_query import LotQueryService
     from fis_monitor.services.lot_user_state import LotUserStateService
@@ -257,6 +259,17 @@ class Services:
 
     session_expired_email: SessionExpiredEmailService
     """Sends one email per session-expiry epoch; idempotency via state_repo key."""
+
+    license_expiry: LicenseExpirySupervisor
+    """Daily runtime license-expiry check. Triggers graceful shutdown + watchdog."""
+
+    license_expiry_shutdown_cell: ShutdownRequesterCell
+    """Late-binding cell for the real ShutdownRequester.
+
+    Exposed here so ``app.py`` lifespan can call ``bind(requester)`` without
+    mutating private attributes on LicenseExpirySupervisor.  Must be bound
+    BEFORE ``supervisor.start("license-expiry", ...)`` is called.
+    """
 
 
 @dataclass(repr=False)

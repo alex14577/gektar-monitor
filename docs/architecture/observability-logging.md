@@ -100,6 +100,24 @@ Added: gektar_monitor-b9wq
 |---|---|---|
 | `on_login_success.callback.fired` | DEBUG | `trigger` |
 
+### license_expiry.* — `fis_monitor.services.license_expiry`
+
+Added: gektar_monitor-rh35 ([[decisions/ADR-056-licensing-hmac-stateless-offline|ADR-056]] §Runtime expiry enforcement)
+
+| Event | Level | Extra fields |
+|---|---|---|
+| `license_expiry.supervisor.start` | INFO | — |
+| `license_expiry.check.valid` | DEBUG | `today`, `exp`, `days_until_exp` |
+| `license_expiry.check.expired` | WARNING | `today`, `exp` |
+| `license_expiry.check.error` | ERROR | `error_type`, `today` |
+| `license_expiry.shutdown_requested` | WARNING | `today`, `exp` |
+| `license_expiry.watchdog.armed` | INFO | `grace_seconds` |
+| `license_expiry.watchdog.fired` | CRITICAL | — |
+| `license_expiry.supervisor.crash` | ERROR | `exc_type` |
+| `license_expiry.supervisor.stop` | INFO | — |
+
+PII policy: `today` and `exp` are dates (`YYYY-MM-DD`). `key_str`, `secret`, licensee, raw payload bytes — NEVER logged.
+
 ---
 
 ## Related Decisions

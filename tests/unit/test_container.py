@@ -81,6 +81,8 @@ class TestServicesFrozen:
             dnd=Mock(),
             catchup_dismiss=Mock(),
             session_expired_email=Mock(),
+            license_expiry=Mock(),
+                license_expiry_shutdown_cell=Mock(),
         )
 
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -135,6 +137,8 @@ class TestContainerNotFrozen:
             dnd=Mock(),
             catchup_dismiss=Mock(),
             session_expired_email=Mock(),
+            license_expiry=Mock(),
+                license_expiry_shutdown_cell=Mock(),
         )
 
         container = Container(infra=infra, services=services)
@@ -157,6 +161,8 @@ class TestContainerNotFrozen:
             dnd=Mock(),
             catchup_dismiss=Mock(),
             session_expired_email=Mock(),
+            license_expiry=Mock(),
+                license_expiry_shutdown_cell=Mock(),
         )
         container.services = new_services  # type: ignore
         assert container.services is new_services
@@ -221,6 +227,8 @@ class TestReprNoPII:
             dnd=Mock(),
             catchup_dismiss=Mock(),
             session_expired_email=Mock(),
+            license_expiry=Mock(),
+                license_expiry_shutdown_cell=Mock(),
         )
 
         repr_str = repr(services)
@@ -275,6 +283,8 @@ class TestReprNoPII:
             dnd=Mock(),
             catchup_dismiss=Mock(),
             session_expired_email=Mock(),
+            license_expiry=Mock(),
+                license_expiry_shutdown_cell=Mock(),
         )
 
         container = Container(infra=infra, services=services)
@@ -334,6 +344,8 @@ class TestContainerConstruction:
             dnd=Mock(),
             catchup_dismiss=Mock(),
             session_expired_email=Mock(),
+            license_expiry=Mock(),
+                license_expiry_shutdown_cell=Mock(),
         )
 
         container = Container(infra=infra, services=services)

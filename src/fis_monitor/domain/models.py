@@ -21,7 +21,7 @@ import hashlib
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import (
     Annotated,
@@ -369,11 +369,13 @@ class SsePayloadSchema:
     SMTP_FAILED: ClassVar[frozenset[str]] = frozenset(
         {"timestamp", "channel_id", "error_category", "attempt_no"}
     )
+    LICENSE_EXPIRED: ClassVar[frozenset[str]] = frozenset({"event", "timestamp", "expires_at"})
 
     _BY_EVENT: ClassVar[dict[str, frozenset[str]]] = {
         "session.expired": SESSION_EXPIRED,
         "cycle.error": CYCLE_ERROR,
         "smtp.failed": SMTP_FAILED,
+        "license.expired": LICENSE_EXPIRED,
     }
 
     @classmethod
@@ -1048,6 +1050,26 @@ class SseLoginSucceeded(BaseModel):
     timestamp: datetime
 
 
+class SseLicenseExpired(BaseModel):
+    """Critical event: runtime license check determined the license has expired
+    or become invalid. Triggers graceful shutdown.
+
+    ``expires_at`` is the expiry date from the license payload, or ``None``
+    for perpetual licenses or when the key could not be loaded.
+
+    No PII: only a date and a timestamp. Licensee identifier is intentionally
+    NOT included — PII / customer-identity leak vector.
+    """
+
+    model_config = _DOMAIN_MODEL_CONFIG
+
+    priority: ClassVar[Literal["critical"]] = "critical"
+
+    event: Literal["license.expired"] = "license.expired"
+    timestamp: datetime
+    expires_at: date | None
+
+
 # ---------------------------------------------------------------------------
 # Conversion helpers — public domain functions
 # ---------------------------------------------------------------------------
@@ -1171,4 +1193,5 @@ type SseEvent = (
     | SseCycleStarted
     | SseStatus
     | SseLoginSucceeded
+    | SseLicenseExpired
 )

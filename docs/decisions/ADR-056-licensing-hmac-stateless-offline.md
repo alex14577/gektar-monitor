@@ -71,6 +71,22 @@ Payload содержит: `v` (версия формата), `iat` (дата в�
 
 Все потери — осознанные и принятые явно в рамках ограничения «сложность ≤2/10».
 
+## Runtime expiry enforcement
+
+Стартовая проверка (`main()` lines ~551-572) — defence-in-depth: синхронная, до запуска lifespan.
+
+Для работающего приложения добавлен `LicenseExpirySupervisor` — фоновый поток, проверяющий лицензию раз в сутки в 00:01 UTC.
+
+**Ключевые решения:**
+
+- **UTC-расписание 00:01** — выбрано вместо «через 24 часа» чтобы поведение было предсказуемым независимо от времени старта. `next_check_at` — pure function, тестируемая без моков времени.
+- **Re-read с диска на каждой проверке** — `LicenseKeyProvider.load_key()` вызывается при каждом тике. Осознанное решение: key rotation (замена `license.key` без перезапуска) работает автоматически.
+- **Watchdog 45 s policy** — после вызова `request_shutdown()` взводится `threading.Timer(45.0, os._exit(1))`. Если graceful shutdown uvicorn не завершится за 45 с, watchdog принудительно завершает процесс. При успешном graceful shutdown lifespan отменяет таймер.
+- **Fail-closed на crash** — необработанное исключение в цикле проверки логируется как `supervisor.crash` и немедленно вызывает shutdown (не игнорируется).
+- **Идемпотентность `_handle_expiry`** — `threading.Event _expiry_handled` гарантирует ровно один вызов watchdog/SSE/shutdown даже при состоянии гонки.
+
+**DI-Protocol сеамы** (в `domain/interfaces.py`): `SecretProvider`, `LicenseKeyProvider`, `ShutdownRequester`. Позволяют подменять зависимости в тестах без реального диска/uvicorn/времени.
+
 ## Links
 
 - [[licensing/index|Licensing MOC]]

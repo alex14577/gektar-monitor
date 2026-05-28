@@ -57,6 +57,7 @@ from fis_monitor.domain.models import (
     SseLotNew,
 )
 from fis_monitor.infra.lock import FileLocker
+from fis_monitor.infra.shutdown_cell import ShutdownRequesterCell
 from fis_monitor.infra.sse.bus import ThreadEventBus
 from fis_monitor.infra.sse.sse_stream import SseStreamer
 from fis_monitor.web.deps import get_sse_streamer
@@ -321,6 +322,8 @@ def _build_smoke_container(
         dnd=_StubService(),
         catchup_dismiss=_StubService(),
         session_expired_email=_StubService(),  # type: ignore[arg-type]
+        license_expiry=_StubService(),  # type: ignore[arg-type]
+        license_expiry_shutdown_cell=ShutdownRequesterCell(),
     )
 
     return Container(infra=infra, services=services)

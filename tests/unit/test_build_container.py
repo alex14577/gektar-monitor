@@ -174,6 +174,8 @@ class TestProtocolSubstitution:
             dnd=original_services.dnd,
             catchup_dismiss=original_services.catchup_dismiss,
             session_expired_email=original_services.session_expired_email,
+            license_expiry=original_services.license_expiry,
+            license_expiry_shutdown_cell=original_services.license_expiry_shutdown_cell,
         )
         container.services = new_services
 

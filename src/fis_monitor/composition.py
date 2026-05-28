@@ -48,6 +48,7 @@ from fis_monitor.infra.notifiers.registry import ExplicitNotifierRegistry
 from fis_monitor.infra.parsers.detail_parser import SelectolaxDetailParser
 from fis_monitor.infra.parsers.list_parser import SelectolaxListParser
 from fis_monitor.infra.playwright.login import PlaywrightLoginSession
+from fis_monitor.infra.shutdown_cell import ShutdownRequesterCell
 from fis_monitor.infra.smtp.email_notifier import SmtpEmailNotifier
 from fis_monitor.infra.smtp.host_policy import DefaultSmtpHostPolicy
 from fis_monitor.infra.smtp.provider_catalog import StaticSmtpProviderCatalog
@@ -80,6 +81,7 @@ from fis_monitor.services.enrichment import EnrichmentService
 from fis_monitor.services.filter_matcher import RfSubjectFilterMatcher
 from fis_monitor.services.full_scan import FullScanService
 from fis_monitor.services.humanize import format_local_time as _format_local_time
+from fis_monitor.services.license_expiry import LicenseExpirySupervisor
 from fis_monitor.services.login import LoginService
 from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.lot_user_state import LotUserStateService
@@ -623,6 +625,41 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
 
     catchup_dismiss = CatchupDismissService(state_repo=settings_repo, clock=clock)
 
+    # ---------------------------------------------------------------------------
+    # LicenseExpirySupervisor — daily runtime expiry check (ADR-056).
+    #
+    # Provider adapters are thin callables wrapping the existing startup-check
+    # helpers so the supervisor re-reads key + secret on every check cycle.
+    # ShutdownRequester is a ShutdownRequesterCell at build_container time —
+    # lifespan binds the real UvicornShutdownRequester after uvicorn.Server
+    # is available, BEFORE supervisor.start("license-expiry", ...).
+    # Fail-closed: calling request_shutdown() on an unbound cell → os._exit(1).
+    # ---------------------------------------------------------------------------
+
+    license_expiry_shutdown_cell = ShutdownRequesterCell()
+
+    class _AssembledSecretProvider:
+        def get_secret(self) -> bytes:
+            from fis_monitor.licensing._secret import _assemble_secret
+
+            return _assemble_secret()
+
+    class _LicenseKeyLoaderProvider:
+        def load_key(self) -> str:
+            from pathlib import Path
+
+            from fis_monitor._license_loader import load_license_key
+
+            return load_license_key(Path(__file__).resolve())
+
+    license_expiry_supervisor = LicenseExpirySupervisor(
+        secret_provider=_AssembledSecretProvider(),
+        key_provider=_LicenseKeyLoaderProvider(),
+        clock=clock,
+        event_bus=event_bus,
+        shutdown_requester=license_expiry_shutdown_cell,
+    )
+
     services = Services(
         notifier_dispatcher=notifier_dispatcher,
         monitor_cycle=monitor_cycle,
@@ -640,6 +677,8 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
         dnd=dnd,
         catchup_dismiss=catchup_dismiss,
         session_expired_email=session_expired_email_svc,
+        license_expiry=license_expiry_supervisor,
+        license_expiry_shutdown_cell=license_expiry_shutdown_cell,
     )
 
     return Container(infra=infra, services=services)

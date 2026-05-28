@@ -407,6 +407,8 @@
 
 - **security-through-obscurity** — Подход к защите, при котором безопасность основана на сокрытии деталей реализации, а не на криптографической стойкости. В контексте лицензирования: XOR-обфускация секрета блокирует `strings`-атаку, но не дизассемблер. Принят явно для соответствия требованию «сложность ≤2/10». Честный tradeoff: атакующий с мотивацией извлечёт секрет. Альтернативы (KMS, HSM) — в [[licensing/out-of-scope]]. См. [[licensing/secret-obfuscation]].
 
+- **LicenseExpirySupervisor** — Фоновый supervisor-поток (`services/license_expiry.py`), проверяющий лицензию раз в сутки в 00:01 UTC. При истечении срока действия или ошибке файла инициирует graceful shutdown через `ShutdownRequester` (`uvicorn.Server.should_exit = True`) и взводит watchdog-таймер (45 с) с hard-exit через `os._exit(1)`. Fail-closed: необработанное исключение в цикле проверки = shutdown. Идемпотентен: `threading.Event _expiry_handled` предотвращает двойной вызов watchdog/SSE/shutdown. Wires в lifespan через `ThreadSupervisor.start("license-expiry", ...)`. Публикует `SseLicenseExpired` на SSE-шину. PII policy: никогда не логирует key_str, secret, licensee. См. [[decisions/ADR-056-licensing-hmac-stateless-offline|ADR-056]] §Runtime expiry enforcement.
+
 ## См. также
 
 - [[decisions-log]]

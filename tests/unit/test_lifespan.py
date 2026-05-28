@@ -189,6 +189,18 @@ class FakeInfra:
             self.sse_streamer = FakeSseStreamer()
 
 
+class FakeLicenseExpirySupervisor:
+    """Minimal stand-in for LicenseExpirySupervisor in lifespan tests."""
+
+    def __init__(self) -> None:
+        self._shutdown_requester: object = None
+        self._watchdog_timer: object = None
+        self.run_forever_calls: int = 0
+
+    def run_forever(self, stop_event: object) -> None:
+        self.run_forever_calls += 1
+
+
 @dataclass
 class FakeServices:
     notifier_dispatcher: FakeDispatcher
@@ -198,6 +210,7 @@ class FakeServices:
     backfill: FakeBackfillService = None  # type: ignore[assignment]
     enrichment: FakeEnrichmentService = None  # type: ignore[assignment]
     session_expired_email: FakeSessionExpiredEmailService = None  # type: ignore[assignment]
+    license_expiry: FakeLicenseExpirySupervisor = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.backfill is None:
@@ -206,6 +219,8 @@ class FakeServices:
             self.enrichment = FakeEnrichmentService()
         if self.session_expired_email is None:
             self.session_expired_email = FakeSessionExpiredEmailService()
+        if self.license_expiry is None:
+            self.license_expiry = FakeLicenseExpirySupervisor()
 
 
 @dataclass

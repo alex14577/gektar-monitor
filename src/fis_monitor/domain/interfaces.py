@@ -87,6 +87,7 @@ __all__ = [
     "EventSubscription",
     "FilterMatcher",
     "HttpClient",
+    "LicenseKeyProvider",
     "ListParser",
     "Locker",
     "LoginSession",
@@ -96,7 +97,9 @@ __all__ = [
     "Notifier",
     "PaginatedListFetcherProto",
     "RegionSubscriptionRepository",
+    "SecretProvider",
     "SettingsRepository",
+    "ShutdownRequester",
     "SmtpCredentialsRepository",
     "SmtpHostPolicy",
     "SmtpProviderCatalog",
@@ -872,4 +875,59 @@ class Notifier(Protocol):
         """
         ...
 
+
+# ===========================================================================
+# Layer 0.5 — licensing seams (runtime expiry enforcement)
+# ===========================================================================
+
+
+class SecretProvider(Protocol):
+    """Source of the HMAC secret bytes used for license verification.
+
+    Separated from the verifier so the secret assembly (XOR obfuscation)
+    can be swapped in tests without touching the verification logic.
+
+    Implementation: thin wrapper over ``fis_monitor.licensing._secret._assemble_secret``.
+    """
+
+    def get_secret(self) -> bytes:
+        """Return the 32-byte HMAC secret. Never raises under normal conditions."""
+        ...
+
+
+class LicenseKeyProvider(Protocol):
+    """Source of the license key string read from disk.
+
+    Re-read on every check so key rotation (replacing the file while the
+    app is running) takes effect without restart. This is an intentional
+    design choice — see ADR-056 §Runtime expiry enforcement.
+
+    Implementation: thin wrapper over
+    ``fis_monitor._license_loader.load_license_key``.
+    """
+
+    def load_key(self) -> str:
+        """Read and return the license key string from disk.
+
+        Raises:
+            FileNotFoundError: key file absent.
+            OSError: other I/O error.
+        """
+        ...
+
+
+class ShutdownRequester(Protocol):
+    """Thread-safe application shutdown request.
+
+    Decouples the license supervisor from uvicorn internals so the
+    supervisor can be tested without a running ASGI server.
+
+    Implementation: a closure that calls
+    ``loop.call_soon_threadsafe(lambda: setattr(server, "should_exit", True))``
+    from the running event loop captured in lifespan.
+    """
+
+    def request_shutdown(self) -> None:
+        """Request graceful application shutdown. Thread-safe, idempotent."""
+        ...
 

@@ -174,18 +174,46 @@ def test_lazy_onboarding_proxy_resolves_via_app_state() -> None:
 
 
 def test_main_argparse_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """main() passes host/port defaults to uvicorn.run when called with no args."""
+    """main() creates uvicorn.Server with correct host/port defaults."""
     monkeypatch.setattr(sys, "argv", ["fis-monitor"])
     # Redirect data_dir so mkdir doesn't pollute cwd
     monkeypatch.chdir(tmp_path)
 
+    # Provide a valid license key via patching load_license_key so the startup
+    # check passes without a real file on disk.
+    import base64
+    import datetime as _dt
+
+    from fis_monitor.licensing._codec import _canonical_bytes, encode_payload
+    from fis_monitor.licensing._hmac import sign
+    from fis_monitor.licensing._secret import _assemble_secret
+
+    _iat = _dt.date.today().isoformat()
+    _payload: dict = {"v": 1, "iat": _iat, "lic": "test"}
+    _encoded = encode_payload(_payload)
+    _sig = sign(_canonical_bytes(_payload), _assemble_secret())
+    _encoded_sig = base64.urlsafe_b64encode(_sig).rstrip(b"=").decode("ascii")
+    _fake_key = f"v1.{_encoded}.{_encoded_sig}"
+
+    # Fake uvicorn.Server: records Config and exposes should_exit.
+    captured_config: list = []
+
+    class FakeServer:
+        def __init__(self, config: object) -> None:
+            captured_config.append(config)
+            self.should_exit = False
+
+        def run(self) -> None:
+            pass
+
     fake_app = MagicMock()
-    fake_run = MagicMock()
+    fake_app.state = MagicMock()
 
     # Patch create_app to return a fake app so lifespan never runs.
     with (
         patch("fis_monitor.app.create_app", return_value=fake_app),
-        patch("uvicorn.run", fake_run),
+        patch("uvicorn.Server", FakeServer),
+        patch("fis_monitor._license_loader.load_license_key", return_value=_fake_key),
         # Provide a stub build_container so the late import inside main() resolves.
         patch.dict(
             "sys.modules",
@@ -196,12 +224,7 @@ def test_main_argparse_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
         main()
 
-    fake_run.assert_called_once()
-    _, kwargs = fake_run.call_args
-    assert kwargs.get("host") == "127.0.0.1" or fake_run.call_args[0][1] == "127.0.0.1"
-    # port may be positional or keyword
-    call_args = fake_run.call_args
-    port_value = call_args.kwargs.get("port") or (
-        call_args.args[2] if len(call_args.args) > 2 else None
-    )
-    assert port_value == 8000
+    assert len(captured_config) == 1, "uvicorn.Server must be constructed once"
+    cfg = captured_config[0]
+    assert cfg.host == "127.0.0.1"
+    assert cfg.port == 8000
