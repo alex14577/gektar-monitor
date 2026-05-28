@@ -436,14 +436,6 @@ _CURSOR_99 = (_NOW.isoformat(), 99)
             ["date_create < ?", "date_create = ? AND id < ?"],
             ["date_create > ?", "id > ?"],
         ),
-        # Cursor (asc) — composite keyset condition
-        (
-            LotFilters(sort_dir="asc"),
-            _CURSOR_42,
-            5,
-            ["date_create > ?", "date_create = ? AND id > ?"],
-            ["date_create < ?", "id < ?"],
-        ),
         # All filters combined (desc cursor)
         (
             LotFilters(
@@ -689,52 +681,40 @@ def _walk_all_pages(
     return all_ids
 
 
-@pytest.mark.parametrize("sort_dir", ["desc", "asc"])
-def test_cursor_no_duplicates_no_gaps_distinct_dates(sort_dir: str) -> None:
-    """Walk > page_size rows with DISTINCT date_create — every row appears exactly once.
+def test_cursor_no_duplicates_no_gaps_distinct_dates() -> None:
+    """Walk > page_size rows with DISTINCT date_create — every row appears exactly once (DESC).
 
-    Invariant: unique == total and dupes == 0 for both sort directions.
+    Invariant: unique == total and dupes == 0.
     """
     from datetime import timedelta
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     # 10 rows each with a distinct date_create, 1 day apart; id = 1..10
-    rows = [
-        _make_db_row(lot_id=i, date_create=base + timedelta(days=i))
-        for i in range(1, 11)
-    ]
+    rows = [_make_db_row(lot_id=i, date_create=base + timedelta(days=i)) for i in range(1, 11)]
     svc = _make_service(rows=rows)
-    ids = _walk_all_pages(svc, LotFilters(sort_dir=sort_dir), page_size=3)
+    ids = _walk_all_pages(svc, LotFilters(), page_size=3)
 
     assert len(ids) == 10, f"Expected 10 ids, got {len(ids)}: {ids}"
     assert len(set(ids)) == 10, f"Duplicates found: {ids}"
 
 
-@pytest.mark.parametrize("sort_dir", ["desc", "asc"])
-def test_cursor_monotonic_order_distinct_dates(sort_dir: str) -> None:
-    """Concatenated pages are monotonically ordered by date_create."""
+def test_cursor_monotonic_order_distinct_dates() -> None:
+    """Concatenated pages are monotonically ordered by date_create DESC."""
     from datetime import timedelta
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
-    rows = [
-        _make_db_row(lot_id=i, date_create=base + timedelta(days=i))
-        for i in range(1, 11)
-    ]
+    rows = [_make_db_row(lot_id=i, date_create=base + timedelta(days=i)) for i in range(1, 11)]
     svc = _make_service(rows=rows)
-    ids = _walk_all_pages(svc, LotFilters(sort_dir=sort_dir), page_size=3)
+    ids = _walk_all_pages(svc, LotFilters(), page_size=3)
 
     # Recover date_create values for each id in returned order
     # date_create for id=i is base + timedelta(days=i)
     dates = [base + timedelta(days=i) for i in ids]
-    if sort_dir == "desc":
-        assert dates == sorted(dates, reverse=True), f"Not monotone DESC: {dates}"
-    else:
-        assert dates == sorted(dates), f"Not monotone ASC: {dates}"
+    assert dates == sorted(dates, reverse=True), f"Not monotone DESC: {dates}"
 
 
-@pytest.mark.parametrize("sort_dir", ["desc", "asc"])
-def test_cursor_no_duplicates_no_gaps_tied_dates(sort_dir: str) -> None:
-    """Walk > page_size rows where ALL rows share the SAME date_create.
+def test_cursor_no_duplicates_no_gaps_tied_dates() -> None:
+    """Walk > page_size rows where ALL rows share the SAME date_create (DESC).
 
     Invariant: no row skipped or duplicated across page boundaries.
     The tie-breaking column is id, so pagination relies entirely on id ordering.
@@ -742,7 +722,7 @@ def test_cursor_no_duplicates_no_gaps_tied_dates(sort_dir: str) -> None:
     tied_date = datetime(2026, 3, 15, tzinfo=UTC)
     rows = [_make_db_row(lot_id=i, date_create=tied_date) for i in range(1, 11)]
     svc = _make_service(rows=rows)
-    ids = _walk_all_pages(svc, LotFilters(sort_dir=sort_dir), page_size=3)
+    ids = _walk_all_pages(svc, LotFilters(), page_size=3)
 
     assert len(ids) == 10, f"Expected 10 ids, got {len(ids)}: {ids}"
     assert len(set(ids)) == 10, f"Duplicates found: {ids}"

@@ -234,12 +234,12 @@ class TestPostViewFiltersInvalid:
     @pytest.mark.parametrize(
         "area_min, area_max, expected_status",
         [
-            ("500", "10", 422),   # min > max → error
-            ("10", "500", 200),   # min < max → ok
+            ("500", "10", 422),  # min > max → error
+            ("10", "500", 200),  # min < max → ok
             ("100", "100", 200),  # min == max → ok (boundary)
-            (None, "500", 200),   # only area_max → ok
-            ("500", None, 200),   # only area_min → ok
-            (None, None, 200),    # neither → ok
+            (None, "500", 200),  # only area_max → ok
+            ("500", None, 200),  # only area_min → ok
+            (None, None, 200),  # neither → ok
         ],
     )
     def test_area_min_greater_than_area_max_returns_422(
@@ -415,7 +415,7 @@ class TestPostViewFiltersFilterContent:
             resp = client.post("/filters/view", data={"subjects": "27"})
         assert resp.status_code == 200
         # The "Ничего не подходит" empty state must appear inside #feed.
-        assert "id=\"feed\"" in resp.text
+        assert 'id="feed"' in resp.text
         assert "Ничего не подходит" in resp.text
 
 
@@ -482,7 +482,6 @@ class TestOobFilterTrigger:
             area_min_label="0",
             area_max_label="∞",
             only_new=False,
-            sort_dir="desc",
         )
         scope_ctx = SimpleNamespace(subjects_count=19)
         zones_ctx = SimpleNamespace(hot=(), today=())
@@ -643,6 +642,7 @@ class TestGetSubjects:
         with TestClient(app) as client:
             resp = client.get("/filters/subjects")
         from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
+
         assert SUBJECT_TITLE_BY_ID[27] in resp.text
         assert SUBJECT_TITLE_BY_ID[28] in resp.text
         # All subjects including Якутия (87) must appear — full catalog.
@@ -724,72 +724,3 @@ class TestHxTriggerFilterChanged:
         assert resp.headers.get("hx-trigger") == "filter-changed", (
             "Expected HX-Trigger: filter-changed in POST /filters/clear response"
         )
-
-
-# ---------------------------------------------------------------------------
-# sort_dir — Layer 4 TestClient tests (gektar_monitor-l2im)
-# ---------------------------------------------------------------------------
-
-
-class TestSortDir:
-    def test_post_filters_view_sort_dir_asc_renders_selected_and_sets_cookie(self) -> None:
-        """POST sort_dir=asc → response html contains value="asc" + cookie sort_dir="asc"."""
-        app = _build_app()
-        with TestClient(app) as client:
-            resp = client.post("/filters/view", data={"sort_dir": "asc"})
-        assert resp.status_code == 200, resp.text
-        assert 'value="asc"' in resp.text
-        assert "selected" in resp.text
-        data = _cookie_data(resp)
-        assert data["sort_dir"] == "asc"
-
-    def test_post_filters_view_sort_dir_desc_renders_selected(self) -> None:
-        """POST sort_dir=desc → cookie sort_dir="desc"."""
-        app = _build_app()
-        with TestClient(app) as client:
-            resp = client.post("/filters/view", data={"sort_dir": "desc"})
-        assert resp.status_code == 200, resp.text
-        data = _cookie_data(resp)
-        assert data["sort_dir"] == "desc"
-
-    def test_post_filters_view_sort_dir_missing_defaults_to_desc(self) -> None:
-        """POST without sort_dir field → cookie sort_dir silently defaults to 'desc'."""
-        app = _build_app()
-        with TestClient(app) as client:
-            resp = client.post("/filters/view", data={})
-        assert resp.status_code == 200, resp.text
-        data = _cookie_data(resp)
-        assert data["sort_dir"] == "desc"
-
-    def test_post_filters_view_sort_dir_invalid_silently_coerced_to_desc(self) -> None:
-        """POST sort_dir=foo → 200 (not 422), cookie sort_dir coerced to 'desc'.
-
-        Contract: invalid sort_dir is silently treated as default (consistent with
-        bool checkbox pattern, not with numeric area_* which returns 422).
-        """
-        app = _build_app()
-        with TestClient(app) as client:
-            resp = client.post("/filters/view", data={"sort_dir": "foo"})
-        assert resp.status_code == 200, resp.text
-        data = _cookie_data(resp)
-        assert data["sort_dir"] == "desc"
-
-    def test_post_filters_clear_resets_sort_dir_to_default(self) -> None:
-        """POST /filters/clear → cookie cleared (max_age=0).
-
-        Default ViewFilters has sort_dir='desc'.
-        """
-        from fis_monitor.services.view_filters import ViewFilters
-
-        app = _build_app()
-        with TestClient(app) as client:
-            # First set sort_dir=asc
-            client.post("/filters/view", data={"sort_dir": "asc"})
-            # Then clear
-            clear_resp = client.post("/filters/clear")
-        assert clear_resp.status_code == 200, clear_resp.text
-        # Cookie must be cleared (max_age=0)
-        set_cookie = clear_resp.headers.get("set-cookie", "")
-        assert "max-age=0" in set_cookie.lower()
-        # Default ViewFilters (as produced by clear endpoint) has sort_dir='desc'
-        assert ViewFilters().sort_dir == "desc"

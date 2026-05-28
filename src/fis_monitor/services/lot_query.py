@@ -17,10 +17,9 @@ than in a new ``LotRepository.list_filtered()`` method.  Rationale:
 **Pagination:** cursor = opaque base64(``<date_create_iso>:<lot_id>``).
 The sort key is ``(date_create, id)``; the composite keyset cursor carries
 both values so pages remain correct even when many lots share the same
-``date_create``.
+``date_create``.  Order is always DESC (newest first):
 
-- DESC: ``WHERE (date_create < ?) OR (date_create = ? AND id < ?)``
-- ASC:  ``WHERE (date_create > ?) OR (date_create = ? AND id > ?)``
+- ``WHERE (date_create < ?) OR (date_create = ? AND id < ?)``
 
 ``date_create`` is stored as ISO-8601 text (via ``_iso()`` in the
 repository), which makes lexicographic and chronological order equivalent.
@@ -104,7 +103,6 @@ class LotFilters:
     area_sqm_max: Decimal | None = None
     status: str | None = None
     fts_query: str | None = None
-    sort_dir: Literal["desc", "asc"] = "desc"
     apply_subscription_cutoff: bool = False
 
     def __post_init__(self) -> None:
@@ -118,10 +116,6 @@ class LotFilters:
         if self.status is not None and self.status not in _KNOWN_STATUSES:
             raise ValueError(
                 f"Unknown lot status {self.status!r}. Allowed: {sorted(_KNOWN_STATUSES)}"
-            )
-        if self.sort_dir not in ("desc", "asc"):
-            raise ValueError(
-                f"sort_dir must be 'desc' or 'asc', got {self.sort_dir!r}"
             )
 
 
@@ -201,10 +195,7 @@ _LOT_SELECT = (
 # Column order is preserved byte-for-byte so row_to_lot() positional mapping
 # is unaffected. Unqualified _LOT_SELECT is kept for the JOIN-free path so
 # the /lots API path is unchanged.
-_LOT_SELECT_QUALIFIED = ", ".join(
-    f"lots.{col.strip()}"
-    for col in _LOT_SELECT.split(",")
-)
+_LOT_SELECT_QUALIFIED = ", ".join(f"lots.{col.strip()}" for col in _LOT_SELECT.split(","))
 
 
 def _compute_freshness(
@@ -352,9 +343,7 @@ class LotQueryService:
         )
 
         now_ts = self._clock.now().timestamp()
-        items = tuple(
-            _lot_to_user_dto(lot, user_states.get(lot.id), now_ts=now_ts) for lot in lots
-        )
+        items = tuple(_lot_to_user_dto(lot, user_states.get(lot.id), now_ts=now_ts) for lot in lots)
 
         next_cursor: str | None = None
         if has_more and lots:
@@ -429,22 +418,14 @@ class LotQueryService:
 
         if last_cursor is not None:
             last_date_iso, last_id = last_cursor
-            if filters.sort_dir == "desc":
-                conditions.append(
-                    f"({col}date_create < ? OR ({col}date_create = ? AND {col}id < ?))"
-                )
-            else:
-                conditions.append(
-                    f"({col}date_create > ? OR ({col}date_create = ? AND {col}id > ?))"
-                )
+            conditions.append(f"({col}date_create < ? OR ({col}date_create = ? AND {col}id < ?))")
             params.extend([last_date_iso, last_date_iso, last_id])
 
         where = " AND ".join(conditions)
-        order_dir = filters.sort_dir.upper()  # "DESC" or "ASC"
         from_clause = f"lots{join_clause}"
         sql = (
             f"SELECT {select_cols} FROM {from_clause} WHERE {where} "
-            f"ORDER BY {col}date_create {order_dir}, {col}id {order_dir} LIMIT ?"
+            f"ORDER BY {col}date_create DESC, {col}id DESC LIMIT ?"
         )
         params.append(limit)
 
@@ -471,10 +452,7 @@ class LotQueryService:
         """
         if not filters.apply_subscription_cutoff:
             return "", ""
-        join_clause = (
-            " LEFT JOIN region_subscriptions rs"
-            " ON lots.region_id = rs.region_id"
-        )
+        join_clause = " LEFT JOIN region_subscriptions rs ON lots.region_id = rs.region_id"
         where_condition = (
             "(lots.region_id IS NULL OR rs.subscribed_at IS NULL"
             " OR date(lots.date_create) >= date(rs.subscribed_at))"

@@ -153,6 +153,17 @@ class TestLotViewModelUrlCadMap:
         assert "pkk.rosreestr.ru" not in payload, (
             f"Old PKK URL must be gone from rendered HTML.\nGot:\n{payload}"
         )
+        assert 'class="copy"' not in payload, f"Icon copy button must be removed.\nGot:\n{payload}"
+        assert 'class="lot__cad-copy"' in payload, (
+            f"Inline copy button with class 'lot__cad-copy' must be present.\nGot:\n{payload}"
+        )
+        assert 'data-copy="01:02:000000:1"' in payload, (
+            f"Button must carry data-copy with the cadastral number.\nGot:\n{payload}"
+        )
+        assert ">Скопировать<" not in payload, (
+            f"Standalone 'Скопировать' button label must not appear"
+            f" (old icon button gone).\nGot:\n{payload}"
+        )
 
 
 class TestSseLotNewRenderedHtml:

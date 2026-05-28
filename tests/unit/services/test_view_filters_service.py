@@ -120,50 +120,21 @@ def test_unknown_keys_in_cookie_are_ignored() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (f) Field constraints
+# Regression: old cookie with sort_dir field must not crash (ewqq)
 # ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# sort_dir field — Layer 1 unit tests (gektar_monitor-l2im)
-# ---------------------------------------------------------------------------
+def test_deserialize_old_cookie_with_sort_dir_ignores_field() -> None:
+    """Decoding a cookie that still contains sort_dir must not raise; field is silently ignored."""
+    import json
+    from urllib.parse import quote
 
-
-class TestSortDir:
-    def test_view_filters_sort_dir_default_is_desc(self) -> None:
-        """Default sort_dir must be 'desc' (safe fallback)."""
-        f = ViewFilters()
-        assert f.sort_dir == "desc"
-
-    def test_view_filters_sort_dir_accepts_asc(self) -> None:
-        """sort_dir='asc' is a valid value."""
-        f = ViewFilters(sort_dir="asc")
-        assert f.sort_dir == "asc"
-
-    def test_view_filters_sort_dir_rejects_invalid(self) -> None:
-        """sort_dir with an invalid value must raise ValidationError."""
-        with pytest.raises(ValidationError):
-            ViewFilters(sort_dir="foo")  # type: ignore[arg-type]
-
-    def test_view_filters_serialize_deserialize_roundtrip_preserves_sort_dir(self) -> None:
-        """Roundtrip must preserve sort_dir='asc'."""
-        original = ViewFilters(sort_dir="asc")
-        recovered = deserialize(serialize(original))
-        assert recovered is not None
-        assert recovered.sort_dir == "asc"
-
-    def test_view_filters_deserialize_old_cookie_without_sort_dir_defaults_to_desc(self) -> None:
-        """Cookie JSON without sort_dir field (old format) must deserialise to default 'desc'."""
-        import json
-        from urllib.parse import quote
-
-        old_json = json.dumps(
-            {"subjects": [], "area_min": None, "area_max": None, "only_new": False}
-        )
-        encoded = quote(old_json, safe="")
-        result = deserialize(encoded)
-        assert result is not None
-        assert result.sort_dir == "desc"
+    old_json = json.dumps(
+        {"subjects": [], "area_min": None, "area_max": None, "only_new": False, "sort_dir": "asc"}
+    )
+    encoded = quote(old_json, safe="")
+    result = deserialize(encoded)
+    assert result is not None
 
 
 # ---------------------------------------------------------------------------

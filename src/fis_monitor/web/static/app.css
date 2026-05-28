@@ -396,7 +396,8 @@ code, kbd, .mono { font-family: var(--font-mono); }
 
 /* ============== POSTER variant (hot / warm) ============== */
 .lot--poster { padding: 14px 20px 14px 28px; cursor: pointer; }
-.lot--poster :is(a, button, input, textarea, select, label, [data-copy]) { cursor: auto; }
+.lot--poster :is(a, button, input, textarea, select, label) { cursor: auto; }
+.lot--poster .lot__cad-copy { cursor: pointer; }
 .lot--poster .lot__row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
 .lot--poster .lot__chips { display: flex; gap: 6px; flex-wrap: wrap; }
 
@@ -410,6 +411,21 @@ code, kbd, .mono { font-family: var(--font-mono); }
   background: var(--code-bg); padding: 4px 8px; border-radius: var(--r-sm);
   color: var(--ink);
 }
+.lot__cad-copy {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+}
+.lot__cad-copy:focus-visible {
+  outline: 2px solid var(--accent, #4f9cf9);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .lot--poster .lot__ogv     { color: var(--muted); font-size: 0.8125rem; margin-top: 4px; }
 .lot--poster .lot__appeared  { color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
 .lot--poster .lot__registry  { color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
@@ -417,14 +433,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .lot--poster .lot__cta {
   display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center;
 }
-
-/* copy button (inline) */
-.copy {
-  border: 0; background: transparent; color: var(--muted);
-  width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 4px;
-  cursor: pointer;
-}
-.copy:hover { background: var(--surface-2); color: var(--ink); }
 
 /* details — hidden by default, revealed via JS toggle; always expanded in poster variant */
 .lot__details { display: none; padding: 8px 16px 0; }
@@ -834,16 +842,7 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
   padding: 8px 0 12px;
   font-size: 0.875rem;
 }
-.filter-bar__left { display: flex; align-items: center; gap: 6px; }
 .filter-bar__right { margin-left: auto; }
-.filter-bar__label { color: var(--muted); font-size: 0.8125rem; }
-.filter-bar__select {
-  padding: 4px 8px; font-size: 0.8125rem;
-  border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--surface); color: var(--ink);
-  cursor: pointer;
-}
-.filter-bar__select:hover { border-color: var(--line-strong); }
 .filter-bar__count { color: var(--ink-2); font-size: 0.8125rem; }
 
 /* ---------- C3 onboarding filter hint ---------- */

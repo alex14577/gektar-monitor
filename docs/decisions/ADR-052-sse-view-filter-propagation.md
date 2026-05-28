@@ -122,7 +122,7 @@ and cycles the `sse-connect` attribute on `#sse-root`:
    tick) — htmx-sse creates a new `EventSource`, which re-reads the updated
    `view_filters` cookie during the `GET /events` handshake.
 3. A 200 ms debounce (module-scoped `_reconnectTimer`) prevents multiple rapid filter
-   clicks (e.g. sort_dir toggle) from spawning several reconnects.
+   clicks (region/area toggles) from spawning several reconnects.
 
 **Test plan:**
 - Layer 4 (`TestClient`): `test_post_view_filters_returns_hx_trigger_header` and

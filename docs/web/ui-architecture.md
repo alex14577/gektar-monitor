@@ -186,9 +186,8 @@ Header разделён на три зоны через CSS flex:
 ### Filter bar
 
 Отдельный `<div class="filter-bar">` между header и лентой лотов (`_feed_lots.html.jinja`).
-- Слева: sort select («по дате ↓ / ↑»), `name="sort_dir"`, вызывает `hx-post="/filters/view"`.
 - Справа: счётчик лотов (`<span id="feed-lot-count">`).
-- Sort field: `first_seen DESC/ASC` (момент обнаружения парсером). `LotFilters.sort_dir: Literal["desc","asc"] = "desc"`.
+- Сортировка захардкожена `ORDER BY date_create DESC, id DESC` в `LotFilters` — UI-контрол удалён (см. bd `gektar_monitor-ewqq`). Поле `sort_dir` исключено из `ViewFilters` / `LotFilters` / Form-схемы `/filters/view`. Старые cookies со значением `sort_dir` молча игнорируются (Pydantic `extra="ignore"`).
 
 ### Пагинация ленты — кнопка «Показать ещё»
 

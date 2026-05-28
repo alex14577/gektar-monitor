@@ -184,7 +184,7 @@
   // document.body. We cycle the sse-connect attribute on #sse-root so htmx-sse tears
   // down the old EventSource and creates a new one that reads the updated view_filters
   // cookie in its GET /events handshake.
-  // Debounce ~200 ms protects against rapid sort_dir clicks spawning many reconnects.
+  // Debounce ~200 ms coalesces rapid filter changes into a single reconnect.
   let _reconnectTimer = null;
   document.body.addEventListener('filter-changed', function() {
     const root = document.getElementById('sse-root');

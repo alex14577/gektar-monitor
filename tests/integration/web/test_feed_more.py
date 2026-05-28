@@ -7,7 +7,6 @@ Invariants covered (per test-strategy Layer 4 + task spec):
   T3 Exhaustion: dataset ≤ one page → no #load-more-trigger rendered on initial feed.
   T4 Invalid cursor → 422.
   T5 only_new preserved across pages: unseen lots appear, seen lots are excluded.
-  T6 sort_dir preserved across pages: ordering consistent with filter cookie.
 """
 
 from __future__ import annotations
@@ -91,7 +90,7 @@ class _PagedFakeLotQueryService:
     pre-sorted item list.  Uses the same cursor encode/decode logic as the
     real service so tests exercise the actual cursor contract.
 
-    ``sort_dir_filter`` allows asserting the sort direction passed per call.
+    Supports cursor-based pagination; sort order is hardcoded DESC (newest first).
     """
 
     def __init__(
@@ -113,37 +112,26 @@ class _PagedFakeLotQueryService:
 
         self.search_calls.append((filters, page_size, cursor))
 
-        # Sort items by (date_create, id) according to sort_dir.
-        desc = filters.sort_dir == "desc"
+        # Sort items by (date_create, id) DESC (hardcoded newest first).
         sorted_items = sorted(
             self._items,
             key=lambda d: (d.date_create, d.id),
-            reverse=desc,
+            reverse=True,
         )
 
         # Apply region filter (subject_display_names).
         if filters.subject_display_names:
-            sorted_items = [
-                d for d in sorted_items if d.region in filters.subject_display_names
-            ]
+            sorted_items = [d for d in sorted_items if d.region in filters.subject_display_names]
 
-        # Apply cursor: skip items we already returned.
+        # Apply cursor: skip items already returned (DESC order hardcoded).
         if cursor is not None:
             date_iso, last_id = _decode_cursor(cursor)
             last_dt = datetime.fromisoformat(date_iso)
-            filtered: list[LotUserDTO] = []
-            for dto in sorted_items:
-                if desc:
-                    if dto.date_create < last_dt or (
-                        dto.date_create == last_dt and dto.id < last_id
-                    ):
-                        filtered.append(dto)
-                else:
-                    if dto.date_create > last_dt or (
-                        dto.date_create == last_dt and dto.id > last_id
-                    ):
-                        filtered.append(dto)
-            sorted_items = filtered
+            sorted_items = [
+                dto
+                for dto in sorted_items
+                if dto.date_create < last_dt or (dto.date_create == last_dt and dto.id < last_id)
+            ]
 
         has_more = len(sorted_items) > page_size
         page_items = sorted_items[:page_size]
@@ -204,10 +192,7 @@ class TestWalkAllPages:
     lot on the last page = 4 pages total (≥3 pages required).
     """
 
-    @pytest.mark.parametrize("sort_dir", ["desc", "asc"])
-    def test_all_lots_appear_exactly_once(
-        self, monkeypatch: pytest.MonkeyPatch, sort_dir: str
-    ) -> None:
+    def test_all_lots_appear_exactly_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """10 lots, route page_size=3 → walk all /feed/more pages, each lot id once."""
         # Force the route to use a small page size so page boundaries are real.
         monkeypatch.setattr(_main_module, "_FEED_PAGE_SIZE", _TEST_PAGE_SIZE)
@@ -223,7 +208,7 @@ class TestWalkAllPages:
         with TestClient(app, raise_server_exceptions=True) as client:
             # Simulate what the browser does after GET /: obtain the first cursor
             # by calling search directly with the same filters the route will use.
-            initial_page = lq.search(LotFilters(sort_dir=sort_dir), page_size=_TEST_PAGE_SIZE)  # type: ignore[arg-type]
+            initial_page = lq.search(LotFilters(), page_size=_TEST_PAGE_SIZE)
             for dto in initial_page.items:
                 collected_ids.append(dto.id)
 
@@ -234,7 +219,7 @@ class TestWalkAllPages:
             while cursor:
                 resp = client.get(
                     f"/feed/more?cursor={cursor}&shown={shown}",
-                    cookies={_COOKIE_NAME: _view_filters_cookie(ViewFilters(sort_dir=sort_dir))},  # type: ignore[arg-type]
+                    cookies={_COOKIE_NAME: _view_filters_cookie(ViewFilters())},
                 )
                 assert resp.status_code == 200, resp.text
                 body = resp.text
@@ -249,11 +234,10 @@ class TestWalkAllPages:
                 cursor = m.group(1) if m else None
                 if cursor:
                     from urllib.parse import unquote_plus
+
                     cursor = unquote_plus(cursor)
 
-        assert pages_walked >= 3, (
-            f"Expected ≥3 /feed/more pages, walked only {pages_walked}"
-        )
+        assert pages_walked >= 3, f"Expected ≥3 /feed/more pages, walked only {pages_walked}"
         assert sorted(collected_ids) == list(range(1, 11)), (
             f"Expected all ids 1-10, got {sorted(collected_ids)}"
         )
@@ -261,9 +245,7 @@ class TestWalkAllPages:
             f"Duplicate ids: {[x for x in collected_ids if collected_ids.count(x) > 1]}"
         )
 
-    def test_next_cursor_absent_on_last_page(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_next_cursor_absent_on_last_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Last page response must NOT contain #load-more-trigger."""
         monkeypatch.setattr(_main_module, "_FEED_PAGE_SIZE", _TEST_PAGE_SIZE)
 
@@ -279,9 +261,7 @@ class TestWalkAllPages:
         with TestClient(app) as client:
             resp = client.get(f"/feed/more?cursor={cursor}")
         assert resp.status_code == 200
-        assert "load-more-trigger" not in resp.text, (
-            "Last page must not render #load-more-trigger"
-        )
+        assert "load-more-trigger" not in resp.text, "Last page must not render #load-more-trigger"
 
 
 # ---------------------------------------------------------------------------
@@ -292,9 +272,7 @@ class TestWalkAllPages:
 class TestFiltersPreserved:
     """T2: region filter in cookie → every load-more page returns only matching lots."""
 
-    def test_region_filter_applied_on_load_more(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_region_filter_applied_on_load_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Cookie with subject filter → /feed/more returns only matching region lots."""
         from fis_monitor.domain.regions import SUBJECT_TITLE_BY_ID
 
@@ -387,9 +365,7 @@ class TestExhaustion:
             settings=Settings(),
             active_lot_count=len(lots),
         )
-        assert ctx["next_cursor"] is None, (
-            "next_cursor must be None when all lots fit in one page"
-        )
+        assert ctx["next_cursor"] is None, "next_cursor must be None when all lots fit in one page"
 
     def test_feed_lots_no_trigger_when_next_cursor_none(self) -> None:
         """_feed_lots.html.jinja must not render #load-more-trigger when next_cursor is None."""
@@ -399,9 +375,7 @@ class TestExhaustion:
 
         from fis_monitor.web.templates import TEMPLATES_DIR
 
-        env = Environment(
-            loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True
-        )
+        env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
         tmpl = env.get_template("partials/_feed_lots.html.jinja")
 
         filters_ctx = SimpleNamespace(
@@ -411,7 +385,6 @@ class TestExhaustion:
             area_min_label="0",
             area_max_label="∞",
             only_new=False,
-            sort_dir="desc",
         )
         html = tmpl.render(
             filters=filters_ctx,
@@ -448,6 +421,7 @@ class TestExhaustion:
         # Provide one lot in zones.today so the <section class="zone"> block renders.
         lot = _make_dto(42)
         from fis_monitor.web.sse_encoder import LotUserViewModel
+
         fake_lot = LotUserViewModel(lot)
 
         filters_ctx = SimpleNamespace(
@@ -457,7 +431,6 @@ class TestExhaustion:
             area_min_label="0",
             area_max_label="∞",
             only_new=False,
-            sort_dir="desc",
         )
         tmpl = env.get_template("partials/_feed_lots.html.jinja")
         html = tmpl.render(
@@ -574,39 +547,3 @@ class TestOnlyNewPreserved:
 
         assert resp.status_code == 200
         assert 'id="lot-3"' in resp.text
-
-
-# ---------------------------------------------------------------------------
-# T6: sort_dir preserved across pages
-# ---------------------------------------------------------------------------
-
-
-class TestSortDirPreserved:
-    """T6: sort_dir from cookie is passed to lot_query.search on /feed/more."""
-
-    @pytest.mark.parametrize("sort_dir", ["asc", "desc"])
-    def test_sort_dir_forwarded_to_search(self, sort_dir: str) -> None:
-        """sort_dir from cookie must reach LotFilters.sort_dir in search() call."""
-        lots = [_make_dto(i) for i in range(1, 4)]
-        lq = _PagedFakeLotQueryService(lots)
-
-        # Get a cursor (using default sort which doesn't matter for this invariant).
-        first_page = lq.search(LotFilters(sort_dir=sort_dir), page_size=2)  # type: ignore[arg-type]
-        cursor = first_page.next_cursor
-        assert cursor
-
-        filters = ViewFilters(sort_dir=sort_dir)  # type: ignore[arg-type]
-        cookie_val = _view_filters_cookie(filters)
-
-        app = _build_app(lq)
-        with TestClient(app) as client:
-            client.cookies.set(_COOKIE_NAME, cookie_val)
-            client.get(f"/feed/more?cursor={cursor}")
-
-        # Find the /feed/more call specifically (search_calls includes the cursor call above).
-        more_calls = [c for c in lq.search_calls if c[2] is not None]
-        assert more_calls, "Expected at least one search() call with a cursor"
-        last = more_calls[-1]
-        assert last[0].sort_dir == sort_dir, (
-            f"Expected sort_dir={sort_dir!r} in LotFilters, got {last[0].sort_dir!r}"
-        )

@@ -35,11 +35,7 @@
       {% endif %}
 
       <span class="lot__cad">
-        <span data-copy="{{ lot.cadastral_no }}">{{ lot.cadastral_no }}</span>
-        <button class="copy" type="button" data-copy="{{ lot.cadastral_no }}"
-                aria-label="Скопировать кадастровый номер">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        </button>
+        <button type="button" data-copy="{{ lot.cadastral_no }}" class="lot__cad-copy" aria-label="Скопировать кадастровый номер" title="Скопировать">{{ lot.cadastral_no }}</button>
         {# hiq3: дата через format_date_ru — «17 марта 2026» без времени, без babel #}
         <span class="lot__appeared" title="Дата создания в ФИС">· {{ lot.date_create | dateformat }}</span>
         {% if lot.has_registry_date %}<span class="lot__registry" title="Дата постановки на учёт в ЕГРН"> · ЕГРН {{ lot.date_registry | dateformat }}</span>{% endif %}
@@ -61,10 +57,11 @@
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
       </a>
       {% endif %}
-      <button class="btn btn--sm" type="button"
-              data-copy="{{ lot.cadastral_no }} · {{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %} · {{ lot.area_ha | replace('.', ',') }} га">
-        Скопировать
-      </button>
+      {% if lot.url_cad_map %}
+      <a class="btn btn--sm" href="{{ lot.url_cad_map }}" target="_blank" rel="noopener">
+        На карту Роскадастр ↗
+      </a>
+      {% endif %}
     </div>
   </div>
 
@@ -77,13 +74,6 @@
       </dl>
       {% endif %}
     </div>
-    {% if lot.url_cad_map %}
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 12px;">
-      <a class="btn btn--sm" href="{{ lot.url_cad_map }}" target="_blank" rel="noopener">
-        На карту Роскадастр ↗
-      </a>
-    </div>
-    {% endif %}
 
   </div>
 </article>

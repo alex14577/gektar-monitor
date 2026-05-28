@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -71,6 +71,7 @@ class SessionStubForFilter:
     expires_soon: bool = False
     expires_at_hhmm: str = ""
 
+
 _COOKIE_NAME = "view_filters"
 _COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
 
@@ -83,18 +84,6 @@ router = APIRouter(prefix="/filters", tags=["filters"])
 # ---------------------------------------------------------------------------
 # Form-parsing helpers
 # ---------------------------------------------------------------------------
-
-
-def _coerce_sort_dir(v: str | None) -> Literal["desc", "asc"]:
-    """Return *v* as a validated sort direction, defaulting to 'desc' on invalid input.
-
-    Consistent with the bool-checkbox pattern (absent key → safe default) rather
-    than numeric fields (invalid → 422). An unknown sort_dir value is silently
-    treated as 'desc' so the UI never breaks on a stale or malformed form submission.
-    """
-    if v in ("desc", "asc"):
-        return v  # type: ignore[return-value]
-    return "desc"
 
 
 def _parse_int_or_none(v: str | None) -> int | None:
@@ -110,9 +99,7 @@ def _parse_int_or_none(v: str | None) -> int | None:
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid integer value: {v!r}") from None
     if result < 0:
-        raise HTTPException(
-            status_code=422, detail=f"Value must be >= 0, got {result}"
-        )
+        raise HTTPException(status_code=422, detail=f"Value must be >= 0, got {result}")
     return result
 
 
@@ -180,9 +167,7 @@ def get_subjects(
         "subjects": subjects,
         "selected_subjects": current.subjects,
     }
-    return templates.TemplateResponse(
-        request, "partials/_filters_subjects.html.jinja", ctx
-    )
+    return templates.TemplateResponse(request, "partials/_filters_subjects.html.jinja", ctx)
 
 
 @router.post("/view", status_code=200, response_model=None)
@@ -197,7 +182,6 @@ def post_view_filters(
     area_min: Annotated[str | None, Form()] = None,
     area_max: Annotated[str | None, Form()] = None,
     only_new: Annotated[str | None, Form()] = None,
-    sort_dir: Annotated[str | None, Form()] = None,
 ) -> Response:
     """Apply view filters and return the rendered feed partial for htmx outerHTML swap.
 
@@ -231,7 +215,6 @@ def post_view_filters(
             # only_new="" (empty value, key present) also → True — non-browser edge case,
             # intentional.
             only_new=only_new is not None,
-            sort_dir=_coerce_sort_dir(sort_dir),
         )
     except ValidationError as exc:
         # Extract the first human-readable message from the Pydantic error.
