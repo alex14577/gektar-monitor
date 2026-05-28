@@ -26,6 +26,10 @@
 - [[parser/anti-bot]] — защит нет
 - [[ops/server-performance]] — измерения скорости, режим техработ
 
+## Подсистемы
+
+- [[licensing/index|Licensing system]] — активационные ключи, HMAC-SHA256, stateless offline-верификация
+
 ## Реализация
 
 - [[ops/getting-started]] — Day 1: клонирование, venv, dev-сервер, ЕСИА-сессия

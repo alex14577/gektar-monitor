@@ -526,6 +526,63 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # License check — fail-closed before any subsystem initialization.
+    # NOTE: args.data_dir.mkdir() is intentionally placed AFTER the license
+    # check so no filesystem side-effects occur if the license is absent/invalid.
+    from datetime import UTC, datetime
+
+    from fis_monitor._license_loader import _default_license_path, load_license_key
+    from fis_monitor.licensing import LicenseStatus, verify_license
+    from fis_monitor.licensing._secret import _assemble_secret
+
+    _anchor = Path(__file__).resolve()
+    try:
+        _key_str = load_license_key(_anchor)
+    except FileNotFoundError:
+        print(
+            f"ERROR: license.key not found. "
+            f"Place a valid license.key next to the program "
+            f"(expected: {_default_license_path(_anchor)}).",
+            file=_sys.stderr,
+        )
+        _sys.exit(1)
+
+    try:
+        _lic_result = verify_license(
+            _key_str,
+            secret=_assemble_secret(),
+            now=datetime.now(UTC),
+        )
+    except Exception:  # defensive: _assemble_secret / unexpected
+        print(
+            "ERROR: License check failed unexpectedly. Contact your vendor.",
+            file=_sys.stderr,
+        )
+        _sys.exit(1)
+
+    match _lic_result.status:
+        case LicenseStatus.VALID:
+            pass  # continue normal startup
+        case LicenseStatus.EXPIRED:
+            _exp_str = _lic_result.expires_at.isoformat() if _lic_result.expires_at else "unknown"
+            print(
+                f"ERROR: License expired on {_exp_str}. Contact your vendor for renewal.",
+                file=_sys.stderr,
+            )
+            _sys.exit(1)
+        case LicenseStatus.INVALID:
+            print(
+                "ERROR: License is invalid. Check license.key contents.",
+                file=_sys.stderr,
+            )
+            _sys.exit(1)
+        case _:
+            print(
+                f"ERROR: Unknown license status: {_lic_result.status}",
+                file=_sys.stderr,
+            )
+            _sys.exit(1)
+
     args.data_dir.mkdir(parents=True, exist_ok=True)
 
     # Bootstrap handler: captures catastrophic errors before lifespan startup

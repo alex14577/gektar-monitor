@@ -67,6 +67,7 @@
 - [[decisions/ADR-053-remove-favorites-feature|ADR-053]] — Remove favorites feature (starred / Избранное): product decision 2026-05-18; SQLite v5→v6 migration drops `lot_user_state.starred` column + `idx_lus_starred`; `ViewFilters.only_stars` removed; no UI/route/service for starred remains (bd gektar_monitor-qhw8)
 - [[decisions/ADR-054-fake-torgi-domain-dependency|ADR-054]] — Разрешённая зависимость tools/fake_torgi → fis_monitor.domain.regions (read-only SUBJECT_TITLE_BY_ID catalog); snapshot-дублирование отклонено; import из services/infra/web запрещён
 - [[decisions/ADR-055-region-id-site-id-namespace|ADR-055]] — `lots.region_id` канонически хранит site-id (`∈ SUBJECT_TITLE_BY_ID`), а не macro-id (1=ДФО, 2=Арктика); фикс бага pc1g (email-фильтр никогда не срабатывал из-за разных namespace); helper `subject_id_by_title` в domain; migration v7→v8
+- [[decisions/ADR-056-licensing-hmac-stateless-offline|ADR-056]] — Licensing: HMAC-SHA256 stateless offline + XOR-обфускация секрета; абсолютная дата истечения; fail-closed integration в `app.py:main`
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

@@ -1,9 +1,13 @@
 """Public API for the licensing subsystem.
 
-Only re-exports the verification entrypoint and its result types.
-Internal modules (_codec, _hmac, _secret, _verify) are not part of the
-public namespace and must not be imported by application code; use these
-top-level names instead.
+Re-exports the verification entrypoint and its result types.
+
+Internal modules (_codec, _hmac, _verify) are implementation details
+and should not be imported by application code.
+
+Exception — composition root: `_secret._assemble_secret` is allowed to
+be imported by `fis_monitor.app:main` only (see spec §10). This is the
+single materialization point for the HMAC secret in production code.
 """
 
 from fis_monitor.licensing._verify import LicenseResult as LicenseResult

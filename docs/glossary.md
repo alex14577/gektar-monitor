@@ -397,6 +397,16 @@
 
 - **async-sync-repo check** — CI guard (`scripts/check_async_sync_repo.py`) that uses AST analysis to detect `async def` route handlers in `src/fis_monitor/web/routes/` that call a sync SQLite repository method without wrapping in `asyncio.to_thread`. Prevents event-loop blocking regressions (incident bd 45el). Suppressed per-call with `# noqa: async-sync-repo`. See [[decisions/ADR-044-async-sync-repo-ast-check|ADR-044]].
 
+## Лицензирование
+
+- **HMAC-SHA256** — Hash-based Message Authentication Code с SHA-256 дайджестом. Используется для подписи payload лицензионного ключа. Верификация — обязательно через `hmac.compare_digest` (constant-time), не через `==` (уязвимо к timing-атаке). Stdlib: `hmac` + `hashlib`. Единственная крипто-зависимость подсистемы лицензирования. См. [[licensing/crypto-hmac]].
+
+- **iat (issued-at)** — Поле payload лицензионного ключа. Строка `YYYY-MM-DD` — дата выпуска ключа. Используется как anti-rollback floor: если текущая дата раньше `iat` → INVALID. Предотвращает грубый откат системных часов (дни/годы). Тонкий откат (часы/минуты) не блокируется — см. [[licensing/out-of-scope]]. Присутствует во всех ключах; обязательное поле. См. [[licensing/crypto-hmac#Anti-rollback floor]].
+
+- **anti-rollback floor** — Защита от обхода срока действия лицензии путём перевода системных часов назад. Реализована через поле `iat` (issued-at): верификатор проверяет `today >= iat_date`, иначе → INVALID. Блокирует грубый откат (дни, годы). Тонкий откат (часы, минуты) без persistent state не блокируем. См. [[licensing/crypto-hmac#Anti-rollback floor через iat]].
+
+- **security-through-obscurity** — Подход к защите, при котором безопасность основана на сокрытии деталей реализации, а не на криптографической стойкости. В контексте лицензирования: XOR-обфускация секрета блокирует `strings`-атаку, но не дизассемблер. Принят явно для соответствия требованию «сложность ≤2/10». Честный tradeoff: атакующий с мотивацией извлечёт секрет. Альтернативы (KMS, HSM) — в [[licensing/out-of-scope]]. См. [[licensing/secret-obfuscation]].
+
 ## См. также
 
 - [[decisions-log]]
