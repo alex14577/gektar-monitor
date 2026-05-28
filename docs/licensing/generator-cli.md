@@ -9,7 +9,7 @@ type: reference
 ## Запуск
 
 ```bash
-python -m tools.gen_license <command> [options]
+gektar-gen-license <command> [options]
 ```
 
 CLI построен на `argparse` (stdlib). Click не используется — no external deps.
@@ -17,7 +17,7 @@ CLI построен на `argparse` (stdlib). Click не используетс
 ## Команда `init-secret`
 
 ```bash
-python -m tools.gen_license init-secret
+gektar-gen-license init-secret
 ```
 
 **Поведение:**
@@ -40,7 +40,7 @@ _P2 = b'\x51\xd4\x...'
 ## Команда `issue`
 
 ```bash
-python -m tools.gen_license issue \
+gektar-gen-license issue \
     (--duration day|week|month|forever | --expires YYYY-MM-DD) \
     --licensee NAME \
     [--out FILE]
@@ -68,7 +68,7 @@ group.add_argument("--expires", ...)
 ### Пример
 
 ```bash
-python -m tools.gen_license issue \
+gektar-gen-license issue \
     --duration month \
     --licensee "Acme Corp" \
     --out license.key
@@ -76,13 +76,15 @@ python -m tools.gen_license issue \
 
 ## Единый источник секрета
 
-`gen_license.py` импортирует `_assemble_secret` из `fis_monitor.licensing._secret` — того же модуля, что использует `app.py`. Генератор и верификатор гарантированно используют одинаковый секрет. Рассинхрон ([[licensing/secret-obfuscation|описание]]) технически невозможен.
+`licensing/cli.py` импортирует `_assemble_secret` из `fis_monitor.licensing._secret` — того же модуля, что использует `app.py`. Генератор и верификатор гарантированно используют одинаковый секрет. Рассинхрон ([[licensing/secret-obfuscation|описание]]) технически невозможен.
 
-## Dev-only гарантия
+## Распространение и dev-only гарантия
 
-`tools/gen_license.py` **никогда не упаковывается в дистрибутив**. PyInstaller бундлит только граф импортов от `fis_monitor.app:main`; `tools/` в этом графе не участвует. Импорт приватного `_assemble_secret` из `tools/` — допустимая dev-зависимость, не нарушение публичного API.
+CLI поставляется как console script `gektar-gen-license`, объявленный в `[project.scripts]` (`pyproject.toml`). Доступен после `pip install -e .` или установки wheel-а.
 
-Запускать только из репозитория разработчика, не из распакованного релиза.
+`fis_monitor/licensing/cli.py` импортирует приватный `_assemble_secret` — допустимо, так как модуль уже в пакете и пользуется внутренними символами того же пакета.
+
+**End-user дистрибутив (PyInstaller)** бундлит только импорт-граф `fis_monitor.app:main`. `fis_monitor.licensing.cli` в этом графе не участвует — в распакованном `.exe` CLI всё равно недоступен. Подробности — [[decisions/ADR-057-licensing-cli-as-entry-point|ADR-057]].
 
 ## См. также
 

@@ -48,6 +48,7 @@ dev = [
 
 [project.scripts]
 fis-monitor = "fis_monitor.app:main"
+gektar-gen-license = "fis_monitor.licensing.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

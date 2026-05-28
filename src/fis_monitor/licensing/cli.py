@@ -1,10 +1,14 @@
-"""Dev-only CLI for generating licensing artifacts.
+"""CLI for generating licensing artifacts.
 
 Two subcommands:
 - init-secret: generates _P1/_P2 literals for _secret.py
 - issue: issues a v1 license key
 
-NOT packaged into distribution.
+Installed as console script `gektar-gen-license` via [project.scripts] in
+pyproject.toml. The module is shipped inside the wheel; end-user distributions
+built with PyInstaller still bundle only the import graph of
+`fis_monitor.app:main`, so this CLI is not reachable from a frozen release.
+See ADR-057.
 """
 
 import argparse
@@ -14,6 +18,7 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from fis_monitor.licensing import _secret as _secret_module
 from fis_monitor.licensing._codec import _canonical_bytes, encode_payload
 from fis_monitor.licensing._hmac import sign
 from fis_monitor.licensing._secret import _assemble_secret
@@ -26,15 +31,23 @@ _DURATION_DAYS: dict[str, int | None] = {
 }
 
 
-def _cmd_init_secret(_args: argparse.Namespace) -> int:
+def _cmd_init_secret(args: argparse.Namespace) -> int:
     """Generate and print _P1/_P2 XOR-pair literals for _secret.py.
 
-    Args:
-        _args: Parsed namespace (unused).
-
-    Returns:
-        Exit code 0.
+    Refuses to run when `_SECRET_INITIALIZED` is True (production secret
+    already in place) unless `--force` is passed. Rotation invalidates
+    every previously issued license key.
     """
+    if getattr(_secret_module, "_SECRET_INITIALIZED", False) and not args.force:
+        print(
+            "ERROR: production secret is already initialized "
+            "(_SECRET_INITIALIZED=True in fis_monitor/licensing/_secret.py).\n"
+            "Re-running init-secret will rotate the secret and INVALIDATE "
+            "every issued license key.\n"
+            "If you intentionally want to rotate, pass --force.",
+            file=sys.stderr,
+        )
+        return 1
     secret = secrets.token_bytes(32)
     p1 = secrets.token_bytes(32)
     p2 = bytes(a ^ b for a, b in zip(secret, p1, strict=True))
@@ -44,14 +57,7 @@ def _cmd_init_secret(_args: argparse.Namespace) -> int:
 
 
 def _cmd_issue(args: argparse.Namespace) -> int:
-    """Issue a v1 license key and print or write it.
-
-    Args:
-        args: Parsed namespace with duration/expires, licensee, out.
-
-    Returns:
-        Exit code 0.
-    """
+    """Issue a v1 license key and print or write it."""
     iat = datetime.now(UTC).date()
 
     if args.expires is not None:
@@ -68,7 +74,7 @@ def _cmd_issue(args: argparse.Namespace) -> int:
         )
         return 1
 
-    payload: dict = {"v": 1, "iat": iat.isoformat(), "lic": args.licensee}
+    payload: dict[str, object] = {"v": 1, "iat": iat.isoformat(), "lic": args.licensee}
     if exp is not None:
         payload["exp"] = exp.isoformat()
 
@@ -91,20 +97,24 @@ def _cmd_issue(args: argparse.Namespace) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Build the argument parser with init-secret and issue subcommands.
-
-    Returns:
-        Configured ArgumentParser.
-    """
+    """Build the argument parser with init-secret and issue subcommands."""
     parser = argparse.ArgumentParser(
-        prog="python -m tools.gen_license",
-        description="Dev-only tool for generating licensing artifacts.",
+        prog="gektar-gen-license",
+        description="Tool for generating licensing artifacts.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     init_p = sub.add_parser(
         "init-secret",
         help="Generate _P1/_P2 XOR-pair literals to paste into _secret.py.",
+    )
+    init_p.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Allow rotation when _SECRET_INITIALIZED=True. "
+            "WARNING: invalidates every previously issued license key."
+        ),
     )
     init_p.set_defaults(func=_cmd_init_secret)
 
@@ -134,14 +144,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the CLI.
-
-    Args:
-        argv: Argument list; defaults to sys.argv[1:] when None.
-
-    Returns:
-        Exit code.
-    """
+    """Entry point for the CLI."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

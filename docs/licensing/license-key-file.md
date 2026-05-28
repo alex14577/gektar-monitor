@@ -69,7 +69,7 @@ Place a valid license.key next to the program
 
 ## Как поставить ключ
 
-1. Выпустить ключ: `python -m tools.gen_license issue ...` ([[licensing/generator-cli]])
+1. Выпустить ключ: `gektar-gen-license issue ...` ([[licensing/generator-cli]])
 2. Положить файл `license.key` рядом с программой
 3. Запустить программу
 

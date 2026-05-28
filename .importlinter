@@ -36,3 +36,15 @@ source_modules =
     tests.unit.services
     tests.unit.domain
 forbidden_modules = sqlite3
+
+[importlinter:contract:licensing-cli-not-in-app-graph]
+name = licensing.cli not reachable from app entry-point (ADR-057 PyInstaller invariant)
+type = forbidden
+source_modules =
+    fis_monitor.app
+    fis_monitor.composition
+    fis_monitor.web
+    fis_monitor.services
+    fis_monitor.infra
+    fis_monitor.domain
+forbidden_modules = fis_monitor.licensing.cli

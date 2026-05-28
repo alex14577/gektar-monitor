@@ -39,26 +39,26 @@ stderr: `ERROR: License is invalid. Check license.key contents.`
 
 ## 3. Просроченный ключ → exit 1
 
-Past-date guard в `tools/gen_license.py` блокирует выпуск ключей прошедшей датой.
+Past-date guard в `src/fis_monitor/licensing/cli.py` блокирует выпуск ключей прошедшей датой.
 **Временно закомментировать** guard и восстановить после теста.
 
 Найти блок:
 ```bash
-grep -n "is before today" tools/gen_license.py
+grep -n "is before today" src/fis_monitor/licensing/cli.py
 ```
 Закомментировать 3 строки начиная с `if exp is not None and exp < iat:` (включая print и return 1).
 
 ```bash
-python -m tools.gen_license issue --expires 2020-01-01 --licensee Smoke --out license.key
+gektar-gen-license issue --expires 2020-01-01 --licensee Smoke --out license.key
 fis-monitor --data-dir ./var-smoke
-git checkout tools/gen_license.py && rm license.key
+git checkout src/fis_monitor/licensing/cli.py && rm license.key
 ```
 stderr: `ERROR: License expired on 2020-01-01. Renew your license.`
 
 ## 4. Валидный ключ → нормальный старт
 
 ```bash
-python -m tools.gen_license issue --duration day --licensee Smoke --out license.key
+gektar-gen-license issue --duration day --licensee Smoke --out license.key
 fis-monitor --data-dir ./var-smoke   # CTRL+C для остановки
 rm license.key
 ```
@@ -68,6 +68,6 @@ rm license.key
 
 ```bash
 rm -f license.key && rm -rf ./var-smoke
-git checkout tools/gen_license.py  # на случай прерванного сценария 3 (восстановить past-date guard)
+git checkout src/fis_monitor/licensing/cli.py  # на случай прерванного сценария 3 (восстановить past-date guard)
 # mv license.key.bak license.key  # если переименовывали
 ```

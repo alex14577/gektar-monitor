@@ -78,7 +78,7 @@ def test_assemble_secret_returns_bytes_of_correct_length():
 | `_hmac.py` отдельно | exercised через `verify_license` (кейсы 1, 7, 8) |
 | `_dispatch_decoder` отдельно | exercised через `verify_license` (кейс 10) |
 | `app.py:main` | только ручной smoke |
-| `tools/gen_license.py` | только ручной smoke |
+| `licensing/cli.py` | только ручной smoke |
 | Значение секрета | нарушит обфускацию |
 | `hmac.compare_digest` (а не `==`) | ручной code review (blocker-правило) |
 
@@ -92,7 +92,7 @@ def test_assemble_secret_returns_bytes_of_correct_length():
 2. Запуск с битым `license.key` → stderr + exit 1
 3. Запуск с EXPIRED ключом → stderr + exit 1 с датой
 4. Запуск с VALID ключом → программа стартует
-5. `python -m tools.gen_license issue --duration week --licensee "Test"` → валидный ключ → подстановка в `license.key` → программа стартует
+5. `gektar-gen-license issue --duration week --licensee "Test"` → валидный ключ → подстановка в `license.key` → программа стартует
 
 ## Почему `app.py:main` не покрывается unit-тестами
 

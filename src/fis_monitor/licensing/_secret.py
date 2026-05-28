@@ -1,3 +1,10 @@
+# Set to True once the real production secret has been baked into _P1/_P2 by
+# `gektar-gen-license init-secret`. The CLI refuses to re-run init-secret while
+# this flag is True (rotation would invalidate every issued license key). Flip
+# back to False only when intentionally rotating the secret.
+_SECRET_INITIALIZED: bool = True
+
+
 def _assemble_secret() -> bytes:
     """Assembles the HMAC secret at runtime from two XOR parts.
 
@@ -6,10 +13,10 @@ def _assemble_secret() -> bytes:
 
     NOTE: The values of _P1 and _P2 below are PLACEHOLDERS only.
     Before first production use, run:
-        python -m tools.gen_license init-secret
+        gektar-gen-license init-secret
     and paste the printed literals into this function.
     """
-    # Secret initialized via `python -m tools.gen_license init-secret`.
+    # Secret initialized via `gektar-gen-license init-secret`.
     # Do NOT re-run init-secret — it would rotate the secret and invalidate
     # all existing license keys.
     _P1: bytes = (

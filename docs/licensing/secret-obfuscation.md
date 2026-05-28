@@ -41,7 +41,7 @@ CLI-команда `init-secret` (см. [[licensing/generator-cli]]) генер�
 
 ## DI-инвариант — секрет как параметр
 
-`verify_license` и `gen_license.py` не вызывают `_assemble_secret()` изнутри. Секрет передаётся параметром:
+`verify_license` не вызывает `_assemble_secret()` изнутри. Секрет передаётся параметром:
 
 ```python
 # В app.py:main — единственное место вызова _assemble_secret() в production-коде
@@ -56,11 +56,11 @@ result = verify_license(
 
 ## Единый источник секрета
 
-`gen_license.py` импортирует `_assemble_secret` из того же модуля `fis_monitor.licensing._secret`, что использует `app.py`. Генератор и верификатор гарантированно используют одинаковый секрет — рассинхрон невозможен.
+`fis_monitor.licensing.cli` импортирует `_assemble_secret` из того же модуля `fis_monitor.licensing._secret`, что использует `app.py`. Генератор и верификатор гарантированно используют одинаковый секрет — рассинхрон невозможен. CLI (в отличие от `verify_license`) вызывает `_assemble_secret()` напрямую: это допустимо, так как CLI — composition-edge той же подсистемы, не сторонний потребитель.
 
 ## Граница dev-only
 
-`tools/gen_license.py` — **dev-инструмент, не упаковывается в дистрибутив**. PyInstaller бундлит только граф импортов от `fis_monitor.app:main`; `tools/` в этом графе не участвует. Импорт приватного `_assemble_secret` из `tools/` — допустимая dev-зависимость, не нарушение API.
+`fis_monitor.licensing.cli` (console_script `gektar-gen-license`) импортирует приватный `_assemble_secret` напрямую. CLI попадает в wheel, но PyInstaller-сборка end-user-а его не содержит: бундлится только импорт-граф `fis_monitor.app:main`, в который `cli.py` не входит. Подробности — [[decisions/ADR-057-licensing-cli-as-entry-point|ADR-057]].
 
 ## Что XOR не защищает
 
