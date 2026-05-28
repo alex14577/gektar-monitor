@@ -53,7 +53,7 @@ from fis_monitor.infra.smtp.email_notifier import SmtpEmailNotifier
 from fis_monitor.infra.smtp.host_policy import DefaultSmtpHostPolicy
 from fis_monitor.infra.smtp.provider_catalog import StaticSmtpProviderCatalog
 from fis_monitor.infra.sqlite.connection import ConnectionProvider
-from fis_monitor.infra.sqlite.init_db import init_db
+from fis_monitor.infra.sqlite.init_db import LATEST_SCHEMA_VERSION, init_db
 from fis_monitor.infra.sqlite.migrations import default_migration_runner
 from fis_monitor.infra.sqlite.repositories.cycles import SqliteCyclesRepository
 from fis_monitor.infra.sqlite.repositories.lots import SqliteLotRepository
@@ -326,7 +326,7 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
     init_db(
         conn_provider,
         schema_sql=schema_sql,
-        latest_version=8,
+        latest_version=LATEST_SCHEMA_VERSION,
         migration_runner=default_migration_runner(),
     )
 

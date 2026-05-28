@@ -32,7 +32,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 8;
+PRAGMA user_version = 9;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
@@ -54,6 +54,10 @@ PRAGMA user_version = 8;
 --   Fixes email filter mismatch: rf_subjects holds site-ids, region_id held macro-id.
 --   Parser fixed: parsed_row_to_lot now resolves row.region via subject_id_by_title().
 --   ADR-035 §I2 amended; ADR-NNN-region-id-namespace-canonical. MigrationRunner v7→v8.
+-- user_version bumped 8→9 (cpo4): добавлен idx_lots_first_seen ON lots(first_seen DESC).
+--   Optimizes SELECT MAX(first_seen) FROM lots (per-cycle header refresh in
+--   monitor_cycle._publish_status → latest_new_first_seen). Без индекса —
+--   full-table scan; на 10k+ строк ощутимо. MigrationRunner v8→v9.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
@@ -129,6 +133,11 @@ CREATE INDEX IF NOT EXISTS idx_lots_inactive_since   ON lots(inactive_since)
 -- Используется removal-detection (architecture.md §7.2.bis).
 CREATE INDEX IF NOT EXISTS idx_lots_stale            ON lots(last_seen_at)
     WHERE is_active = 1;
+-- Satisfies SELECT MAX(first_seen) FROM lots (per-cycle header refresh,
+-- monitor_cycle._publish_status → latest_new_first_seen). DESC matches the
+-- "most recent" access pattern; ASC would also work for MAX but is less
+-- symmetric for future ORDER BY first_seen DESC LIMIT N. bd cpo4.
+CREATE INDEX IF NOT EXISTS idx_lots_first_seen        ON lots(first_seen DESC);
 
 -- История изменений: status, area_sqm, date_update, auction, is_active, list_presence
 --
