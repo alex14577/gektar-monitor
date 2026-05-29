@@ -356,29 +356,61 @@ class LotQueryService:
     # Query builder
     # ------------------------------------------------------------------
 
-    def _build_query(
+    # ------------------------------------------------------------------
+    # Count
+    # ------------------------------------------------------------------
+
+    def count(self, filters: LotFilters) -> int:
+        """Return the total number of active lots matching ``filters``.
+
+        Unlike ``search()``, this method applies no cursor, ORDER BY, or LIMIT —
+        it issues a single ``SELECT COUNT(*)`` so the result reflects the true
+        total even when ``page_size=200`` would cap a ``search()`` call.
+
+        ``only_new`` is a user-state predicate (in-memory post-filter) that
+        cannot be expressed at the SQL layer; it is therefore intentionally
+        NOT applied here.  The counter represents the region+area+subscription
+        scope, matching the same filter dimensions used by ``search()``.
+
+        Args:
+            filters: filter criteria (regions, area range, subscription cutoff).
+                     ``fts_query`` raises ``NotImplementedError`` if set.
+
+        Returns:
+            Non-negative integer count of matching active lots.
+        """
+        if filters.fts_query is not None:
+            raise NotImplementedError(
+                "Full-text search (fts_query) is deferred to P2. "
+                "Leave fts_query=None for count()."
+            )
+
+        where, params, from_clause = self._build_where(filters)
+        sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where}"
+        conn = self._conn_provider.get()
+        cur = conn.execute(sql, params)
+        row = cur.fetchone()
+        cur.close()
+        return int(row[0])
+
+    # ------------------------------------------------------------------
+    # Query builder
+    # ------------------------------------------------------------------
+
+    def _build_where(
         self,
         filters: LotFilters,
-        *,
-        last_cursor: tuple[str, int] | None,
-        limit: int,
-    ) -> tuple[str, list[Any]]:
-        """Build the parameterised SELECT statement for ``search``.
+    ) -> tuple[str, list[Any], str]:
+        """Build the WHERE clause and FROM clause shared by ``search`` and ``count``.
 
-        Returns ``(sql, params)`` ready for ``conn.execute(sql, params)``.
+        Returns ``(where_str, params, from_clause)`` where:
+        - ``where_str``: space-separated AND conditions (no cursor / ORDER / LIMIT).
+        - ``params``: bound parameters for the WHERE conditions only.
+        - ``from_clause``: ``"lots"`` or ``"lots LEFT JOIN region_subscriptions ..."``
+          depending on ``apply_subscription_cutoff``.
 
-        Filter mapping:
-        - ``regions``: ``lots.region IN (?, ...)`` -- region codes cast to str.
-        - ``subject_display_names``: ``lots.region IN (?, ...)`` -- display names
-          matched directly against the TEXT ``lots.region`` column.
-        - ``area_sqm_min`` / ``area_sqm_max``: mapped to ``lots.area_sqm``.
-        - ``status``: exact ``lots.status = ?`` match.
-        - ``cursor``: composite keyset on ``(date_create, id)``:
-            DESC: ``(date_create < ?) OR (date_create = ? AND id < ?)``
-            ASC:  ``(date_create > ?) OR (date_create = ? AND id > ?)``
-        - ``apply_subscription_cutoff``: when True, LEFT JOIN region_subscriptions
-            and add WHERE predicate mirroring ``passes_subscription_cutoff``
-            (ADR-039 day-precision rule).  When False, query is unchanged.
+        This method is the DRY core used by both ``_build_query`` (adds cursor +
+        ORDER + LIMIT) and ``count`` (adds SELECT COUNT(*) only).
         """
         join_clause, cutoff_condition = self._subscription_cutoff_fragment(filters)
 
@@ -387,9 +419,6 @@ class LotQueryService:
 
         # Table-qualify column references when a JOIN is present to avoid ambiguity.
         col = "lots." if join_clause else ""
-        # SELECT list: use qualified form when JOIN is active (region_id is
-        # ambiguous between lots and region_subscriptions without it).
-        select_cols = _LOT_SELECT_QUALIFIED if join_clause else _LOT_SELECT
 
         if filters.regions:
             placeholders = ", ".join("?" * len(filters.regions))
@@ -416,18 +445,60 @@ class LotQueryService:
         if cutoff_condition:
             conditions.append(cutoff_condition)
 
-        if last_cursor is not None:
-            last_date_iso, last_id = last_cursor
-            conditions.append(f"({col}date_create < ? OR ({col}date_create = ? AND {col}id < ?))")
-            params.extend([last_date_iso, last_date_iso, last_id])
-
         where = " AND ".join(conditions)
         from_clause = f"lots{join_clause}"
+        return where, params, from_clause
+
+    def _build_query(
+        self,
+        filters: LotFilters,
+        *,
+        last_cursor: tuple[str, int] | None,
+        limit: int,
+    ) -> tuple[str, list[Any]]:
+        """Build the parameterised SELECT statement for ``search``.
+
+        Returns ``(sql, params)`` ready for ``conn.execute(sql, params)``.
+
+        Filter mapping delegated to ``_build_where``; this method adds cursor,
+        ORDER BY, and LIMIT on top.
+
+        - ``cursor``: composite keyset on ``(date_create, id)``:
+            DESC: ``(date_create < ?) OR (date_create = ? AND id < ?)``
+        - ``apply_subscription_cutoff``: when True, LEFT JOIN region_subscriptions
+            and add WHERE predicate mirroring ``passes_subscription_cutoff``
+            (ADR-039 day-precision rule).  When False, query is unchanged.
+
+        ``_build_where`` already calls ``_subscription_cutoff_fragment`` internally
+        and returns the complete ``from_clause`` (including any JOIN).  We derive
+        the column-qualifier prefix and SELECT column list from ``from_clause``
+        without a second call to ``_subscription_cutoff_fragment``.
+        """
+        where, params, from_clause = self._build_where(filters)
+        # Determine column qualifier from from_clause instead of calling
+        # _subscription_cutoff_fragment again (DRY — single call per query path).
+        # NOTE: this heuristic holds only while _build_where is the SOLE source
+        # of JOINs in from_clause. If a future JOIN is added, derive has_join
+        # explicitly rather than string-matching here.
+        has_join = "LEFT JOIN" in from_clause
+        col = "lots." if has_join else ""
+        select_cols = _LOT_SELECT_QUALIFIED if has_join else _LOT_SELECT
+
+        # Extend WHERE with cursor condition (not part of _build_where — cursor
+        # is search-only, count() must not include it).
+        if last_cursor is not None:
+            last_date_iso, last_id = last_cursor
+            where = (
+                where
+                + f" AND ({col}date_create < ? OR ({col}date_create = ? AND {col}id < ?))"
+            )
+            params = [*params, last_date_iso, last_date_iso, last_id]
+
         sql = (
             f"SELECT {select_cols} FROM {from_clause} WHERE {where} "
             f"ORDER BY {col}date_create DESC, {col}id DESC LIMIT ?"
         )
-        params.append(limit)
+        params = [*params, limit]
 
         return sql, params
 

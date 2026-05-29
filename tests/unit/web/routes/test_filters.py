@@ -491,6 +491,7 @@ class TestOobFilterTrigger:
             scope=scope_ctx,
             zones=zones_ctx,
             archive_count=0,
+            lot_count=0,
             filters_active=False,
             health=SimpleNamespace(total_lots=0),
             session=SimpleNamespace(expired=False, expires_soon=False),

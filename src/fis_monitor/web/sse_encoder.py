@@ -261,6 +261,11 @@ class LotViewModel:
         """hiq3: always False for SSE fan-out path; LotUserViewModel overrides from DTO."""
         return False
 
+    @property
+    def is_backfill(self) -> bool:
+        """False for server-rendered feed and base SSE path; overridden by _SseLotNewViewModel."""
+        return False
+
 
 class _SseLotNewViewModel(LotViewModel):
     """``LotViewModel`` variant for ``SseLotNew`` events.
@@ -268,14 +273,27 @@ class _SseLotNewViewModel(LotViewModel):
     Overrides ``was_new`` to ``True`` because ``lot.new`` semantically means
     first-seen: the encoder already knows the event type, so the override lives
     here rather than widening the domain DTO contract.
+
+    Also carries ``is_backfill`` so ``_lot_poster.html.jinja`` can stamp
+    ``data-backfill="1"`` — the JS layer reads this attribute to reposition
+    the card to the bottom of the feed without sound/notification (dr21).
     """
 
-    __slots__ = ()
+    __slots__ = ("_is_backfill",)
+
+    def __init__(self, dto: LotPublicDTO, *, is_backfill: bool = False) -> None:
+        super().__init__(dto)
+        self._is_backfill = is_backfill
 
     @property
     def was_new(self) -> bool:
         """Always True: a lot.new event is, by definition, first-seen."""
         return True
+
+    @property
+    def is_backfill(self) -> bool:
+        """True when the originating SseLotNew event came from BackfillService."""
+        return self._is_backfill
 
 
 class LotUserViewModel(LotViewModel):
@@ -360,7 +378,7 @@ def make_html_sse_encoder(env: Environment) -> Callable[[SseEvent], bytes]:
             return encode_sse_event(event)
 
         template = env.get_template(template_name)
-        vm = _SseLotNewViewModel(event.lot)
+        vm = _SseLotNewViewModel(event.lot, is_backfill=event.is_backfill)
         html: str = template.render(lot=vm, session=_SSE_SESSION_CTX)
 
         # RFC 8895 §9.2.5: split on newlines so each line starts with "data:".

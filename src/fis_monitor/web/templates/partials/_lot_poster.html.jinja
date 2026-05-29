@@ -15,6 +15,7 @@
          data-title="{{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %}"
          data-area="{{ lot.area_ha }}"
          {% if lot.event == 'gone' %}data-event="gone"{% endif %}
+         {% if lot.is_backfill %}data-backfill="1"{% endif %}
          tabindex="0"
          aria-labelledby="lot-{{ lot.id }}-title">
 

@@ -303,12 +303,47 @@
     // 5. start escalation timer
     escalationStart();
   }
+  // ---------- Lot count helper — Russian plural forms ----------
+  // Full Russian rule matching the server-side Jinja lot_plural macro:
+  //   n%10==1 && n%100!=11                       → 'лот'
+  //   n%10 in [2,3,4] && n%100 not in [12,13,14] → 'лота'
+  //   else                                        → 'лотов'
+  // Named lotPlural to avoid shadowing the generic plural(n, forms) defined
+  // in the since-arrived counter block below.
+  function lotPlural(n) {
+    const r10 = n % 10;
+    const r100 = n % 100;
+    if (r10 === 1 && r100 !== 11) return 'лот';
+    if (r10 >= 2 && r10 <= 4 && (r100 < 12 || r100 > 14)) return 'лота';
+    return 'лотов';
+  }
+
+  // Increment all .js-lot-count elements by 1 and update their text.
+  // data-count holds the current numeric value; text is re-rendered with
+  // the updated number and correct plural form.
+  //
+  // The .zone__title-count element carries a sibling "·" span that is NOT
+  // part of .js-lot-count — only textContent of the span itself is updated,
+  // which contains just "N лот..." without any prefix.
+  // No-op when no matching elements exist.
+  function incrementLotCounters() {
+    document.querySelectorAll('.js-lot-count').forEach((el) => {
+      const prev = parseInt(el.dataset.count || '0', 10);
+      const next = prev + 1;
+      el.dataset.count = String(next);
+      el.textContent = `${next} ${lotPlural(next)}`;
+      // Reveal filter-bar counter (hidden via CSS [data-count="0"]);
+      // data-count attribute update above triggers CSS re-evaluation.
+    });
+  }
+
   // ---------- SSE wiring via htmx:sseMessage ----------
   // htmx-sse extension fires a synthetic "htmx:sseMessage" on document.body
   // for every incoming SSE event AFTER performing its own sse-swap.
-  // We intercept "lot.new" to drive sound + browser notification + aria-live.
-  // The htmx DOM insertion has already happened at this point, so we look up
-  // the freshly prepended <article> in #feed to read its data-* attributes.
+  // We intercept "lot.new" to drive:
+  //   - Live lots: sound + browser notification + aria-live + escalation.
+  //   - Backfill lots: silent reposition to bottom of feed (no sound/notification).
+  //   - Both: increment all .js-lot-count counters.
   //
   // Contract — e.detail.type invariant (vendored htmx-sse extension, line 154-155):
   //   swap(child, event.data); api.triggerEvent(elt, "htmx:sseMessage", event);
@@ -319,14 +354,34 @@
     const type = e.detail && e.detail.type;
     if (type === 'lot.new') {
       // Locate the article that htmx just inserted (it is the first child of
-      // #feed because sse-swap prepends to the feed container).
+      // #feed because sse-swap prepends to the feed container with afterbegin).
       const feed = document.getElementById('feed');
       const node = feed ? feed.firstElementChild : null;
-      if (node && node.classList.contains('lot')) {
+
+      if (node && node.dataset.backfill === '1') {
+        // --- Backfill lot: reposition to BOTTOM of feed, silently. ---
+        // htmx already inserted the card at the top (afterbegin).  We move it
+        // to just before #load-more-trigger (if present) or to the end of the
+        // section zone, so it appears at the bottom of the visible list.
+        // No sound, no browser notification, no escalation.
+        // Counter incremented here: card is real and in DOM.
+        incrementLotCounters();
+        const loadMoreTrigger = document.getElementById('load-more-trigger');
+        if (loadMoreTrigger && loadMoreTrigger.parentNode) {
+          loadMoreTrigger.parentNode.insertBefore(node, loadMoreTrigger);
+        } else {
+          // No load-more trigger: append to section.zone or fall back to #feed.
+          const zone = feed.querySelector('section.zone');
+          (zone || feed).appendChild(node);
+        }
+      } else if (node && node.classList.contains('lot')) {
+        // --- Live lot: standard notification path. ---
+        // Counter incremented here: card is real and in DOM.
+        incrementLotCounters();
         onLotNew(node);
       } else {
-        // Fallback: fire with null so sound still plays; node may have been
-        // swapped before this listener ran or #feed is absent.
+        // Fallback: node not found or #feed absent — do NOT increment counter
+        // (no real card in DOM, incrementing would be a phantom count).
         if (!feed) console.warn('[sseMessage] #feed not found — DOM structure may have changed');
         onLotNew(null);
       }

@@ -43,6 +43,10 @@ class FakeLotQueryService:
         self.search_calls.append(filters)
         return Page(items=self._items, next_cursor=None, has_more=False)
 
+    def count(self, filters: LotFilters) -> int:
+        """Return total matching items (same as len(search result) for this fake)."""
+        return len(self._items)
+
     def get_by_id(self, lot_id: int) -> Any:
         raise NotImplementedError
 

@@ -163,6 +163,7 @@ def build_feed_context(
     """
     lot_filters = _view_filters_to_lot_filters(filters)
     page = lot_query.search(lot_filters, page_size=_FEED_PAGE_SIZE)
+    lot_count = lot_query.count(lot_filters)
     zones, archive_count = _assemble_feed_zones(
         page.items,
         view_filters=filters,
@@ -171,6 +172,7 @@ def build_feed_context(
         "zones": zones,
         "archive_count": archive_count,  # deprecated: always 0; kept for template compat
         "next_cursor": page.next_cursor,
+        "lot_count": lot_count,
         "filters_active": _filters_are_active(filters),
         "health": SimpleNamespace(
             last_cycle_human="—",

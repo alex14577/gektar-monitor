@@ -13,15 +13,45 @@ through. Cookie changes while connected require an F5 (new EventSource connectio
 
 See [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] for full semantics.
 
+### Backfill lots and `is_backfill`
+
+`BackfillService` publishes `SseLotNew` with `is_backfill=True` for every
+historically new lot (first-time upsert) during a catalog catch-up run.
+
+**Client behaviour (dr21):**
+
+- htmx's `sse-swap="lot.new"` inserts the card at the **top** of `#feed`
+  (afterbegin, normal path).
+- The JS layer (`htmx:sseMessage` handler) immediately checks
+  `node.dataset.backfill === '1'`.  If set, the node is synchronously
+  relocated to just before `#load-more-trigger` (or appended to
+  `section.zone`/`#feed` if absent) — **no flash** because the move is
+  in the same synchronous callback.
+- **Backfill lots are silent**: no sound, no browser notification, no
+  escalation timer (`onLotNew` is not called).
+- **Counter incremented**: all `.js-lot-count` elements are incremented
+  by +1 regardless of live vs. backfill.
+
+**Why event name stays `"lot.new"` (not `"lot.backfill"`):**
+
+Changing the event name would bypass the per-connection view-filter
+(ADR-052): `sse-swap="lot.new"` binds only to that event; a separate
+`"lot.backfill"` event would require a second `sse-swap` binding and
+duplicate filter logic. The `is_backfill` flag inside the existing event
+keeps coupling low. See [[decisions/ADR-060-backfill-sse-insertion-and-true-total-counter|ADR-060]].
+
 ---
 
 ## SSE event payloads
 
 ```python
-class SSELotNew(BaseModel):
+class SseLotNew(BaseModel):
     event: Literal["lot.new"]
-    lot: LotDTO
-    fragment_template: Literal["poster", "list"]
+    lot: LotPublicDTO
+    fragment_template: Literal["poster"]
+    is_backfill: bool = False
+    # True when published by BackfillService (historical catch-up).
+    # False (default) when published by BrowserSseNotifier (live monitor cycle).
 
 
 class SSELotStatus(BaseModel):

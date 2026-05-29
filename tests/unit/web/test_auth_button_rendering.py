@@ -121,6 +121,9 @@ def _make_app(
 
             return Page(items=(), next_cursor=None, has_more=False)
 
+        def count(self, filters: object) -> int:
+            return 0
+
     class _StubClock:
         def now(self) -> datetime:
             return datetime(2026, 5, 15, 12, 0, tzinfo=UTC)

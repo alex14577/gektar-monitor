@@ -551,7 +551,7 @@ class BackfillService:
                         try:
                             lot_dto = _lot_to_public_dto(lot)
                             self._event_bus.publish(
-                                SseLotNew(lot=lot_dto, fragment_template="poster")
+                                SseLotNew(lot=lot_dto, fragment_template="poster", is_backfill=True)
                             )
                         except Exception:
                             logger.warning(

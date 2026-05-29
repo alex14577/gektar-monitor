@@ -911,6 +911,14 @@ class SseLotNew(BaseModel):
     event: Literal["lot.new"] = "lot.new"
     lot: LotPublicDTO
     fragment_template: Literal["poster"]
+    is_backfill: bool = False
+    """True when published by BackfillService (historical catch-up, not real-time).
+
+    Backfill lots are inserted at the BOTTOM of the feed (after #load-more-trigger),
+    silently — no sound/notification/new-lot badge.  The event name stays "lot.new"
+    so that the per-connection view-filter (ADR-052) applies identically.
+    Default False preserves backward compatibility with live-path publishers.
+    """
 
 
 class SseLotStatus(BaseModel):

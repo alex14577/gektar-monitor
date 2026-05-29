@@ -147,6 +147,13 @@ class _PagedFakeLotQueryService:
             has_more=has_more,
         )
 
+    def count(self, filters: LotFilters) -> int:
+        """Return the total matching active lots (mirrors search logic without cursor/limit)."""
+        items = list(self._items)
+        if filters.subject_display_names:
+            items = [d for d in items if d.region in filters.subject_display_names]
+        return len(items)
+
     def get_by_id(self, lot_id: int) -> Any:
         raise NotImplementedError
 
@@ -392,6 +399,7 @@ class TestExhaustion:
             zones=SimpleNamespace(hot=(), today=()),
             archive_count=0,
             next_cursor=None,  # ← no more pages
+            lot_count=0,
             filters_active=False,
             health=SimpleNamespace(total_lots=0),
             session=SimpleNamespace(expired=False, expires_soon=False),
@@ -439,6 +447,7 @@ class TestExhaustion:
             zones=SimpleNamespace(hot=(), today=(fake_lot,)),
             archive_count=0,
             next_cursor=fake_cursor,
+            lot_count=1,
             filters_active=False,
             health=SimpleNamespace(total_lots=1),
             session=SimpleNamespace(expired=False, expires_soon=False),

@@ -10,9 +10,12 @@
      inside the same zone section, matching the initial-page DOM nesting.
    - When absent (last page): emits a hidden sentinel so outerHTML still removes the
      trigger cleanly (empty body would be a no-op swap in HTMX 1.9).
-   - OOB span (#feed-lot-count) is updated here to reflect the running total of
-     visible lots (initial shown_total + len(lots) on this page).  Stateless: the
-     shown count is threaded through the cursor URL (&shown=N).
+
+   Lot counter: NOT managed here.  The filter-bar #feed-lot-count element shows the
+   true total from DB (set at initial render via build_feed_context / lot_query.count).
+   Live lot.new SSE events are handled client-side by incrementLotCounters() in app.js
+   which increments all .js-lot-count elements.  load-more must NOT touch the counter
+   — overwriting it with a smaller "shown so far" value would corrupt the true total.
 
    Session context: mirrors SessionStubForFilter from filters.py (expired=False by
    default; the user is actively browsing so the session is considered active).
@@ -52,10 +55,8 @@
 <span hidden></span>
 {% endif %}
 
-{# OOB counter update: replace #feed-lot-count span with the running total.
-   shown_total already includes all lots on this page (route computed it as
-   shown_before + len(visible)).  hx-swap-oob requires the element to be a
-   top-level sibling of the primary response fragment (which it is here). #}
-<span id="feed-lot-count" class="filter-bar__count" hx-swap-oob="true">
-  {{ shown_total }} лот{{ 'а' if shown_total % 10 in [2,3,4] and shown_total % 100 not in [12,13,14] else ('' if shown_total % 10 == 1 and shown_total % 100 != 11 else 'ов') }}
-</span>
+{# OOB counter removed: #feed-lot-count now shows the true total from DB
+   (set at initial render via build_feed_context / lot_query.count).
+   Live lot.new SSE events increment all .js-lot-count elements client-side.
+   load-more must NOT overwrite the counter — it would replace the true total
+   with the smaller "shown so far" value (ddpf+hke7). #}
