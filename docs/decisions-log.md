@@ -70,6 +70,7 @@
 - [[decisions/ADR-056-licensing-hmac-stateless-offline|ADR-056]] — Licensing: HMAC-SHA256 stateless offline + XOR-обфускация секрета; абсолютная дата истечения; fail-closed integration в `app.py:main`
 - [[decisions/ADR-057-licensing-cli-as-entry-point|ADR-057]] — CLI генератора лицензий переезжает в `fis_monitor.licensing.cli`, регистрируется как console_script `gektar-gen-license`; PyInstaller-сборка end-user-а CLI не содержит (импорт-граф `app.py:main` его не тянет)
 - [[decisions/ADR-058-license-payload-v2|ADR-058]] — Payload v2: `{v, nbf, exp, lic="interactive"}`; exp обязателен; nbf-floor вместо iat-floor; v1 удалён; добавлены `_prompt.py` / `_interactive.py` для интерактивного режима CLI
+- [[decisions/ADR-059-gen-license-standalone-onefile|ADR-059]] — PyInstaller `--onefile` для `gektar-gen-license` standalone CLI; отдельный venv `build/.venv-gen`; size gate <25 MB; supersedes ADR-026 §onefile-restriction для CLI без runtime-ресурсов
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

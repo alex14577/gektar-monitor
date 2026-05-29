@@ -48,3 +48,34 @@ source_modules =
     fis_monitor.infra
     fis_monitor.domain
 forbidden_modules = fis_monitor.licensing.cli
+
+[importlinter:contract:gen-license-cli-no-app-graph]
+name = gen-license CLI must not import app-layer modules (ADR-059 size gate invariant)
+type = forbidden
+source_modules =
+    fis_monitor.licensing.cli
+    fis_monitor.licensing._interactive
+    fis_monitor.licensing._prompt
+    fis_monitor.licensing._secret
+    fis_monitor.licensing._codec
+    fis_monitor.licensing._hmac
+    fis_monitor.licensing._verify
+forbidden_modules =
+    fis_monitor.app
+    fis_monitor.composition
+    fis_monitor.web
+    fis_monitor.services
+    fis_monitor.infra
+    fis_monitor.domain
+    fastapi
+    starlette
+    uvicorn
+    sse_starlette
+    playwright
+    requests
+    urllib3
+    selectolax
+    psutil
+    watchdog
+    jinja2
+    multipart

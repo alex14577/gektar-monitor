@@ -45,6 +45,11 @@ dev = [
     "cryptography>=42.0",
     "mypy>=1.13",
 ]
+# SE-2: Pinned PyInstaller for gen-license builds. Tested with PyInstaller 6.x.
+# Use: pip install -e ".[build-tools]" before running build_gen_license.sh/.ps1
+build-tools = [
+    "pyinstaller>=6.10,<7",
+]
 
 [project.scripts]
 fis-monitor = "fis_monitor.app:main"

@@ -11,6 +11,9 @@ __pycache__/
 *.egg
 build/
 !build/fis-monitor.spec
+!build/fis-monitor-debug.spec
+!build/gektar-gen-license.spec
+!build/rthook_debug.py
 dist/
 .eggs/
 .pytest_cache/

@@ -89,6 +89,39 @@ gektar-gen-license (no args)
 
 **Composition root** — `app.py:main` — единственное место, где материализуются `_assemble_secret()` и `datetime.now(UTC)`. Всё ниже по стеку получает зависимости через параметры (DI).
 
+## Distribution packaging
+
+### gektar-gen-license standalone .exe
+
+CLI-генератор распространяется авторизованным партнёрам-реселлерам в виде
+единственного исполняемого файла, собранного через PyInstaller `--onefile`.
+
+**Артефакты:**
+- `dist/gektar-gen-license-linux-x86_64-<ver>` (Linux, единственный файл)
+- `dist/gektar-gen-license-windows-x86_64-<ver>.exe` (Windows)
+- SHA256 рядом с каждым артефактом
+
+**Сборка:**
+
+```bash
+bash scripts/build_gen_license.sh          # Linux
+.\scripts\build_gen_license.ps1            # Windows
+```
+
+**Ключевые свойства:**
+- Отдельный venv `build/.venv-gen` — изолирован от fis-monitor venv
+  (`build/.venv`), предотвращает bloat через транзитивные зависимости.
+- Size gate <25 MB в build-скрипте — ранняя защита от случайного подтягивания
+  тяжёлых deps (playwright, fastapi и т.д.).
+- Import-linter контракт `gen-license-cli-no-app-graph` запрещает `cli.py`,
+  `_interactive.py`, `_prompt.py` импортировать app-layer и 3rd-party runtime-deps.
+- `console=True`, `upx=False`, без code signing (SmartScreen warning).
+
+**Обоснование --onefile:** ADR-026 отвергает --onefile для fis-monitor из-за
+cold-start при распаковке Playwright Chromium (~280 MB). Для gen-license
+(~15 MB, без Chromium) cold-start <200 мс — приемлемо для интерактивного CLI.
+Подробнее: [[decisions/ADR-059-gen-license-standalone-onefile|ADR-059]].
+
 ## Расширяемость на v3
 
 Если потребуется v3 payload: добавить `_decode_v3`, расширить `verify_license` аналогично — v2-путь не модифицируется (Open/Closed principle).
