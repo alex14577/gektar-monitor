@@ -57,6 +57,7 @@ kill %1
 
 ```
 fis-monitor/
+├── license.key               # кладётся клиентом вручную, НЕ входит в архив
 ├── bin/                      # PyInstaller --onedir output
 │   ├── fis-monitor           # executable
 │   └── _internal/            # Python runtime + bundled libs + data

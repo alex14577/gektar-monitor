@@ -87,6 +87,17 @@ Payload содержит: `v` (версия формата), `iat` (дата в�
 
 **DI-Protocol сеамы** (в `domain/interfaces.py`): `SecretProvider`, `LicenseKeyProvider`, `ShutdownRequester`. Позволяют подменять зависимости в тестах без реального диска/uvicorn/времени.
 
+## License key location
+
+Canonical location: `<archive-root>/license.key` — рядом с `run.sh` / `run.bat`, **не** внутри `bin/`.
+
+Both startup sites use a single frozen-aware `resolve_base_dir()` from `fis_monitor._license_loader`:
+
+- **`app.py` (startup check)**: вычисляет `base_dir` через `resolve_base_dir(frozen, sys.executable, Path(__file__))`, затем передаёт в `load_license_key(base_dir)`.
+- **`composition.py` `_LicenseKeyLoaderProvider` (runtime supervisor)**: получает `base_dir` через DI из `build_container(base_dir=...)`. `build_container` принимает `base_dir: Path | None = None`; если `None` — вычисляет через `resolve_base_dir` self-fallback. `app.py` передаёт явный `base_dir` чтобы оба сайта использовали одно и то же значение.
+
+Таким образом `LicenseExpirySupervisor` (суточный re-read 00:01 UTC) читает ключ с того же пути, что и стартовая проверка — рассинхрон устранён.
+
 ## Links
 
 - [[licensing/index|Licensing MOC]]

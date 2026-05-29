@@ -591,18 +591,24 @@ def main() -> None:
     # check so no filesystem side-effects occur if the license is absent/invalid.
     from datetime import UTC, datetime
 
-    from fis_monitor._license_loader import _default_license_path, load_license_key
+    from fis_monitor._license_loader import default_license_path, load_license_key, resolve_base_dir
     from fis_monitor.licensing import LicenseStatus, verify_license
     from fis_monitor.licensing._secret import _assemble_secret
 
-    _anchor = Path(__file__).resolve()
+    _base_dir = resolve_base_dir(
+        frozen=getattr(_sys, "frozen", False),
+        executable=Path(_sys.executable),
+        module_file=Path(__file__),
+    )
     try:
-        _key_str = load_license_key(_anchor)
+        _key_str = load_license_key(_base_dir)
     except FileNotFoundError:
+        _expected = default_license_path(_base_dir)
         print(
-            f"ERROR: license.key not found. "
-            f"Place a valid license.key next to the program "
-            f"(expected: {_default_license_path(_anchor)}).",
+            f"ERROR: license.key not found.\n"
+            f"Expected location: {_expected}\n"
+            f"Place the license.key file in the fis-monitor folder "
+            f"(next to run.sh / run.bat) and restart.",
             file=_sys.stderr,
         )
         _sys.exit(1)
@@ -675,7 +681,11 @@ def main() -> None:
     import importlib
 
     composition = importlib.import_module("fis_monitor.composition")
-    build_container = composition.build_container
+    _build_container_raw = composition.build_container
+    _captured_base_dir = _base_dir
+
+    def build_container(settings: object, data_dir: Path) -> object:
+        return _build_container_raw(settings, data_dir, base_dir=_captured_base_dir)
 
     application = create_app(
         args.data_dir,

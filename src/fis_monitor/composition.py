@@ -294,7 +294,9 @@ def _derive_login_config(base_url: str) -> tuple[str, tuple[str, ...]]:
 # ---------------------------------------------------------------------------
 
 
-def build_container(settings: Settings | None, data_dir: Path) -> Container:
+def build_container(
+    settings: Settings | None, data_dir: Path, base_dir: Path | None = None
+) -> Container:
     """Topologically assemble Container per ADR-004.
 
     Layer order:
@@ -638,6 +640,17 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
 
     license_expiry_shutdown_cell = ShutdownRequesterCell()
 
+    if base_dir is None:
+        import sys as _sys
+
+        from fis_monitor._license_loader import resolve_base_dir as _resolve_base_dir
+
+        base_dir = _resolve_base_dir(
+            frozen=getattr(_sys, "frozen", False),
+            executable=Path(_sys.executable),
+            module_file=Path(__file__),
+        )
+
     class _AssembledSecretProvider:
         def get_secret(self) -> bytes:
             from fis_monitor.licensing._secret import _assemble_secret
@@ -645,16 +658,17 @@ def build_container(settings: Settings | None, data_dir: Path) -> Container:
             return _assemble_secret()
 
     class _LicenseKeyLoaderProvider:
-        def load_key(self) -> str:
-            from pathlib import Path
+        def __init__(self, base_dir: Path) -> None:
+            self._base_dir = base_dir
 
+        def load_key(self) -> str:
             from fis_monitor._license_loader import load_license_key
 
-            return load_license_key(Path(__file__).resolve())
+            return load_license_key(self._base_dir)
 
     license_expiry_supervisor = LicenseExpirySupervisor(
         secret_provider=_AssembledSecretProvider(),
-        key_provider=_LicenseKeyLoaderProvider(),
+        key_provider=_LicenseKeyLoaderProvider(base_dir),
         clock=clock,
         event_bus=event_bus,
         shutdown_requester=license_expiry_shutdown_cell,

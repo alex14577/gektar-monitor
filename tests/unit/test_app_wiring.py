@@ -230,3 +230,56 @@ def test_main_argparse_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     cfg = captured_config[0]
     assert cfg.host == "127.0.0.1"
     assert cfg.port == 8000
+
+
+def _make_v2_key(nbf: str, exp: str) -> str:
+    """Build a signed v2 license key for the given ISO date strings."""
+    import base64
+
+    from fis_monitor.licensing._codec import _canonical_bytes, encode_payload
+    from fis_monitor.licensing._hmac import sign
+    from fis_monitor.licensing._secret import _assemble_secret
+
+    payload: dict = {"v": 2, "nbf": nbf, "exp": exp, "lic": "interactive"}
+    encoded = encode_payload(payload)
+    sig = sign(_canonical_bytes(payload), _assemble_secret())
+    encoded_sig = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+    return f"v2.{encoded}.{encoded_sig}"
+
+
+@pytest.mark.parametrize(
+    "loader_side_effect",
+    [
+        pytest.param(FileNotFoundError("no license.key"), id="missing"),
+        pytest.param(None, id="invalid"),  # garbage key string
+        pytest.param("expired", id="expired"),
+    ],
+)
+def test_main_fail_closed_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loader_side_effect: object
+) -> None:
+    """Fail-closed regression guard: main() must sys.exit(1) when the license
+    is missing, invalid, or expired — never silently continue."""
+    import datetime as _dt
+
+    monkeypatch.setattr(sys, "argv", ["fis-monitor"])
+    monkeypatch.chdir(tmp_path)
+
+    if isinstance(loader_side_effect, FileNotFoundError):
+        loader_mock = MagicMock(side_effect=loader_side_effect)
+    elif loader_side_effect == "expired":
+        _yesterday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+        _before = (_dt.date.today() - _dt.timedelta(days=30)).isoformat()
+        loader_mock = MagicMock(return_value=_make_v2_key(nbf=_before, exp=_yesterday))
+    else:
+        loader_mock = MagicMock(return_value="not-a-valid-key")
+
+    with (
+        patch("fis_monitor._license_loader.load_license_key", loader_mock),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        from fis_monitor.app import main
+
+        main()
+
+    assert exc_info.value.code == 1

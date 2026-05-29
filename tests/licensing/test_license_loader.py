@@ -1,40 +1,51 @@
+from pathlib import Path
+
 import pytest
 
-from fis_monitor._license_loader import load_license_key
-
-
-def _make_src_layout(base):
-    """Create a fake src-layout: base/src/fis_monitor/app.py."""
-    app_py = base / "src" / "fis_monitor" / "app.py"
-    app_py.parent.mkdir(parents=True, exist_ok=True)
-    app_py.touch()
-    return app_py
+from fis_monitor._license_loader import default_license_path, load_license_key, resolve_base_dir
 
 
 def test_load_license_key_valid(tmp_path):
-    project = tmp_path / "project"
-    app_py = _make_src_layout(project)
-    (project / "license.key").write_text("v1.payload.sig", encoding="utf-8")
+    (tmp_path / "license.key").write_text("v2.payload.sig", encoding="utf-8")
 
-    result = load_license_key(anchor=app_py)
+    result = load_license_key(tmp_path)
 
-    assert result == "v1.payload.sig"
+    assert result == "v2.payload.sig"
 
 
 def test_load_license_key_missing_raises(tmp_path):
-    project = tmp_path / "project"
-    app_py = _make_src_layout(project)
     # no license.key written intentionally
-
     with pytest.raises(FileNotFoundError):
-        load_license_key(anchor=app_py)
+        load_license_key(tmp_path)
 
 
 def test_load_license_key_strips_trailing_whitespace(tmp_path):
-    project = tmp_path / "project"
-    app_py = _make_src_layout(project)
-    (project / "license.key").write_text("v1.payload.sig\n   ", encoding="utf-8")
+    (tmp_path / "license.key").write_text("v2.payload.sig\n   ", encoding="utf-8")
 
-    result = load_license_key(anchor=app_py)
+    result = load_license_key(tmp_path)
 
-    assert result == "v1.payload.sig"
+    assert result == "v2.payload.sig"
+
+
+def test_default_license_path(tmp_path):
+    assert default_license_path(tmp_path) == tmp_path / "license.key"
+
+
+def test_resolve_base_dir_frozen():
+    # frozen onedir: executable=<root>/bin/fis-monitor -> <root>
+    result = resolve_base_dir(
+        frozen=True,
+        executable=Path("/x/bin/fis-monitor"),
+        module_file=Path("/irrelevant/module.py"),
+    )
+    assert result == Path("/x")
+
+
+def test_resolve_base_dir_src_layout():
+    # src-layout: module_file=<root>/src/fis_monitor/app.py -> <root>
+    result = resolve_base_dir(
+        frozen=False,
+        executable=Path("/irrelevant/python"),
+        module_file=Path("/x/src/fis_monitor/app.py"),
+    )
+    assert result == Path("/x")

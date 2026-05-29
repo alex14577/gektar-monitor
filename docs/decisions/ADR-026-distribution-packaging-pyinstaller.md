@@ -44,6 +44,8 @@ source+install.sh was considered: rejected because it requires Python 3.12, pip,
 
 `src/fis_monitor/composition.py` uses `Path(__file__).resolve().parent.parent.parent / "docs/db/schema.sql"`. In `--onedir` mode this resolves to `_internal/docs/db/schema.sql`. The spec bundles `docs/db/schema.sql` with destination `docs/db/` so it lands at the correct path.
 
+`license.key` is resolved via `resolve_base_dir()` in `fis_monitor._license_loader`. The function is frozen-aware: in a frozen `--onedir` bundle, `sys.executable` is `<root>/bin/fis-monitor[.exe]`, so `sys.executable.parent.parent` = `<root>` — the archive root where the client places `license.key`. In src-layout (dev/test), `__file__` for the calling module is `<root>/src/fis_monitor/X.py`, so three `.parent` calls also reach `<root>`. The canonical path is always `<root>/license.key` — rядом с `run.sh` / `run.bat`, never inside `bin/_internal`.
+
 ### Archive format
 
 - Linux: `.tar.gz` (preserves POSIX executable bits on `bin/fis-monitor` and `run.sh`).
