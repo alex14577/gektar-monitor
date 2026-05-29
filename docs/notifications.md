@@ -22,7 +22,7 @@ CSS-состояния:
 - `[aria-disabled="true"]` — muted + `cursor: not-allowed`, но `pointer-events: auto` — кнопка остаётся в tab-order и генерирует click (toast «разрешите в настройках» доступен с клавиатуры).
 - Кнопка никогда не выставляет `disabled` — используется `aria-disabled` только для `denied`; для прочих состояний атрибут снимается через `removeAttribute('aria-disabled')` (избегаем ложного «dimmed» в NVDA).
 
-**Toast и screen reader:** контейнер `.toaster` создаётся `ensureToaster()` с `role="status"` и `aria-live="polite"`. Все toast-сообщения (включая «разрешите в настройках браузера») автоматически озвучиваются скринридером без дополнительного `announce()` (WCAG 4.1.3).
+**Toast и screen reader:** контейнер `.toaster` создаётся `ensureToaster()` с `role="status"` и `aria-live="polite"`, поэтому toast-сообщения попутно озвучиваются скринридером без отдельного `announce()`. ⚠️ Это **описание текущего поведения, а не требование**: поддержка скринридеров/AT — вне scope ([[decisions/ADR-061-assistive-tech-out-of-scope|ADR-061]]); WCAG-ссылки здесь справочные, новых AT-вложений не делать без явного запроса.
 
 **Wiring SSE → уведомление:** htmx-sse extension (ADR-029) публикует `htmx:sseMessage` на `document.body` после каждого sse-swap. Обработчик `lot.new` читает `feed.firstElementChild` (только что вставленный `<article>`) и берёт `data-title` / `data-area` для тела уведомления. Существующая htmx-вставка в `#feed` при этом не затрагивается.
 

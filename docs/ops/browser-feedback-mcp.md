@@ -71,7 +71,7 @@
   Lighthouse-style trace, Core Web Vitals.
 - `list_network_requests`, `get_console_message` — сетевые запросы и
   ошибки JS в реальном времени.
-- `lighthouse_audit` — полный аудит a11y/perf.
+- `lighthouse_audit` — аудит perf / Core Web Vitals (a11y-секция — информативно; AT вне scope, см. [[decisions/ADR-061-assistive-tech-out-of-scope|ADR-061]]).
 - Подключение к **уже открытому** Chrome (авторизованные сессии).
 - Memory heap snapshots, extensions API.
 
@@ -81,7 +81,7 @@
 - Performance-регрессия: «страница `/lots` тормозит, найди узкое место».
 - Проверить, что HTMX-запрос ушёл с правильными заголовками.
 - Поймать JS-ошибку в консоли после Alpine-инициализации.
-- Аудит a11y/Lighthouse перед релизом UI-фичи.
+- Perf/Lighthouse-аудит перед релизом UI-фичи (a11y/AT — вне scope, [[decisions/ADR-061-assistive-tech-out-of-scope|ADR-061]]).
 
 **Когда НЕ брать:**
 - Простая проверка «отрисовалось ли» — Playwright snapshot дешевле.

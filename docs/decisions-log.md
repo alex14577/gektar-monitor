@@ -72,6 +72,7 @@
 - [[decisions/ADR-058-license-payload-v2|ADR-058]] — Payload v2: `{v, nbf, exp, lic="interactive"}`; exp обязателен; nbf-floor вместо iat-floor; v1 удалён; добавлены `_prompt.py` / `_interactive.py` для интерактивного режима CLI
 - [[decisions/ADR-059-gen-license-standalone-onefile|ADR-059]] — PyInstaller `--onefile` для `gektar-gen-license` standalone CLI; отдельный venv `build/.venv-gen`; size gate <25 MB; supersedes ADR-026 §onefile-restriction для CLI без runtime-ресурсов
 - [[decisions/ADR-060-backfill-sse-insertion-and-true-total-counter|ADR-060]] — Backfill SSE insertion at bottom + counter as true total: `SseLotNew.is_backfill` flag; JS reposition synchronous in htmx:sseMessage; `LotQueryService.count()` for true total; OOB counter removed from load-more (dr21, ddpf, hke7)
+- [[decisions/ADR-061-assistive-tech-out-of-scope|ADR-061]] — Screen-reader / assistive-technology support **вне scope** (нишевый sighted desktop-tool, нет WCAG-требования). Existing ARIA grandfathered, новых AT-вложений не делать без явного запроса; AT-only баги → `wontfix`. Визуальная доступность (контраст, focus-visible, reduced-motion) остаётся как обычный дизайн
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES
@@ -216,7 +217,7 @@ platformdirs    # кросс-платформенные пути для данн
 | ✅ | **Mobile out of scope MVP**. Минимум 1366×768. Никакого PWA, service-worker, manifest.json. Никакого гамбургер-меню |
 | ✅ | **Упрощение контролов**: пагинация 50 (не infinite scroll), только Esc/Enter shortcuts (без J/K/G), тёмная тема только через `prefers-color-scheme` (без тоггла), координаты только десятичные (ДМС в tooltip) |
 | ✅ | **Базовый шрифт 16px**, настраиваемый 14/16/18 в Настройках. Контраст всех цветов ≥ 4.5:1 (WCAG AA) |
-| ✅ | **`aria-live="polite"`** для ленты лотов (screen-reader озвучивает новые), `assertive` для критичных (сессия истекла, ошибка) |
+| ⚠️ | **`aria-live`** для ленты/критичных — реализовано, но AT-поддержка **вне scope** ([[decisions/ADR-061-assistive-tech-out-of-scope\|ADR-061]]): grandfathered, не описание требования. AT-only баги → `wontfix` |
 | ✅ | **Одно уведомление на новый лот, попавший под notify-фильтр** (subjects РФ из настроек). Лоты вне фильтра — тихо появляются в ленте без звука. **Diff-событие (лот ушёл) — БЕЗ звука вообще**, только серая карточка в ленте. **Сервер решает** tier и кладёт в SSE-фрагмент атрибут `data-tier="match\|silent\|gone"`, JS играет звук только для `match` |
 | ✅ | **Эскалация звука** при отсутствии реакции: 0с тихий pop → 60с погромче → 120с пульсирующий title + favicon |
 | ✅ | **«Не беспокоить до HH:MM»** в шапке с пресетами (1 час / 3 часа / до утра / своё) |
