@@ -188,12 +188,14 @@ def test_main_argparse_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     from fis_monitor.licensing._hmac import sign
     from fis_monitor.licensing._secret import _assemble_secret
 
-    _iat = _dt.date.today().isoformat()
-    _payload: dict = {"v": 1, "iat": _iat, "lic": "test"}
+    _today = _dt.date.today()
+    _nbf = _today.isoformat()
+    _exp = (_today + _dt.timedelta(days=30)).isoformat()
+    _payload: dict = {"v": 2, "nbf": _nbf, "exp": _exp, "lic": "interactive"}
     _encoded = encode_payload(_payload)
     _sig = sign(_canonical_bytes(_payload), _assemble_secret())
     _encoded_sig = base64.urlsafe_b64encode(_sig).rstrip(b"=").decode("ascii")
-    _fake_key = f"v1.{_encoded}.{_encoded_sig}"
+    _fake_key = f"v2.{_encoded}.{_encoded_sig}"
 
     # Fake uvicorn.Server: records Config and exposes should_exit.
     captured_config: list = []
