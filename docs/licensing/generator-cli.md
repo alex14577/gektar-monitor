@@ -1,6 +1,6 @@
 ---
 name: licensing-generator-cli
-description: CLI-генератор ключей — init-secret, issue, dev-only гарантия
+description: CLI-генератор ключей — init-secret, issue, интерактивный режим
 type: reference
 ---
 
@@ -10,9 +10,31 @@ type: reference
 
 ```bash
 gektar-gen-license <command> [options]
+# или без аргументов для интерактивного режима:
+gektar-gen-license
 ```
 
 CLI построен на `argparse` (stdlib). Click не используется — no external deps.
+
+## Интерактивный режим
+
+При запуске **без аргументов** (двойной клик или `gektar-gen-license` в терминале без команды) программа входит в guided-режим и задаёт три вопроса:
+
+```
+Дата начала действия (nbf, YYYY-MM-DD): 2026-06-01
+Дата окончания действия (exp, YYYY-MM-DD): 2026-12-31
+Директория для сохранения [Enter = /home/user]: 
+Ключ сохранён: /home/user/license.key
+Нажмите Enter для выхода…
+```
+
+- Неверный формат даты → сообщение об ошибке, вопрос задаётся повторно
+- `exp < nbf` → сообщение об ошибке, вопрос `exp` задаётся повторно
+- Несуществующая директория → сообщение об ошибке, вопрос директории повторяется
+- Если `license.key` уже существует → уточнение «Перезаписать? [y/N]:»
+- Файл всегда называется `license.key` (фиксировано)
+- Пустой ответ на вопрос директории → использует директорию рядом с исполняемым файлом (frozen) или `cwd()` (dev)
+- Ctrl+C → «Отменено.» без паузы
 
 ## Команда `init-secret`
 
@@ -41,48 +63,43 @@ _P2 = b'\x51\xd4\x...'
 
 ```bash
 gektar-gen-license issue \
-    (--duration day|week|month|forever | --expires YYYY-MM-DD) \
-    --licensee NAME \
-    [--out FILE]
+    --nbf YYYY-MM-DD \
+    --exp YYYY-MM-DD \
+    --out DIR
 ```
 
 ### Флаги
 
 | Флаг | Описание |
 |---|---|
-| `--duration day\|week\|month\|forever` | Вычислить `exp` от сегодняшней UTC-даты |
-| `--expires YYYY-MM-DD` | Задать `exp` явно |
-| `--licensee NAME` | Обязательный; строка идентификатора получателя |
-| `--out FILE` | Записать ключ в файл; по умолчанию — stdout |
+| `--nbf YYYY-MM-DD` | Not-before дата (начало действия ключа) — **обязательный** |
+| `--exp YYYY-MM-DD` | Expiry дата (конец действия, включительно) — **обязательный** |
+| `--out DIR` | Директория, куда записать `license.key` — **обязательный** |
 
-`--duration` и `--expires` взаимоисключающие, ровно один обязателен:
+Файл всегда записывается как `<DIR>/license.key`.
 
-```python
-group = parser.add_mutually_exclusive_group(required=True)
-group.add_argument("--duration", ...)
-group.add_argument("--expires", ...)
-```
-
-`--duration forever` → поле `exp` отсутствует в payload (бессрочный ключ).
+Гарды:
+- `exp < nbf` → exit 1
+- `--out` не существует или не является директорией → exit 1
 
 ### Пример
 
 ```bash
 gektar-gen-license issue \
-    --duration month \
-    --licensee "Acme Corp" \
-    --out license.key
+    --nbf 2026-06-01 \
+    --exp 2026-12-31 \
+    --out /tmp/
 ```
+
+Записывает `/tmp/license.key` с ключом формата `v2.<payload>.<sig>`.
 
 ## Единый источник секрета
 
-`licensing/cli.py` импортирует `_assemble_secret` из `fis_monitor.licensing._secret` — того же модуля, что использует `app.py`. Генератор и верификатор гарантированно используют одинаковый секрет. Рассинхрон ([[licensing/secret-obfuscation|описание]]) технически невозможен.
+`licensing/cli.py` импортирует `_assemble_secret` из `fis_monitor.licensing._secret` — того же модуля, что использует `app.py`. Генератор и верификатор гарантированно используют одинаковый секрет.
 
 ## Распространение и dev-only гарантия
 
 CLI поставляется как console script `gektar-gen-license`, объявленный в `[project.scripts]` (`pyproject.toml`). Доступен после `pip install -e .` или установки wheel-а.
-
-`fis_monitor/licensing/cli.py` импортирует приватный `_assemble_secret` — допустимо, так как модуль уже в пакете и пользуется внутренними символами того же пакета.
 
 **End-user дистрибутив (PyInstaller)** бундлит только импорт-граф `fis_monitor.app:main`. `fis_monitor.licensing.cli` в этом графе не участвует — в распакованном `.exe` CLI всё равно недоступен. Подробности — [[decisions/ADR-057-licensing-cli-as-entry-point|ADR-057]].
 
@@ -90,5 +107,7 @@ CLI поставляется как console script `gektar-gen-license`, объ�
 
 - [[licensing/secret-obfuscation|XOR-обфускация]] — что делает `init-secret` под капотом
 - [[licensing/license-key-file|Файл license.key]] — куда класть выпущенный ключ
-- [[licensing/key-format|Формат ключа]] — структура генерируемой строки
+- [[licensing/key-format|Формат ключа]] — структура генерируемой строки v2
+- [[decisions/ADR-057-licensing-cli-as-entry-point|ADR-057]]
+- [[decisions/ADR-058-license-payload-v2|ADR-058]]
 - [[licensing/index|MOC]]

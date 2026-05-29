@@ -1,19 +1,19 @@
 ---
 name: licensing-key-format
-description: Строковый формат лицензионного ключа, поля payload, base64url правила
+description: Строковый формат лицензионного ключа v2, поля payload, base64url правила
 type: reference
 ---
 
 # Формат лицензионного ключа
 
-## Строка ключа
+## Строка ключа (v2)
 
 ```
-v1.<base64url_payload>.<base64url_sig>
+v2.<base64url_payload>.<base64url_sig>
 ```
 
 - Одна строка, UTF-8, три токена через `.`
-- Первый токен — литерал `v1` (идентификатор версии формата)
+- Первый токен — литерал `v2` (идентификатор версии формата)
 - `base64url` — алфавит `A-Za-z0-9-_`, **без padding** (символы `=` отсутствуют)
 
 ### Восстановление padding при декоде
@@ -24,14 +24,16 @@ s += '=' * (-len(s) % 4)
 
 Это стандартный приём для base64url без padding.
 
-## Поля payload
+## Поля payload (v2)
 
 | Поле | Тип | Обязательное | Описание |
 |---|---|---|---|
-| `v` | `int` | да | Версия формата (для v1 = `1`) |
-| `iat` | `string` | да | Дата выпуска UTC `YYYY-MM-DD`; anti-rollback floor |
-| `exp` | `string \| null` | нет | Дата истечения UTC `YYYY-MM-DD`; отсутствие или `null` = бессрочный |
-| `lic` | `string` | да | Идентификатор получателя (произвольная строка) |
+| `v` | `int` | да | Версия формата (для v2 = `2`) |
+| `nbf` | `string` | да | Not-before UTC `YYYY-MM-DD`; anti-rollback floor — ключ не действует раньше этой даты |
+| `exp` | `string` | да | Expiry UTC `YYYY-MM-DD`; ключ не действует после этой даты |
+| `lic` | `string` | да | Тип лицензии — хардкод `"interactive"` в v2 |
+
+Все поля **обязательны**. Отсутствие любого из них → INVALID при верификации.
 
 ### Почему `date`, не `datetime`
 
@@ -48,21 +50,36 @@ json.dumps(payload_dict, sort_keys=True, separators=(',', ':'))
 ### Пример payload (до base64url)
 
 ```json
-{"exp":"2026-12-31","iat":"2026-05-28","lic":"Acme Corp","v":1}
+{"exp":"2026-12-31","lic":"interactive","nbf":"2026-05-29","v":2}
 ```
 
 ### Пример полного ключа (структурный)
 
 ```
-v1.eyJleHAiOiIyMDI2LTEyLTMxIiwiaWF0IjoiMjAyNi0wNS0yOCIsImxpYyI6IkFjbWUgQ29ycCIsInYiOjF9.W3NpZ25hdHVyZV9ieXRlc19oZXJlXQ
+v2.eyJleHAiOiIyMDI2LTEyLTMxIiwibGljIjoiaW50ZXJhY3RpdmUiLCJuYmYiOiIyMDI2LTA1LTI5IiwidiI6Mn0.<base64url_sig>
 ```
 
 ## Версионирование формата
 
-Первый токен (`v1`) позволяет диспатчеру `_dispatch_decoder` выбрать нужный декодер без попытки разобрать payload. Неизвестный префикс → `INVALID` немедленно. Это делает добавление v2 возможным без изменения v1-пути.
+Первый токен (`v2`) позволяет диспатчеру `verify_license` выбрать нужный декодер без попытки разобрать payload. Неизвестный префикс (включая `v1`) → `INVALID` немедленно. Это делает добавление v3 возможным без изменения v2-пути.
+
+## Migration v1 → v2
+
+**v1 удалён полностью** в рамках [[decisions/ADR-058-license-payload-v2|ADR-058]]. Ни один v1 ключ не будет принят верификатором — `verify_license` возвращает `INVALID` при любом префиксе, отличном от `v2.`.
+
+Отличия v2 от v1:
+
+| Аспект | v1 | v2 |
+|---|---|---|
+| Версионный маркер | `v1.` | `v2.` |
+| Anti-rollback field | `iat` (issued-at) | `nbf` (not-before) |
+| Expiry | опционально | обязательно |
+| Licensee | произвольная строка | хардкод `"interactive"` |
+| Perpetual keys | поддерживались | не поддерживаются |
 
 ## См. также
 
 - [[licensing/crypto-hmac|HMAC-SHA256]] — как payload подписывается
 - [[licensing/module-api#_codec.py|Кодек API]] — `encode_payload` / `decode_payload`
+- [[decisions/ADR-058-license-payload-v2|ADR-058]] — решение о переходе на v2
 - [[licensing/index|MOC]]

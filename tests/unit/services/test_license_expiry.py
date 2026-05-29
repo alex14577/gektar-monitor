@@ -7,9 +7,10 @@ Invariants verified (spec §Тесты, инварианты 1-7):
   2. VALID → EXPIRED → shutdown exactly once.
   3. stop_event mid-wait → clean exit without shutdown.
   4. verify raises RuntimeError → supervisor.crash + shutdown (fail-closed).
-  5. Null-exp key (perpetual) → supervisor loops without shutdown.
   6. FileNotFoundError on load_key → check.error + shutdown_requested once.
   7. Watchdog Timer.start called; _handle_expiry idempotent (no duplicate fire).
+
+Note: v1 keys and perpetual (no-exp) keys removed in v2 migration (ADR-058).
 """
 
 from __future__ import annotations
@@ -40,19 +41,22 @@ _TEST_SECRET: bytes = (
 )
 
 
-def _make_key(
-    licensee: str,
-    iat: date,
-    exp: date | None,
+def _make_v2_key(
+    nbf: date,
+    exp: date,
     secret: bytes = _TEST_SECRET,
 ) -> str:
-    payload: dict[str, object] = {"v": 1, "iat": iat.isoformat(), "lic": licensee}
-    if exp is not None:
-        payload["exp"] = exp.isoformat()
+    """Build a v2 license key for tests. exp is always required in v2."""
+    payload: dict[str, object] = {
+        "v": 2,
+        "nbf": nbf.isoformat(),
+        "exp": exp.isoformat(),
+        "lic": "interactive",
+    }
     encoded = encode_payload(payload)
     sig = sign(_canonical_bytes(payload), secret)
     encoded_sig = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
-    return f"v1.{encoded}.{encoded_sig}"
+    return f"v2.{encoded}.{encoded_sig}"
 
 
 # ---------------------------------------------------------------------------
@@ -251,12 +255,12 @@ def test_next_check_at_cadence(now_str: str, expected_str: str) -> None:
 
 def test_valid_then_expired_shutdown_once() -> None:
     """VALID on first check; EXPIRED on second check → shutdown called exactly once."""
-    iat = date(2026, 1, 1)
+    nbf = date(2026, 1, 1)
     exp = date(2026, 5, 28)  # expired by base_now (2026-05-28T22:00)
-    key = _make_key("test-lic", iat, exp)
+    key = _make_v2_key(nbf, exp)
 
     # Clock starts before expiry on first check (T1 = 2026-05-27), expired on second (T1 = base_now)
-    t1 = datetime(2026, 5, 27, 22, 0, 0, tzinfo=UTC)  # VALID: today=2026-05-27 < exp=2026-05-28
+    t1 = datetime(2026, 5, 27, 22, 0, 0, tzinfo=UTC)  # VALID: today=2026-05-27 <= exp=2026-05-28
     t2 = datetime(2026, 5, 29, 0, 1, 0, tzinfo=UTC)   # EXPIRED: today=2026-05-29 > exp=2026-05-28
 
     calls_seq: list[datetime] = [t1, t2]
@@ -359,22 +363,26 @@ def test_verifier_raises_triggers_shutdown() -> None:
 
 
 # ===========================================================================
-# Invariant 5 — null-exp (perpetual) key → loops without shutdown
+# Invariant 5 — VALID key → supervisor loops without shutdown
 # ===========================================================================
 
 
-def test_perpetual_license_no_shutdown() -> None:
-    """Perpetual license (expires_at=None) never triggers shutdown."""
+def test_valid_license_loops_without_shutdown() -> None:
+    """VALID license (v2, with exp in future) never triggers shutdown over multiple checks."""
     svc, clk, _kp, ver, _tf, sr, _eb = _build_supervisor()
-    ver.set_result(LicenseResult(status=LicenseStatus.VALID, expires_at=None, licensee="perm"))
+    # v2 VALID keys always have an exp date
+    future_exp = date(2027, 12, 31)
+    ver.set_result(
+        LicenseResult(status=LicenseStatus.VALID, expires_at=future_exp, licensee="interactive")
+    )
 
     # Do several _check_once calls manually to simulate N days passing
     for _ in range(5):
         result = svc._check_once()
-        assert result is False, "VALID perpetual key must return False (no expiry)"
+        assert result is False, "VALID key must return False (no shutdown requested)"
         clk.advance(timedelta(days=1))
 
-    assert sr.calls == 0, "Perpetual license must never request shutdown"
+    assert sr.calls == 0, "VALID license must never request shutdown"
 
 
 # ===========================================================================

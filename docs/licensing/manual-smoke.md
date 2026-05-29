@@ -20,7 +20,7 @@ uv pip install -e .
 # или: pip install -e .
 ```
 
-После этого команда `fis-monitor` доступна как entry-point.
+После этого команды `fis-monitor` и `gektar-gen-license` доступны как entry-points.
 
 ## 1. Нет файла → exit 1
 
@@ -39,17 +39,17 @@ stderr: `ERROR: License is invalid. Check license.key contents.`
 
 ## 3. Просроченный ключ → exit 1
 
-Past-date guard в `src/fis_monitor/licensing/cli.py` блокирует выпуск ключей прошедшей датой.
+Past-date guard в `src/fis_monitor/licensing/cli.py` блокирует выпуск ключей с `exp < nbf`.
 **Временно закомментировать** guard и восстановить после теста.
 
 Найти блок:
 ```bash
-grep -n "is before today" src/fis_monitor/licensing/cli.py
+grep -n "is before" src/fis_monitor/licensing/cli.py
 ```
-Закомментировать 3 строки начиная с `if exp is not None and exp < iat:` (включая print и return 1).
+Закомментировать строки начиная с `if exp < nbf:` (включая print и return 1).
 
 ```bash
-gektar-gen-license issue --expires 2020-01-01 --licensee Smoke --out license.key
+gektar-gen-license issue --nbf 2020-01-01 --exp 2020-01-01 --out .
 fis-monitor --data-dir ./var-smoke
 git checkout src/fis_monitor/licensing/cli.py && rm license.key
 ```
@@ -58,16 +58,23 @@ stderr: `ERROR: License expired on 2020-01-01. Renew your license.`
 ## 4. Валидный ключ → нормальный старт
 
 ```bash
-gektar-gen-license issue --duration day --licensee Smoke --out license.key
+gektar-gen-license issue --nbf 2026-01-01 --exp 2026-12-31 --out .
 fis-monitor --data-dir ./var-smoke   # CTRL+C для остановки
 rm license.key
 ```
 Ожидаемый результат: uvicorn стартует без строк `ERROR` в stderr.
 
+## 5. Интерактивный режим (двойной клик)
+
+```bash
+gektar-gen-license
+```
+Ожидаемый результат: три вопроса → файл `license.key` создан в текущей директории → пауза «Нажмите Enter для выхода…».
+
 ## Cleanup
 
 ```bash
 rm -f license.key && rm -rf ./var-smoke
-git checkout src/fis_monitor/licensing/cli.py  # на случай прерванного сценария 3 (восстановить past-date guard)
+git checkout src/fis_monitor/licensing/cli.py  # на случай прерванного сценария 3
 # mv license.key.bak license.key  # если переименовывали
 ```

@@ -2,7 +2,9 @@
 
 Two subcommands:
 - init-secret: generates _P1/_P2 literals for _secret.py
-- issue: issues a v1 license key
+- issue: issues a v2 license key
+
+Interactive mode (no arguments): guided key generation via console prompts.
 
 Installed as console script `gektar-gen-license` via [project.scripts] in
 pyproject.toml. The module is shipped inside the wheel; end-user distributions
@@ -15,20 +17,50 @@ import argparse
 import base64
 import secrets
 import sys
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 from pathlib import Path
 
 from fis_monitor.licensing import _secret as _secret_module
 from fis_monitor.licensing._codec import _canonical_bytes, encode_payload
 from fis_monitor.licensing._hmac import sign
+from fis_monitor.licensing._interactive import _default_save_dir, run_interactive
+from fis_monitor.licensing._prompt import ConsolePrompter, Prompter
 from fis_monitor.licensing._secret import _assemble_secret
 
-_DURATION_DAYS: dict[str, int | None] = {
-    "day": 1,
-    "week": 7,
-    "month": 30,
-    "forever": None,
-}
+
+def _build_v2_key(nbf: date, exp: date, secret: bytes) -> str:
+    """Build a v2 license key string.
+
+    Pure function. No I/O, no side effects.
+
+    Args:
+        nbf: Not-before date (start of validity).
+        exp: Expiry date (end of validity, inclusive).
+        secret: 32-byte HMAC secret.
+
+    Returns:
+        License key string in ``v2.<payload>.<sig>`` format.
+    """
+    payload: dict[str, object] = {
+        "v": 2,
+        "nbf": nbf.isoformat(),
+        "exp": exp.isoformat(),
+        "lic": "interactive",
+    }
+    encoded_payload = encode_payload(payload)
+    sig = sign(_canonical_bytes(payload), secret)
+    encoded_sig = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+    return f"v2.{encoded_payload}.{encoded_sig}"
+
+
+def _write_key(path: Path, key_str: str) -> None:
+    """Write a key string to a file.
+
+    Args:
+        path: Destination file path.
+        key_str: License key string to write.
+    """
+    path.write_text(key_str + "\n", encoding="utf-8")
 
 
 def _cmd_init_secret(args: argparse.Namespace) -> int:
@@ -57,41 +89,42 @@ def _cmd_init_secret(args: argparse.Namespace) -> int:
 
 
 def _cmd_issue(args: argparse.Namespace) -> int:
-    """Issue a v1 license key and print or write it."""
-    iat = datetime.now(UTC).date()
+    """Issue a v2 license key and write it to a file."""
+    nbf: date = args.nbf
+    exp: date = args.exp
+    out_dir: Path = args.out
 
-    if args.expires is not None:
-        exp: date | None = args.expires
-    else:
-        days = _DURATION_DAYS[args.duration]
-        exp = (iat + timedelta(days=days)) if days is not None else None
-
-    if exp is not None and exp < iat:
+    if exp < nbf:
         print(
-            f"ERROR: --expires {exp.isoformat()} is before today ({iat.isoformat()}). "
-            f"Refusing to issue a dead-on-arrival key.",
+            f"ERROR: --exp {exp.isoformat()} is before --nbf ({nbf.isoformat()}). "
+            f"Refusing to issue a key with inverted date range.",
             file=sys.stderr,
         )
         return 1
 
-    payload: dict[str, object] = {"v": 1, "iat": iat.isoformat(), "lic": args.licensee}
-    if exp is not None:
-        payload["exp"] = exp.isoformat()
+    if not out_dir.exists() or not out_dir.is_dir():
+        print(
+            f"ERROR: --out {out_dir} does not exist or is not a directory.",
+            file=sys.stderr,
+        )
+        return 1
 
-    encoded_payload = encode_payload(payload)
-    payload_bytes = _canonical_bytes(payload)
     secret = _assemble_secret()
-    sig = sign(payload_bytes, secret)
-    encoded_sig = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
-    key = f"v1.{encoded_payload}.{encoded_sig}"
+    key = _build_v2_key(nbf, exp, secret)
+    dest = out_dir / "license.key"
 
-    if args.out is not None:
-        if args.out.is_dir():
-            print(f"ERROR: --out {args.out} is a directory.", file=sys.stderr)
-            return 1
-        args.out.write_text(key + "\n", encoding="utf-8")
-    else:
-        print(key)
+    if dest.is_symlink():
+        print(
+            f"ERROR: {dest} is a symlink. Refusing to write.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        _write_key(dest, key)
+    except OSError as exc:
+        print(f"ERROR: Could not write {dest}: {exc}", file=sys.stderr)
+        return 1
 
     return 0
 
@@ -118,33 +151,86 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     init_p.set_defaults(func=_cmd_init_secret)
 
-    issue_p = sub.add_parser("issue", help="Issue a v1 license key.")
-    group = issue_p.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--duration",
-        choices=["day", "week", "month", "forever"],
-        help="Relative expiry duration.",
-    )
-    group.add_argument(
-        "--expires",
+    issue_p = sub.add_parser("issue", help="Issue a v2 license key.")
+    issue_p.add_argument(
+        "--nbf",
+        required=True,
         type=date.fromisoformat,
         metavar="YYYY-MM-DD",
-        help="Absolute expiry date (ISO 8601).",
+        help="Not-before date (start of validity, ISO 8601).",
     )
-    issue_p.add_argument("--licensee", required=True, help="Licensee name.")
+    issue_p.add_argument(
+        "--exp",
+        required=True,
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Expiry date (end of validity, ISO 8601).",
+    )
     issue_p.add_argument(
         "--out",
+        required=True,
         type=Path,
-        metavar="FILE",
-        help="Write key to this file instead of stdout.",
+        metavar="DIR",
+        help="Directory to write license.key into.",
     )
     issue_p.set_defaults(func=_cmd_issue)
 
     return parser
 
 
+def _run_interactive_mode(prompter: Prompter) -> int:
+    """Run interactive key generation mode.
+
+    Args:
+        prompter: Prompter implementation for I/O.
+
+    Returns:
+        Exit code: 0 on success, 1 on error.
+    """
+    return run_interactive(
+        prompter=prompter,
+        key_writer=_write_key,
+        builder=_build_v2_key,
+        default_dir_fn=_default_save_dir,
+        secret_fn=_assemble_secret,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the CLI."""
+    """Entry point for the CLI.
+
+    When called with no arguments (interactive double-click mode), runs a
+    guided key generation wizard. Otherwise, parses subcommands via argparse.
+
+    Args:
+        argv: Argument list. None means use sys.argv[1:].
+
+    Returns:
+        Exit code.
+    """
+    # Interactive mode: no argv given AND no real CLI arguments
+    is_interactive = argv is None and len(sys.argv) == 1
+    # Also support empty list for tests
+    if argv is not None and len(argv) == 0:
+        is_interactive = True
+
+    if is_interactive:
+        prompter = ConsolePrompter()
+        try:
+            code = _run_interactive_mode(prompter)
+        except KeyboardInterrupt:
+            print("\nОтменено.", file=sys.stderr)
+            return 130
+        except SystemExit:
+            raise
+        except Exception as exc:
+            prompter.error(f"Неожиданная ошибка: {exc}")
+            prompter.ask_text("Нажмите Enter для выхода…")
+            return 1
+        else:
+            prompter.ask_text("Нажмите Enter для выхода…")
+            return code
+
     parser = _build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

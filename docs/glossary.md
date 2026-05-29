@@ -401,9 +401,13 @@
 
 - **HMAC-SHA256** — Hash-based Message Authentication Code с SHA-256 дайджестом. Используется для подписи payload лицензионного ключа. Верификация — обязательно через `hmac.compare_digest` (constant-time), не через `==` (уязвимо к timing-атаке). Stdlib: `hmac` + `hashlib`. Единственная крипто-зависимость подсистемы лицензирования. См. [[licensing/crypto-hmac]].
 
-- **iat (issued-at)** — Поле payload лицензионного ключа. Строка `YYYY-MM-DD` — дата выпуска ключа. Используется как anti-rollback floor: если текущая дата раньше `iat` → INVALID. Предотвращает грубый откат системных часов (дни/годы). Тонкий откат (часы/минуты) не блокируется — см. [[licensing/out-of-scope]]. Присутствует во всех ключах; обязательное поле. См. [[licensing/crypto-hmac#Anti-rollback floor]].
+- **nbf (not-before)** — Поле payload v2 лицензионного ключа. Строка `YYYY-MM-DD` — дата начала действия ключа. Используется как anti-rollback floor: если `today < nbf` → INVALID. Позволяет выпускать ключи с будущей датой активации. Обязательное поле в v2. Заменило `iat` (issued-at) из v1. См. [[licensing/crypto-hmac#Anti-rollback floor]], [[decisions/ADR-058-license-payload-v2|ADR-058]].
 
-- **anti-rollback floor** — Защита от обхода срока действия лицензии путём перевода системных часов назад. Реализована через поле `iat` (issued-at): верификатор проверяет `today >= iat_date`, иначе → INVALID. Блокирует грубый откат (дни, годы). Тонкий откат (часы, минуты) без persistent state не блокируем. См. [[licensing/crypto-hmac#Anti-rollback floor через iat]].
+- **payload v2** — Формат payload лицензионного ключа второй версии: `{"v": 2, "nbf": "YYYY-MM-DD", "exp": "YYYY-MM-DD", "lic": "interactive"}`. Отличия от v1: поле `nbf` вместо `iat`, `exp` обязателен (нет perpetual), `lic` хардкодирован как `"interactive"`. Ключ в формате `v2.<base64url_payload>.<base64url_sig>`. См. [[licensing/key-format]], [[decisions/ADR-058-license-payload-v2|ADR-058]].
+
+- **iat (issued-at)** — *(v1-only, удалён в v2)* Поле payload v1 лицензионного ключа. В v2 заменено на `nbf` (not-before) с более явной семантикой начала действия. Устаревший термин; v1 ключи более не принимаются верификатором.
+
+- **anti-rollback floor** — Защита от обхода срока действия лицензии путём перевода системных часов назад. В v2 реализована через поле `nbf`: верификатор проверяет `today >= nbf_date`, иначе → INVALID. Блокирует грубый откат (дни, годы). Тонкий откат (часы, минуты) без persistent state не блокируем. См. [[licensing/crypto-hmac#Anti-rollback floor]].
 
 - **security-through-obscurity** — Подход к защите, при котором безопасность основана на сокрытии деталей реализации, а не на криптографической стойкости. В контексте лицензирования: XOR-обфускация секрета блокирует `strings`-атаку, но не дизассемблер. Принят явно для соответствия требованию «сложность ≤2/10». Честный tradeoff: атакующий с мотивацией извлечёт секрет. Альтернативы (KMS, HSM) — в [[licensing/out-of-scope]]. См. [[licensing/secret-obfuscation]].
 

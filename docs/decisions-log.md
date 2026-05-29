@@ -69,6 +69,7 @@
 - [[decisions/ADR-055-region-id-site-id-namespace|ADR-055]] — `lots.region_id` канонически хранит site-id (`∈ SUBJECT_TITLE_BY_ID`), а не macro-id (1=ДФО, 2=Арктика); фикс бага pc1g (email-фильтр никогда не срабатывал из-за разных namespace); helper `subject_id_by_title` в domain; migration v7→v8
 - [[decisions/ADR-056-licensing-hmac-stateless-offline|ADR-056]] — Licensing: HMAC-SHA256 stateless offline + XOR-обфускация секрета; абсолютная дата истечения; fail-closed integration в `app.py:main`
 - [[decisions/ADR-057-licensing-cli-as-entry-point|ADR-057]] — CLI генератора лицензий переезжает в `fis_monitor.licensing.cli`, регистрируется как console_script `gektar-gen-license`; PyInstaller-сборка end-user-а CLI не содержит (импорт-граф `app.py:main` его не тянет)
+- [[decisions/ADR-058-license-payload-v2|ADR-058]] — Payload v2: `{v, nbf, exp, lic="interactive"}`; exp обязателен; nbf-floor вместо iat-floor; v1 удалён; добавлены `_prompt.py` / `_interactive.py` для интерактивного режима CLI
 
 **Резервирование:**
 - [[decisions/ADR-009-backup-user-state-tables-only|ADR-009]] — Backup стратегия — только USER_STATE_TABLES

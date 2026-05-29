@@ -2,7 +2,7 @@
 
 Provides:
 - test_secret: fixed 32-byte secret fixture (NOT _assemble_secret())
-- make_key: helper to generate v1 license key strings for tests
+- make_v2_key: helper to generate v2 license key strings for tests
 """
 
 import base64
@@ -28,38 +28,35 @@ def test_secret() -> bytes:
     return _TEST_SECRET
 
 
-def make_key(
-    licensee: str,
-    iat: date,
-    exp: date | None,
+def make_v2_key(
+    nbf: date,
+    exp: date,
     secret: bytes,
+    lic: str = "interactive",
 ) -> str:
-    """Generate a v1 license key string for use in tests.
+    """Generate a v2 license key string for use in tests.
 
-    Format: ``v1.<base64url_payload>.<base64url_sig>``
+    Format: ``v2.<base64url_payload>.<base64url_sig>``
 
     Uses production codec (_canonical_bytes, encode_payload, sign) so that
     any change to serialization is reflected here automatically.
 
     Args:
-        licensee: Licensee identifier string.
-        iat: Issued-at date.
-        exp: Expiry date, or ``None`` for no expiry.
+        nbf: Not-before date.
+        exp: Expiry date.
         secret: 32-byte HMAC secret.
+        lic: Licensee identifier (default "interactive"; override for negative tests).
 
     Returns:
-        License key string in ``v1.<payload>.<sig>`` format.
+        License key string in ``v2.<payload>.<sig>`` format.
     """
     payload: dict[str, object] = {
-        "v": 1,
-        "iat": iat.isoformat(),
-        "lic": licensee,
+        "v": 2,
+        "nbf": nbf.isoformat(),
+        "exp": exp.isoformat(),
+        "lic": lic,
     }
-    if exp is not None:
-        payload["exp"] = exp.isoformat()
-
     encoded_payload = encode_payload(payload)
     sig = sign(_canonical_bytes(payload), secret)
     encoded_sig = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
-
-    return f"v1.{encoded_payload}.{encoded_sig}"
+    return f"v2.{encoded_payload}.{encoded_sig}"
