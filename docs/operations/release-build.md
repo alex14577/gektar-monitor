@@ -18,7 +18,7 @@ How to produce a client-deliverable archive from source.
 bash scripts/build_release.sh
 ```
 
-Output: `dist/fis-monitor-linux-x86_64-<version>.tar.gz` + `.sha256` checksum.
+Output: `dist/fis-monitor-linux-x86_64-<version>.tar.gz`.
 
 The script:
 1. Creates a fresh isolated venv under `build/.venv`
@@ -36,7 +36,7 @@ The script:
 .\scripts\build_release.ps1
 ```
 
-Output: `dist\fis-monitor-windows-x86_64-<version>.zip` + `.sha256`.
+Output: `dist\fis-monitor-windows-x86_64-<version>.zip`.
 
 **Status: written, NOT tested on a real Windows machine.** Run on a Windows 10/11 x86_64 host with Python 3.12 in PATH and verify the archive before distributing.
 
@@ -141,7 +141,7 @@ push tag v* ──► build (ubuntu-latest)   ──► release (create GitHub R
 
 **`release`** (только на тег-пуш, depends on build):
 1. `actions/download-artifact@v4` — скачивает все артефакты
-2. `softprops/action-gh-release@v2` — создаёт Release с автоматическим changelog и прикладывает `.tar.gz` / `.zip` + `.sha256`
+2. `softprops/action-gh-release@v2` — создаёт Release с автоматическим changelog и прикладывает `.tar.gz` / `.zip`
 
 ### Где смотреть логи
 

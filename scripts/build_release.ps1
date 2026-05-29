@@ -1,7 +1,6 @@
 # Build fis-monitor Windows x86_64 distribution archive.
 #
 # Output: dist\fis-monitor-windows-x86_64-<version>.zip
-#         dist\fis-monitor-windows-x86_64-<version>.zip.sha256
 #
 # STATUS: Written but NOT tested on a real Windows machine.
 # Run this script on a Windows 10/11 x86_64 host with Python 3.12+ installed.
@@ -184,14 +183,7 @@ $ArchiveSize = (Get-Item $ArchivePath).Length / 1MB
 Write-Step ("Archive size: {0:F1} MB" -f $ArchiveSize)
 
 # ---------------------------------------------------------------------------
-# Step 7: Checksum
-# ---------------------------------------------------------------------------
-$Hash = (Get-FileHash $ArchivePath -Algorithm SHA256).Hash.ToLower()
-"$Hash  $ArchivePath" | Set-Content "$ArchivePath.sha256" -Encoding UTF8
-Write-Step "SHA-256: $Hash"
-
-# ---------------------------------------------------------------------------
-# Step 8: Cleanup
+# Step 7: Cleanup
 # ---------------------------------------------------------------------------
 Write-Step "Cleaning build intermediates..."
 @($VenvDir, $PyiDist, $PyiWork, $StageDir) | ForEach-Object {
@@ -206,5 +198,4 @@ Write-Step "Cleaning build intermediates..."
 # ---------------------------------------------------------------------------
 Write-Step "SUCCESS"
 Write-Step "Artifact : $ArchivePath"
-Write-Step "Checksum : $ArchivePath.sha256"
 Write-Step ("Size     : {0:F1} MB" -f $ArchiveSize)

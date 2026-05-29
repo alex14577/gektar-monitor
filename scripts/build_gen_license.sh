@@ -2,7 +2,6 @@
 # Build gektar-gen-license Linux x86_64 standalone executable.
 #
 # Output: dist/gektar-gen-license-linux-x86_64-<version>
-#         dist/gektar-gen-license-linux-x86_64-<version>.sha256
 #
 # Principles:
 #   - Failure-fast: set -euo pipefail aborts on any error.
@@ -202,12 +201,6 @@ cp "$BINARY_FILE" "$ARTIFACT_PATH"
 chmod 755 "$ARTIFACT_PATH"
 
 # ---------------------------------------------------------------------------
-# Step 7: SHA256 checksum
-# ---------------------------------------------------------------------------
-sha256sum "$ARTIFACT_PATH" > "${ARTIFACT_PATH}.sha256"
-log "SHA-256: $(cat "${ARTIFACT_PATH}.sha256")"
-
-# ---------------------------------------------------------------------------
 # Step 8: Cleanup build intermediates
 # ---------------------------------------------------------------------------
 log "Cleaning build intermediates..."
@@ -220,5 +213,4 @@ rm -rf "$PYINSTALLER_DIST"
 # ---------------------------------------------------------------------------
 log "SUCCESS"
 log "Artifact : $ARTIFACT_PATH"
-log "Checksum : ${ARTIFACT_PATH}.sha256"
 log "Size     : $SIZE_HR"

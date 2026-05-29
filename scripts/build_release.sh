@@ -2,7 +2,6 @@
 # Build fis-monitor Linux x86_64 distribution archive.
 #
 # Output: dist/fis-monitor-linux-x86_64-<version>.tar.gz
-#         dist/fis-monitor-linux-x86_64-<version>.tar.gz.sha256
 #
 # Principles:
 #   - Failure-fast: set -euo pipefail aborts on any error.
@@ -279,13 +278,7 @@ ARCHIVE_SIZE=$(du -sh "$ARCHIVE_PATH" | cut -f1)
 log "Archive size: $ARCHIVE_SIZE"
 
 # ---------------------------------------------------------------------------
-# Step 7: Checksum
-# ---------------------------------------------------------------------------
-sha256sum "$ARCHIVE_PATH" > "${ARCHIVE_PATH}.sha256"
-log "SHA-256: $(cat "${ARCHIVE_PATH}.sha256")"
-
-# ---------------------------------------------------------------------------
-# Step 8: Cleanup build intermediates
+# Step 7: Cleanup build intermediates
 # ---------------------------------------------------------------------------
 log "Cleaning build intermediates..."
 # Only wipe what cannot be cached: _dist (PyInstaller raw output, already
@@ -300,5 +293,4 @@ rm -rf "$PYINSTALLER_DIST" "$STAGE_DIR"
 # ---------------------------------------------------------------------------
 log "SUCCESS"
 log "Artifact : $ARCHIVE_PATH"
-log "Checksum : ${ARCHIVE_PATH}.sha256"
 log "Size     : $ARCHIVE_SIZE"

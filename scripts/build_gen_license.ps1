@@ -1,7 +1,6 @@
 # Build gektar-gen-license Windows x86_64 standalone executable.
 #
 # Output: dist\gektar-gen-license-windows-x86_64-<version>.exe
-#         dist\gektar-gen-license-windows-x86_64-<version>.exe.sha256
 #
 # STATUS: Written but NOT tested on a real Windows machine.
 # Run this script on a Windows 10/11 x86_64 host with Python 3.12+ installed.
@@ -228,12 +227,6 @@ Write-Step "Copying artifact..."
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 Copy-Item $BinaryFile -Destination $ArtifactPath -Force
 
-# ---------------------------------------------------------------------------
-# Step 7: SHA256 checksum
-# ---------------------------------------------------------------------------
-$Hash = (Get-FileHash $ArtifactPath -Algorithm SHA256).Hash.ToLower()
-"$Hash  $ArtifactPath" | Set-Content "$ArtifactPath.sha256" -Encoding UTF8
-Write-Step "SHA-256: $Hash"
 
 # ---------------------------------------------------------------------------
 # Step 8: Cleanup build intermediates
@@ -247,5 +240,4 @@ if (Test-Path $PyiDist) { Remove-Item $PyiDist -Recurse -Force }
 # ---------------------------------------------------------------------------
 Write-Step "SUCCESS"
 Write-Step "Artifact : $ArtifactPath"
-Write-Step "Checksum : $ArtifactPath.sha256"
 Write-Step ("Size     : {0:F1} MB" -f $SizeMBDisplay)

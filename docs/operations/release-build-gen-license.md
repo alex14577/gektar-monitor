@@ -22,7 +22,7 @@ No GUI required. No Chromium. No `playwright install`.
 bash scripts/build_gen_license.sh
 ```
 
-Output: `dist/gektar-gen-license-linux-x86_64-<version>` + `.sha256` checksum.
+Output: `dist/gektar-gen-license-linux-x86_64-<version>`.
 
 The script:
 1. Creates isolated venv under `build/.venv-gen` (separate from `build/.venv`)
@@ -48,7 +48,7 @@ bash scripts/build_gen_license.sh --clean
 .\scripts\build_gen_license.ps1
 ```
 
-Output: `dist\gektar-gen-license-windows-x86_64-<version>.exe` + `.sha256`.
+Output: `dist\gektar-gen-license-windows-x86_64-<version>.exe`.
 
 For a clean build:
 
@@ -81,9 +81,7 @@ Expected output: a single line `v2.<base64-payload>.<base64-sig>`.
 ```
 dist/
 ├── gektar-gen-license-linux-x86_64-<ver>        # single executable (Linux)
-├── gektar-gen-license-linux-x86_64-<ver>.sha256
-├── gektar-gen-license-windows-x86_64-<ver>.exe  # single executable (Windows)
-└── gektar-gen-license-windows-x86_64-<ver>.exe.sha256
+└── gektar-gen-license-windows-x86_64-<ver>.exe  # single executable (Windows)
 ```
 
 Unlike fis-monitor, there is no directory structure or `browsers/` — a single
@@ -97,7 +95,6 @@ Send the appropriate binary + README-gen-license.txt to the authorized partner.
 # Example: pack for email
 zip gektar-gen-license-linux-x86_64-1.0.0.zip \
     dist/gektar-gen-license-linux-x86_64-1.0.0 \
-    dist/gektar-gen-license-linux-x86_64-1.0.0.sha256 \
     scripts/templates/README-gen-license.txt
 ```
 
