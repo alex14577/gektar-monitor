@@ -44,7 +44,9 @@ version() {
     # Read version from pyproject.toml using only stdlib — no extra deps.
     python3 - <<'PYEOF'
 import tomllib, pathlib
-data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+# read_bytes() avoids platform default-encoding issues (cp1252 on Windows
+# chokes on the UTF-8 Russian description); harmless on Linux.
+data = tomllib.loads(pathlib.Path("pyproject.toml").read_bytes().decode("utf-8"))
 print(data["project"]["version"])
 PYEOF
 }

@@ -41,7 +41,9 @@ function Write-Fail  {
 
 function Get-ProjectVersion {
     # CR-4: Use Python (tomllib) for authoritative parsing — matches sh script approach.
-    $ver = & python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])" 2>&1
+    # read_bytes() avoids Windows cp1252 default, which fails on the UTF-8
+    # Russian description in pyproject.toml.
+    $ver = & python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_bytes().decode('utf-8'))['project']['version'])" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Could not parse version from pyproject.toml: $ver"
     }
