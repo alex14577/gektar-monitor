@@ -52,3 +52,6 @@
 # - linear.api-key
 # - github.org
 # - github.repo
+
+# Issue prefix (matches existing issue IDs)
+issue-prefix: "gektar_monitor"
