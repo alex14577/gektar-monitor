@@ -12,21 +12,6 @@
    остаётся на внутреннем #feed (htmx-sse MutationObserver re-wires).
 #}
 
-{# Macro: correct Russian plural for "лот".
-   Rule (matches JS lotPlural in app.js):
-     n%10==1 && n%100!=11        → 'лот'
-     n%10 in [2,3,4] && n%100 not in [12,13,14] → 'лота'
-     else                        → 'лотов'
-   Both the filter-bar counter and the zone title use this macro so server-render
-   and live JS increment produce identical text. #}
-{% macro lot_plural(n) -%}
-{%- set r10 = n % 10 -%}
-{%- set r100 = n % 100 -%}
-{%- if r10 == 1 and r100 != 11 -%}лот
-{%- elif r10 in [2, 3, 4] and r100 not in [12, 13, 14] -%}лота
-{%- else -%}лотов
-{%- endif -%}
-{%- endmacro %}
 
 <div id="feed-wrapper">
 
@@ -41,9 +26,7 @@
    (data-count="0" → display:none) but remains in the DOM. #}
 <div class="filter-bar">
   <div class="filter-bar__right">
-    <span id="feed-lot-count" class="filter-bar__count js-lot-count" data-count="{{ lot_count }}">
-      {{ lot_count }} {{ lot_plural(lot_count) }}
-    </span>
+    {% include 'partials/_feed_lot_count.html.jinja' %}
   </div>
 </div>
 

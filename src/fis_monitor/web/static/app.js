@@ -186,6 +186,18 @@
   // cookie in its GET /events handshake.
   // Debounce ~200 ms coalesces rapid filter changes into a single reconnect.
   let _reconnectTimer = null;
+  // ---------- SSE re-sync lot counter on (re)connect (B1, ADR-060 amendment) ----------
+  // htmx:sseOpen fires on #sse-root after every successful EventSource open (including
+  // reconnects). We fetch GET /feed/count which returns the #feed-lot-count span with
+  // the current DB count and swap it outerHTML — re-syncing any drift accumulated
+  // while SSE was disconnected. _reconnectTimer already coalesces filter-changed
+  // reconnects; sseOpen fires at most once per actual connection, so no extra debounce.
+  document.body.addEventListener('htmx:sseOpen', function() {
+    if (window.htmx) {
+      htmx.ajax('GET', '/feed/count', { target: '#feed-lot-count', swap: 'outerHTML' });
+    }
+  });
+
   document.body.addEventListener('filter-changed', function() {
     const root = document.getElementById('sse-root');
     if (!root) return;

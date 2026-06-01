@@ -123,6 +123,20 @@ This removes the duplication without weakening the true-total invariant: the
 single remaining counter is still driven by `LotQueryService.count(filters)` on
 render and incremented per `lot.new` SSE event.
 
+## Amendment (2026-06-01, bd gektar-monitor-z15) — counter re-sync on SSE (re)connect
+
+**Problem.** Decision §3 sets `#feed-lot-count` to the true total via `count()` **at page render**, then mutates it **only** via JS `incrementLotCounters()` on each `lot.new` SSE event. If the browser is not connected to SSE while lots arrive (tab closed, SSE dropped, backfill running during a reconnect gap), those `lot.new` events are missed and never recovered — the counter freezes at its render-time value (observed: 195 while DB held 255). A full page reload re-runs `count()` and shows the correct total, but live re-sync never happens. The increment-only design assumed a continuously-connected SSE stream.
+
+**Resolution (variant B1).** On SSE (re)connect the client re-syncs the counter to the authoritative `count()`:
+
+- The `#feed-lot-count` span is extracted into a shared partial (`partials/_feed_lot_count.html.jinja`), included by `_feed_lots.html.jinja`.
+- New read-only route `GET /feed/count` renders that partial: reads the `view_filters` cookie, builds `LotFilters` via the same `_view_filters_to_lot_filters(vf)` adapter used by `build_feed_context`, returns `<span id="feed-lot-count" … data-count=N>` via `LotQueryService.count(filters)` — identical filter parity to page render.
+- `app.js` listens on `htmx:sseOpen` (bubbles from `#sse-root` to `document.body`) and issues an htmx OOB swap of `#feed-lot-count` from `GET /feed/count`. This reuses the OOB-swap pattern already used by `POST /filters/view`.
+
+**Why not variant A (server emits a `SseLotCount` event at stream start).** Considered and rejected: A requires a new domain event (`SseLotCount`), an `initial_events` kwarg + a `subscribe()→count()→yield→drain` ordering invariant inside `SseStreamer` — the same fragile drain path implicated in the shutdown work (ADR-014 amendment / gektar-monitor-3l8, -1iz) — and couples the SSE infra layer to `LotQueryService`. B1 touches no domain models and no `SseStreamer`; the only cost is one lightweight HTTP round-trip per (re)connect, negligible for a single-user desktop app. The race A claimed to avoid is benign under B1: `count()` returns the absolute DB total, so a `lot.new` arriving during the in-flight `GET /feed/count` cannot cause a double-count — the absolute value overwrites accumulated increments correctly.
+
+**Consequences.** Counter self-heals on every SSE (re)connect, not only on full page reload. No change to `SseLotNew`, `SseStreamer`, or the domain event union. `only_new` remains ignored by `count()` (unchanged §3 limitation). Filter parity guaranteed by reusing `_view_filters_to_lot_filters`.
+
 ## See also
 
 - [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] — per-connection view-filter

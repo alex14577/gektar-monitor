@@ -1,0 +1,13 @@
+{# Lot count span — extracted partial for OOB re-sync on SSE reconnect (B1, ADR-060 amendment).
+   Consumed by _feed_lots.html.jinja (include) and GET /feed/count (standalone fragment).
+   Requires lot_count in context. #}
+{% macro lot_plural(n) -%}
+{%- set r10 = n % 10 -%}
+{%- set r100 = n % 100 -%}
+{%- if r10 == 1 and r100 != 11 -%}лот
+{%- elif r10 in [2, 3, 4] and r100 not in [12, 13, 14] -%}лота
+{%- else -%}лотов
+{%- endif -%}
+{%- endmacro %}<span id="feed-lot-count" class="filter-bar__count js-lot-count" data-count="{{ lot_count }}">
+  {{ lot_count }} {{ lot_plural(lot_count) }}
+</span>
