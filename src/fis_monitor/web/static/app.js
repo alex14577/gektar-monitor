@@ -321,10 +321,6 @@
   // Increment all .js-lot-count elements by 1 and update their text.
   // data-count holds the current numeric value; text is re-rendered with
   // the updated number and correct plural form.
-  //
-  // The .zone__title-count element carries a sibling "·" span that is NOT
-  // part of .js-lot-count — only textContent of the span itself is updated,
-  // which contains just "N лот..." without any prefix.
   // No-op when no matching elements exist.
   function incrementLotCounters() {
     document.querySelectorAll('.js-lot-count').forEach((el) => {

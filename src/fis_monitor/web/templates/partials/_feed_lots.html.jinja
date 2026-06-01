@@ -72,7 +72,7 @@
   {% if zones.today %}
     <section class="zone" aria-label="Список лотов">
       <header class="zone__head">
-        <h2 class="zone__title">Список <span aria-hidden="true">·</span> <span class="zone__title-count js-lot-count" data-count="{{ lot_count }}">{{ lot_count }} {{ lot_plural(lot_count) }}</span></h2>
+        <h2 class="zone__title">Список</h2>
       </header>
       {% for lot in zones.today %}
         {% include "partials/_lot_poster.html.jinja" %}

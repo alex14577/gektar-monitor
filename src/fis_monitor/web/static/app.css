@@ -326,7 +326,6 @@ code, kbd, .mono { font-family: var(--font-mono); }
   text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--muted); margin: 0;
 }
-.zone__title-count { color: var(--ink-2); font-weight: 600; }
 .zone--hot  { background: var(--hot-soft);  border-color: color-mix(in oklab, var(--hot) 25%, var(--line)); }
 .zone--hot  .zone__title { color: var(--hot); }
 .zone--cool { }

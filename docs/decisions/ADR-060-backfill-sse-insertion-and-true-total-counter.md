@@ -64,8 +64,9 @@ The move is synchronous in the same event-loop tick as the htmx insert — no
 at page size and NOT affected by `only_new` (user-state predicate, in-memory only).
 
 `build_feed_context` calls `count()` after `search()` and exposes `lot_count` in
-the template context.  `#feed-lot-count` and `.zone__title-count` render
-`lot_count`, both carry the `js-lot-count` class and `data-count=N` attribute.
+the template context.  The counter is rendered in **exactly one** canonical
+place — `#feed-lot-count` in the filter bar — carrying the `js-lot-count` class
+and `data-count=N` attribute (see Amendment below).
 
 The JS `incrementLotCounters()` function increments **every** `.js-lot-count`
 element on each `lot.new` event (live + backfill), using Russian plural forms
@@ -101,6 +102,26 @@ removed.  Load-more no longer touches the counter — the JS handles it going fo
 - `_SseLotNewViewModel.__slots__` now includes `_is_backfill`; `LotViewModel`
   gains a `is_backfill` property (always False) so server-rendered templates
   never raise `AttributeError` on the attribute.
+
+## Amendment (2026-06-01, bd gektar-monitor-0v9)
+
+The original Decision §3 rendered `lot_count` in **two** elements simultaneously —
+`#feed-lot-count` (filter bar) and `.zone__title-count` (zone `<h2>` heading) —
+both carrying `js-lot-count`.  On screen this showed the same number twice, and
+after the page-load render the two could diverge: a server-side filter re-render
+(`POST /filters/view`) resets both to the DB total, but the zone heading was
+otherwise a redundant copy of the filter-bar counter.
+
+**Resolution:** the counter now lives in **exactly one** canonical element,
+`#feed-lot-count` in the filter bar.  The `.zone__title-count` span was removed
+from `_feed_lots.html.jinja`; the zone heading is now a plain `<h2>Список</h2>`.
+The dead `.zone__title-count` CSS rule and the stale `incrementLotCounters()`
+comment referencing the removed element were also dropped.  `incrementLotCounters()`
+is unchanged — it now matches exactly one `.js-lot-count` element.
+
+This removes the duplication without weakening the true-total invariant: the
+single remaining counter is still driven by `LotQueryService.count(filters)` on
+render and incremented per `lot.new` SSE event.
 
 ## See also
 

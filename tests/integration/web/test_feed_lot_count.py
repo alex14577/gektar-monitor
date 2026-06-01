@@ -143,19 +143,13 @@ def test_feed_lots_template_renders_lot_count_not_page_size() -> None:
     # Counter must show true_total, not len(zones.today)=3
     assert "350 лотов" in html or "350 лота" in html or "350 лот" in html, (
         f"Expected '350 лот...' in counter, not found. "
-        f"Check #feed-lot-count / zone__title-count. snippet: {html[:500]}"
+        f"Check #feed-lot-count. snippet: {html[:500]}"
     )
     assert "3 лота" not in html or "350" in html, (
         "Template must render lot_count (350), not len(zones.today) (3)"
     )
     assert 'id="feed-lot-count"' in html
     assert 'class="filter-bar__count js-lot-count"' in html
-
-    # .zone__title-count must carry data-count so JS does not reset it to 0
-    # (JS reads data-count as the base for incrementLotCounters).
-    assert 'class="zone__title-count js-lot-count" data-count="350"' in html, (
-        '.zone__title-count must have data-count="350" so JS increments from true total'
-    )
 
 
 def test_feed_lot_count_filter_bar_renders_at_zero() -> None:
