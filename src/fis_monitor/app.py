@@ -693,7 +693,9 @@ def main() -> None:
         host=args.host,
         port=args.port,
     )
-    config = uvicorn.Config(application, host=args.host, port=args.port)
+    config = uvicorn.Config(
+        application, host=args.host, port=args.port, timeout_graceful_shutdown=5
+    )
     server = uvicorn.Server(config)
     application.state._uvicorn_server = server
     server.run()

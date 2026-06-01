@@ -179,7 +179,7 @@ sqlite3 state.db "PRAGMA integrity_check;"
 
 ## 11. systemd unit — TimeoutStopSec (R3-M3)
 
-Для Linux-инсталляции (если когда-то — MVP только Windows): unit-файл ДОЛЖЕН содержать `TimeoutStopSec=45` (grace 35с + phase 1.5 ~5с + запас 5с). Меньше — systemd прибьёт процесс SIGKILL'ом во время phase 1.5, in-flight уведомления потеряются. Документируется в installer-скрипте.
+Для Linux-инсталляции (если когда-то — MVP только Windows): unit-файл ДОЛЖЕН содержать `TimeoutStopSec=52` (uvicorn-drain 5с + grace 35с + phase 1.5 ~5с + запас 7с; см. [[decisions/ADR-014-two-phase-shutdown|ADR-014]] — расширение про `timeout_graceful_shutdown`). Меньше — systemd прибьёт процесс SIGKILL'ом во время phase 1.5, in-flight уведомления потеряются. Документируется в installer-скрипте.
 
 ## 12. Жалоба пользователя на дубль email-уведомления (R4-C5)
 
