@@ -477,3 +477,99 @@ class TestSessionExpiredPaginatedFetcher:
 
         # Only region A was iterated; region B not reached
         assert fetcher.iterate_calls == [_REGION_A]
+
+
+# ---------------------------------------------------------------------------
+# Fake helpers — single-page SessionExpiredError
+# ---------------------------------------------------------------------------
+
+
+class FakeListParserSessionExpired:
+    """List parser that raises SessionExpiredError on parse()."""
+
+    def parse(self, html: str) -> ParsedListPage:
+        raise SessionExpiredError("session expired")
+
+
+# ---------------------------------------------------------------------------
+# Tests — single-page path SessionExpiredError (ADR-063 symmetry fix)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionExpiredSinglePage:
+    def test_session_expired_publishes_sse_event(self) -> None:
+        """SseSessionExpired is published when single-page parse raises SessionExpiredError."""
+        bus = FakeEventBus()
+        lot_repo = FakeLotRepository(pages={0: [_make_lot(1)]})
+        config = FakeConfigSource(regions=[_REGION_A])
+
+        svc = FullScanService(
+            http=FakeHttpClient(),
+            list_parser=FakeListParserSessionExpired(),  # type: ignore[arg-type]
+            lot_repo=lot_repo,
+            cycles_repo=FakeCyclesRepository(),
+            config_source=config,
+            clock=FakeClock(),
+            event_bus=bus,
+            cycle_progress_signal=threading.Event(),
+            batch_size=50,
+            inter_batch_sleep_sec=0.0,
+            paginated_fetcher=None,
+        )
+
+        svc.run_once()
+
+        session_expired_events = [e for e in bus.published if isinstance(e, SseSessionExpired)]
+        assert len(session_expired_events) == 1
+
+    def test_session_expired_single_page_suppresses_deactivation(self) -> None:
+        """Single-page SessionExpiredError → all_regions_completed=False → mark_inactive not called."""  # noqa: E501
+        bus = FakeEventBus()
+        # lot 99 is active but NOT in seen_ids — deactivation must be suppressed
+        lot_repo = FakeLotRepository(pages={0: [_make_lot(1), _make_lot(99)]})
+        config = FakeConfigSource(regions=[_REGION_A])
+
+        svc = FullScanService(
+            http=FakeHttpClient(),
+            list_parser=FakeListParserSessionExpired(),  # type: ignore[arg-type]
+            lot_repo=lot_repo,
+            cycles_repo=FakeCyclesRepository(),
+            config_source=config,
+            clock=FakeClock(),
+            event_bus=bus,
+            cycle_progress_signal=threading.Event(),
+            batch_size=50,
+            inter_batch_sleep_sec=0.0,
+            paginated_fetcher=None,
+        )
+
+        svc.run_once()
+
+        # mass-deactivation suppressed: lot 99 must NOT be marked inactive
+        assert lot_repo.mark_inactive_calls == []
+
+    def test_session_expired_single_page_aborts_remaining_regions(self) -> None:
+        """Single-page SessionExpiredError on region A → region B HTTP never called."""
+        bus = FakeEventBus()
+        lot_repo = FakeLotRepository()
+        config = FakeConfigSource(regions=[_REGION_A, _REGION_B])
+
+        http = FakeHttpClient()
+        svc = FullScanService(
+            http=http,
+            list_parser=FakeListParserSessionExpired(),  # type: ignore[arg-type]
+            lot_repo=lot_repo,
+            cycles_repo=FakeCyclesRepository(),
+            config_source=config,
+            clock=FakeClock(),
+            event_bus=bus,
+            cycle_progress_signal=threading.Event(),
+            batch_size=50,
+            inter_batch_sleep_sec=0.0,
+            paginated_fetcher=None,
+        )
+
+        svc.run_once()
+
+        # Only 1 HTTP call (region A); region B never reached
+        assert len(http.calls) == 1

@@ -50,9 +50,9 @@ class UpstreamError(Exception):
    поймать и прервать цикл.
 4. `FullScanService._fetch_region_ids_paginated` re-raise-ит после publish;
    `run_once` ловит в цикле регионов и делает `break`.
-5. `FullScanService._fetch_region_ids_single_page` публикует событие и возвращает
-   пустое множество (как прежде), при этом `all_regions_completed=False` подавляет
-   mass-deactivation.
+5. `FullScanService._fetch_region_ids_single_page` публикует событие и re-raise-ит —
+   единый механизм с paginated-путём: `run_once` ловит `SessionExpiredError`, ставит
+   `all_regions_completed=False` и делает `break`.
 
 **Реаутентификация — ручная:** `SseSessionExpired` → UI-modal + `SessionExpiredEmailService`.
 Авто-refresh из Backfill/FullScan **не реализуется** (ADR-063).

@@ -405,11 +405,11 @@ class FullScanService:
             # Log at WARN (not ERROR) — this is an auth issue, not a DOM bug.
             logger.warning(
                 "full_scan: session expired for region=%s "
-                "(ESIA login page detected) — skipping region",
+                "(ESIA login page detected) — aborting remaining regions",
                 region,
             )
             self._event_bus.publish(SseSessionExpired(timestamp=self._clock.now()))
-            return set()
+            raise
         except ParseBugError:
             logger.warning(
                 "full_scan: parse error for region=%s — skipping region",
