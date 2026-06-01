@@ -25,7 +25,7 @@ import threading
 from collections.abc import Callable, Iterator
 from typing import Protocol
 
-from fis_monitor.domain.errors import ParseBugError, UpstreamError
+from fis_monitor.domain.errors import ParseBugError, SessionExpiredError, UpstreamError
 from fis_monitor.domain.interfaces import HttpClient
 from fis_monitor.domain.models import ParsedListPage, ParsedListRow
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
@@ -98,8 +98,10 @@ class PaginatedListFetcher:
         (not before the first) to respect the upstream rate limit.
 
         ``UpstreamError`` or ``ParseBugError`` from any page ends iteration
-        for that region — yielding partial results would corrupt BackfillService
-        coverage tracking.
+        for that region via ``return`` (partial rows already yielded stay with
+        the caller).  ``SessionExpiredError`` is re-raised instead so callers
+        (BackfillService, FullScanService) can publish ``SseSessionExpired``.
+        Yielding partial results would corrupt BackfillService coverage tracking.
 
         *page_callback*, if supplied, is called **before** yielding the first
         row of each page as ``page_callback(page_num, items_count)``.  This
@@ -152,6 +154,14 @@ class PaginatedListFetcher:
             try:
                 parsed_page = self._list_parser.parse(response.text)
                 rows = parsed_page.rows
+            except SessionExpiredError:
+                logger.warning(
+                    "paginated_list_fetcher: SessionExpiredError on region=%s page=%d"
+                    " — propagating",
+                    region,
+                    page,
+                )
+                raise
             except ParseBugError:
                 logger.warning(
                     "paginated_list_fetcher: ParseBugError on region=%s page=%d — stopping",

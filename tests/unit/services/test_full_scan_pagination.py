@@ -4,6 +4,10 @@ Tests the new paginated path in _fetch_region_ids_paginated: when a
 PaginatedListFetcher is supplied, all pages are iterated and their ids
 are collected. The existing single-page tests in test_full_scan_service.py
 remain unchanged (backward-compat path).
+
+Also covers SessionExpiredError handling (ADR-063):
+  - _fetch_region_ids_paginated publishes SseSessionExpired, pagination_completed=False.
+  - run_once aborts remaining regions on SessionExpiredError.
 """
 
 from __future__ import annotations
@@ -13,12 +17,14 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
+from fis_monitor.domain.errors import SessionExpiredError
 from fis_monitor.domain.interfaces import Lot
 from fis_monitor.domain.models import (
     CycleResult,
     ParsedListPage,
     ParsedListRow,
     Settings,
+    SseSessionExpired,
 )
 from fis_monitor.services.full_scan import FullScanService
 
@@ -361,3 +367,113 @@ class TestPaginatedMassDeactivationGuard:
 
         # Abort guard: no mark_inactive calls
         assert lot_repo.mark_inactive_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Test 3: SessionExpiredError handling (ADR-063)
+# ---------------------------------------------------------------------------
+
+
+class FakePaginatedListFetcherSessionExpired:
+    """Raises SessionExpiredError after yielding rows for the first region."""
+
+    def __init__(self, rows_before_expiry: list[ParsedListRow]) -> None:
+        self._rows = rows_before_expiry
+        self.iterate_calls: list[int] = []
+
+    def iterate(
+        self,
+        region: int,
+        stop_event: threading.Event,
+        *,
+        sleep_between_pages: float = 0.0,
+        per_page: int | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[ParsedListRow]:
+        self.iterate_calls.append(region)
+        yield from self._rows
+        raise SessionExpiredError("session expired mid-iterate")
+
+
+class TestSessionExpiredPaginatedFetcher:
+    def test_session_expired_publishes_sse_event(self) -> None:
+        """SseSessionExpired is published when SessionExpiredError raised mid-paginate."""
+        rows = [_make_row(1), _make_row(2)]
+        fetcher = FakePaginatedListFetcherSessionExpired(rows)
+        bus = FakeEventBus()
+        config = FakeConfigSource(regions=[_REGION_A])
+        lot_repo = FakeLotRepository(pages={0: [_make_lot(1)]})
+
+        svc = FullScanService(
+            http=FakeHttpClient(),
+            list_parser=FakeListParser(),
+            lot_repo=lot_repo,
+            cycles_repo=FakeCyclesRepository(),
+            config_source=config,
+            clock=FakeClock(),
+            event_bus=bus,
+            cycle_progress_signal=threading.Event(),
+            batch_size=50,
+            inter_batch_sleep_sec=0.0,
+            paginated_fetcher=fetcher,  # type: ignore[arg-type]
+        )
+
+        svc.run_once()
+
+        session_expired_events = [e for e in bus.published if isinstance(e, SseSessionExpired)]
+        assert len(session_expired_events) == 1
+
+    def test_session_expired_pagination_completed_false_suppresses_deactivation(self) -> None:
+        """pagination_completed=False after SessionExpiredError — mark_inactive not called."""
+        rows = [_make_row(1)]
+        fetcher = FakePaginatedListFetcherSessionExpired(rows)
+        bus = FakeEventBus()
+        config = FakeConfigSource(regions=[_REGION_A])
+        # Active lot 99 is NOT in paginated results — but mass-deactivation must be suppressed
+        lot_repo = FakeLotRepository(pages={0: [_make_lot(1), _make_lot(99)]})
+
+        svc = FullScanService(
+            http=FakeHttpClient(),
+            list_parser=FakeListParser(),
+            lot_repo=lot_repo,
+            cycles_repo=FakeCyclesRepository(),
+            config_source=config,
+            clock=FakeClock(),
+            event_bus=bus,
+            cycle_progress_signal=threading.Event(),
+            batch_size=50,
+            inter_batch_sleep_sec=0.0,
+            paginated_fetcher=fetcher,  # type: ignore[arg-type]
+        )
+
+        svc.run_once()
+
+        # mass-deactivation suppressed: lot 99 must NOT be marked inactive
+        assert lot_repo.mark_inactive_calls == []
+
+    def test_session_expired_aborts_remaining_regions(self) -> None:
+        """SessionExpiredError on region A → region B iterate() never called."""
+        rows = [_make_row(1)]
+        fetcher = FakePaginatedListFetcherSessionExpired(rows)
+        bus = FakeEventBus()
+        config = FakeConfigSource(regions=[_REGION_A, _REGION_B])
+        lot_repo = FakeLotRepository()
+
+        svc = FullScanService(
+            http=FakeHttpClient(),
+            list_parser=FakeListParser(),
+            lot_repo=lot_repo,
+            cycles_repo=FakeCyclesRepository(),
+            config_source=config,
+            clock=FakeClock(),
+            event_bus=bus,
+            cycle_progress_signal=threading.Event(),
+            batch_size=50,
+            inter_batch_sleep_sec=0.0,
+            paginated_fetcher=fetcher,  # type: ignore[arg-type]
+        )
+
+        svc.run_once()
+
+        # Only region A was iterated; region B not reached
+        assert fetcher.iterate_calls == [_REGION_A]

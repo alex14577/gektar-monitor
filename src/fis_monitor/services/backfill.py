@@ -28,9 +28,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
+from fis_monitor.domain.errors import SessionExpiredError
 from fis_monitor.domain.models import (
     DEFAULT_TRACKED_FIELDS,
     SseLotNew,
+    SseSessionExpired,
 )
 from fis_monitor.domain.models import (
     lot_to_public_dto as _lot_to_public_dto,
@@ -439,6 +441,11 @@ class BackfillService:
             self._monitor_cycle.mark_region_in_backfill(region)
             try:
                 self._process_region(region, stop)
+            except SessionExpiredError:
+                logger.warning(
+                    "backfill: session expired — aborting remaining regions",
+                )
+                break
             finally:
                 self._monitor_cycle.clear_region_in_backfill(region)
 
@@ -570,6 +577,14 @@ class BackfillService:
                     )
                     continue
 
+        except SessionExpiredError:
+            logger.warning(
+                "backfill: session expired during region=%s page=%d — publishing SseSessionExpired",
+                region,
+                current_page_num,
+            )
+            self._event_bus.publish(SseSessionExpired(timestamp=datetime.now(UTC)))
+            raise
         except Exception:
             logger.error(
                 "backfill.region.exception",

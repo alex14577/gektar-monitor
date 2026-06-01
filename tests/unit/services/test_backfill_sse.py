@@ -8,6 +8,7 @@ Invariants tested:
   7. EventBus publish exception → backfill does not raise, logs warning, continues.
   8. Cancelled backfill (stop.is_set() True at publish time) → SseLotNew NOT published.
   9. Duplicate lot (was_new=False) → no SseLotNew published.
+  10. SessionExpiredError from fetcher → SseSessionExpired published, remaining regions aborted.
 """
 
 from __future__ import annotations
@@ -19,11 +20,13 @@ from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from fis_monitor.domain.errors import SessionExpiredError
 from fis_monitor.domain.models import (
     LotUpsertResult,
     ParsedListRow,
     Settings,
     SseLotNew,
+    SseSessionExpired,
 )
 from fis_monitor.services.backfill import BackfillService
 
@@ -269,3 +272,85 @@ def test_backfill_cancelled_before_start_no_sse_published():
     # Pre-cancelled backfill: row loop exits immediately after cancel check
     # so SseLotNew is never published (no upserts completed either)
     assert len(bus.published) == 0, "no SseLotNew should be published when pre-cancelled"
+
+
+# ---------------------------------------------------------------------------
+# Tests for SessionExpiredError handling (invariant 10, ADR-063)
+# ---------------------------------------------------------------------------
+
+
+class FakePaginatedListFetcherSessionExpired:
+    """Yields rows for region A page 1, then raises SessionExpiredError on next call."""
+
+    def __init__(self, rows_before_expiry: list[ParsedListRow]) -> None:
+        self._rows = rows_before_expiry
+        self._call_count = 0
+
+    def iterate(
+        self,
+        region: int,
+        stop_event: threading.Event,
+        *,
+        sleep_between_pages: float = 0.0,
+        per_page: int | None = None,
+        max_pages: int | None = None,
+        page_callback: object = None,
+    ) -> Iterator[ParsedListRow]:
+        self._call_count += 1
+        if self._call_count == 1:
+            # First region: yield some rows, then raise SessionExpiredError
+            yield from self._rows
+            raise SessionExpiredError("session expired mid-iterate")
+        # Second region: should never be reached
+        raise AssertionError("second region should not be fetched after session expiry")
+
+
+def test_backfill_session_expired_publishes_sse_session_expired() -> None:
+    """Invariant 10a: SessionExpiredError → SseSessionExpired published once."""
+    rows = [_make_row(1), _make_row(2)]
+    bus = FakeEventBus()
+    lot_repo = FakeLotRepository()
+    svc = BackfillService(
+        fetcher=FakePaginatedListFetcherSessionExpired(rows),
+        lot_repo=lot_repo,
+        config_source=FakeConfigSource(),
+        monitor_cycle=FakeMonitorCycle(),
+        event_bus=bus,
+        sleep_between_pages=0.0,
+    )
+
+    _run_sync(svc)
+
+    session_expired_events = [e for e in bus.published if isinstance(e, SseSessionExpired)]
+    assert len(session_expired_events) == 1
+
+
+def test_backfill_session_expired_aborts_remaining_regions() -> None:
+    """Invariant 10b: SessionExpiredError on region A → region B not processed."""
+    rows = [_make_row(1)]
+    bus = FakeEventBus()
+    lot_repo = FakeLotRepository()
+
+    class FakeConfigSourceTwoRegions:
+        def current(self) -> Settings:
+            return Settings(regions=[_REGION_A, 50])
+
+        def subscribe(self, cb: Any) -> Any:
+            raise NotImplementedError
+
+    fetcher = FakePaginatedListFetcherSessionExpired(rows)
+    svc = BackfillService(
+        fetcher=fetcher,
+        lot_repo=lot_repo,
+        config_source=FakeConfigSourceTwoRegions(),
+        monitor_cycle=FakeMonitorCycle(),
+        event_bus=bus,
+        sleep_between_pages=0.0,
+    )
+
+    _run_sync(svc)
+
+    # Only one iterate call (region A); region B never reached
+    assert fetcher._call_count == 1
+    session_expired_events = [e for e in bus.published if isinstance(e, SseSessionExpired)]
+    assert len(session_expired_events) == 1

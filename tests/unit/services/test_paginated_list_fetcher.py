@@ -8,6 +8,7 @@ Coverage:
   5. ParseBugError on a page stops iteration for that region.
   6. Multiple pages are iterated in order.
   7. sleep_between_pages=0.0 does not block tests.
+  10. SessionExpiredError re-raised from parse block; partial rows delivered.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from fis_monitor.domain.errors import ParseBugError, UpstreamError
+from fis_monitor.domain.errors import ParseBugError, SessionExpiredError, UpstreamError
 from fis_monitor.domain.models import HttpResponse, ParsedListPage, ParsedListRow
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.paginated_list_fetcher import PaginatedListFetcher
@@ -427,3 +428,32 @@ class TestPageCallback:
         # No page_callback argument — must not raise
         result = list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0))
         assert [r.id for r in result] == [1]
+
+
+# ---------------------------------------------------------------------------
+# Test 10: SessionExpiredError propagates from parse block
+# ---------------------------------------------------------------------------
+
+class TestSessionExpiredError:
+    def test_session_expired_raises_through_iterate(self) -> None:
+        """SessionExpiredError from parse block is re-raised (not swallowed).
+
+        Partial rows from page 1 must be yielded before the error is raised on
+        page 2 — caller gets what was delivered, then sees the exception.
+        """
+        rows_p1 = [_make_row(1), _make_row(2)]
+        http = FakeHttpClient(["<p1/>", "<p2/>"])
+        parser = FakeListParser([rows_p1, SessionExpiredError("session expired")])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        collected: list[int] = []
+        import pytest
+        with pytest.raises(SessionExpiredError):
+            for row in fetcher.iterate(_REGION, stop, sleep_between_pages=0.0):
+                collected.append(row.id)
+
+        # Page 1 rows were already yielded before the error on page 2
+        assert collected == [1, 2]
+        assert len(http.calls) == 2  # page 1 and page 2 fetched

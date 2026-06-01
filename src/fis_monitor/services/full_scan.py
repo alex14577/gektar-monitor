@@ -57,6 +57,7 @@ from fis_monitor.domain.interfaces import (
     ListParser,
     LotRepository,
 )
+from fis_monitor.domain.models import SseSessionExpired
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 
@@ -235,7 +236,15 @@ class FullScanService:
         all_regions_completed = True
         for region in settings.regions:
             logger.debug("full_scan.region.start", extra={"region_id": region})
-            region_ids, pagination_completed = self._fetch_region_ids(region, _stop)
+            try:
+                region_ids, pagination_completed = self._fetch_region_ids(region, _stop)
+            except SessionExpiredError:
+                logger.warning(
+                    "full_scan: session expired for region=%s — aborting remaining regions",
+                    region,
+                )
+                all_regions_completed = False
+                break
             seen_ids.update(region_ids)
             logger.debug(
                 "full_scan.region.finish",
@@ -338,6 +347,15 @@ class FullScanService:
                 ids.add(row.id)
             # Iterator exhausted without exception — all pages visited.
             pagination_completed = True
+        except SessionExpiredError:
+            logger.warning(
+                "full_scan: session expired during paginated fetch for region=%s"
+                " — partial ids only",
+                region,
+            )
+            self._event_bus.publish(SseSessionExpired(timestamp=self._clock.now()))
+            # pagination_completed stays False; re-raise so run_once can abort remaining regions
+            raise
         except Exception:
             # Exception mid-iteration → ids contains only pages fetched so far.
             # pagination_completed stays False → caller excludes this region
@@ -390,6 +408,7 @@ class FullScanService:
                 "(ESIA login page detected) — skipping region",
                 region,
             )
+            self._event_bus.publish(SseSessionExpired(timestamp=self._clock.now()))
             return set()
         except ParseBugError:
             logger.warning(
