@@ -66,7 +66,7 @@ class FakeLotRepo:
         self._active_count = active_count
         self.count_active_calls: int = 0
 
-    def count_active(self, region_id: int | None = None) -> int:
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
         self.count_active_calls += 1
         return self._active_count
 

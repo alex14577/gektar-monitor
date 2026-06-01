@@ -339,12 +339,13 @@ class LotRepository(Protocol):
         """
         ...
 
-    def count_active(self, region_id: int | None = None) -> int:
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
         """Return the number of active lots (``is_active = 1``).
 
-        When ``region_id`` is given, filters ``WHERE region_id = ?`` additionally.
-        Used by lifespan auto-trigger (``region_id=None``) and by
-        ``BackfillService.maybe_start`` (``region_id=<specific>``).
+        When ``region_ids`` is non-empty, filters ``WHERE region_id IN (...)``
+        additionally. Empty tuple returns count across all active lots.
+        Used by lifespan auto-trigger (empty) and by
+        ``BackfillService.maybe_start`` (subject site-ids for a macro-region).
         Implementations MUST be a single ``SELECT COUNT(*)`` — read-only, no
         BEGIN IMMEDIATE.
         """

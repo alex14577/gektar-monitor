@@ -794,7 +794,7 @@ def test_lifespan_does_not_start_backfill_auto():
     # Add a lot_repo that reports empty catalogue — the old lifespan code would
     # have used this to trigger backfill-auto.
     class EmptyLotRepo:
-        def count_active(self) -> int:
+        def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
             return 0
 
     container.infra.lot_repo = EmptyLotRepo()  # type: ignore[attr-defined]

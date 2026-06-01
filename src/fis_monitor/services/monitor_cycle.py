@@ -74,6 +74,7 @@ from fis_monitor.domain.models import (
     parsed_row_to_lot as _parsed_row_to_lot,
 )
 from fis_monitor.domain.regions import subject_id_by_title as _subject_id_by_title
+from fis_monitor.domain.regions import subjects_for_macros as _subjects_for_macros
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
@@ -540,7 +541,7 @@ class MonitorCycleService:
         else:
             self._parse_miss_counter.pop(region, None)
             if self._backfill is not None and self._stop_event is not None:
-                db_count = self._lot_repo.count_active(region_id=region)
+                db_count = self._lot_repo.count_active(region_ids=_subjects_for_macros([region]))
                 triggered = self._backfill.maybe_start(
                     region,
                     parsed_page.total_count,

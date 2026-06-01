@@ -15,7 +15,7 @@ class FakeLotRepository:
 
     def __init__(self, count_active_value: int = 0) -> None:
         self._count_active_value = count_active_value
-        self.count_active_calls: list[int | None] = []
+        self.count_active_calls: list[tuple[int, ...]] = []
         self._lots: dict[int, Lot] = {}
         self._last_known_ids: dict[int, int] = {}
 
@@ -44,8 +44,8 @@ class FakeLotRepository:
     def needing_enrichment(self, limit: int) -> list[int]:
         return []
 
-    def count_active(self, region_id: int | None = None) -> int:
-        self.count_active_calls.append(region_id)
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
+        self.count_active_calls.append(region_ids)
         return self._count_active_value
 
     def latest_new_first_seen(self) -> datetime | None:

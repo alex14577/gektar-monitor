@@ -289,8 +289,9 @@ class TestDefaultMigrationRunnerFactory:
         # v4→v5 (lots.date_registry, ADR-040), v5→v6 (drop starred, ADR-053),
         # v6→v7 (backfill region_id NULL rows, ADR-035 I2),
         # v7→v8 (region_id macro-id → site-id namespace fix, pc1g),
-        # v8→v9 (idx_lots_first_seen DESC, cpo4)
-        assert len(migrations) == 8
+        # v8→v9 (idx_lots_first_seen DESC, cpo4),
+        # v9→v10 (region_subscriptions macro→subject expansion, ADR-062)
+        assert len(migrations) == 9
         m1 = migrations[0]
         assert m1.from_version == 1
         assert m1.to_version == 2

@@ -32,7 +32,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 9;
+PRAGMA user_version = 10;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
@@ -58,6 +58,12 @@ PRAGMA user_version = 9;
 --   Optimizes SELECT MAX(first_seen) FROM lots (per-cycle header refresh in
 --   monitor_cycle._publish_status → latest_new_first_seen). Без индекса —
 --   full-table scan; на 10k+ строк ощутимо. MigrationRunner v8→v9.
+-- user_version bumped 9→10 (v1t): expand region_subscriptions from macro-ids
+--   (1=ДФО, 2=Арктика) to subject site-ids (27–96). Fixes JOIN mismatch:
+--   lots.region_id stores subject site-ids (since v7→v8), but region_subscriptions
+--   still held macro-ids → 0 JOIN matches → broken cutoff-filter, suppression,
+--   delta-trigger. Shared subjects 87/96 get MIN(subscribed_at). ADR-062 Phase 1.
+--   MigrationRunner v9→v10.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
@@ -77,7 +83,7 @@ CREATE TABLE IF NOT EXISTS lots (
     cadastral_no         TEXT    NOT NULL,
     area_sqm             INTEGER,
     region               TEXT    NOT NULL,
-    region_id            INTEGER,                    -- macro-region FK (1=ДФО, 2=Арктика); ADR-039
+    region_id            INTEGER,                    -- RF-subject site-id (27–96); ADR-035 §I2, ADR-062
     municipality         TEXT,
     land_category        TEXT,
     permitted_use        TEXT,                       -- ВРИ
@@ -318,11 +324,12 @@ CREATE INDEX IF NOT EXISTS idx_notifications_pending  ON notifications(last_atte
 -- Retention: permanent_fail старше 90 дней удаляются в maintenance
 -- (chunked DELETE, см. architecture.md §7.2.bis).
 
--- Per-region subscription timestamps (ADR-039).
+-- Per-region subscription timestamps (ADR-039, ADR-062).
 -- Set by WatchdogConfigSource when a new region appears in config.json.
+-- region_id stores RF-subject site-ids (27–96) — same namespace as lots.region_id.
 -- Read by notifier_dispatcher to suppress lots older than subscribed_at.
 CREATE TABLE IF NOT EXISTS region_subscriptions (
-    region_id     INTEGER PRIMARY KEY,
+    region_id     INTEGER PRIMARY KEY,     -- RF-subject site-id (27–96); ADR-062
     subscribed_at TEXT    NOT NULL          -- ISO-8601 UTC timestamp
 );
 

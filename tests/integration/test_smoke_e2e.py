@@ -193,7 +193,7 @@ class _StubLotRepo:
     """Minimal lot_repo for smoke: count_active() returns 1 so the lifespan
     auto-backfill path (triggered on empty DB) is skipped."""
 
-    def count_active(self) -> int:
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
         return 1
 
 

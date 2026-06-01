@@ -568,19 +568,21 @@ class SqliteLotRepository:
             parsed = parsed.replace(tzinfo=UTC)
         return parsed
 
-    def count_active(self, region_id: int | None = None) -> int:
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
         """Return the number of active lots.
 
-        When ``region_id`` is given, filters by ``lots.region_id`` too.
+        When ``region_ids`` is non-empty, filters by ``lots.region_id IN (...)``.
+        Empty tuple returns count across all active lots.
         Single read-only ``SELECT COUNT(*)`` — no BEGIN IMMEDIATE needed.
         """
         conn = self._conn_provider.get()
-        if region_id is None:
+        if not region_ids:
             cur = conn.execute("SELECT COUNT(*) FROM lots WHERE is_active = 1")
         else:
+            placeholders = ",".join("?" * len(region_ids))
             cur = conn.execute(
-                "SELECT COUNT(*) FROM lots WHERE is_active = 1 AND region_id = ?",
-                (region_id,),
+                f"SELECT COUNT(*) FROM lots WHERE is_active = 1 AND region_id IN ({placeholders})",
+                region_ids,
             )
         row = cur.fetchone()
         cur.close()

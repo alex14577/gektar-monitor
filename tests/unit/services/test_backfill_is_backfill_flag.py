@@ -96,7 +96,7 @@ class _FakeLotRepository:
     def needing_enrichment(self, limit: int) -> list[int]:
         return []
 
-    def count_active(self) -> int:
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
         return 0
 
 

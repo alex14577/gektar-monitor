@@ -1,10 +1,10 @@
-"""Tests for SqliteRegionSubscriptionRepository and count_active(region_id=...).
+"""Tests for SqliteRegionSubscriptionRepository and count_active(region_ids=...).
 
 Layer 1 (Infrastructure: repos). Real SQLite in-memory DB via tmp_db fixture.
 
 Invariants covered:
-1. count_active(region_id=X) filters only region X.
-2. count_active(region_id=None) returns global count (backward compat).
+1. count_active(region_ids=(X,)) filters only region X.
+2. count_active(region_ids=()) returns global count (no filter).
 3. RegionSubscriptionRepository.set_if_absent is idempotent — repeated call
    does not overwrite and returns False.
 4. set_if_absent returns True on first insert, False on repeat.
@@ -163,41 +163,42 @@ class TestDelete:
 
 
 # ---------------------------------------------------------------------------
-# Tests: LotRepository.count_active(region_id=...)
+# Tests: LotRepository.count_active(region_ids=...)
 # ---------------------------------------------------------------------------
 
 
-class TestCountActiveWithRegionId:
+class TestCountActiveWithRegionIds:
     def test_count_active_no_filter_global(self, tmp_db: ConnectionProvider) -> None:
-        _insert_lot_with_region_id(tmp_db, 1, region_id=1)
-        _insert_lot_with_region_id(tmp_db, 2, region_id=2)
+        _insert_lot_with_region_id(tmp_db, 1, region_id=72)
+        _insert_lot_with_region_id(tmp_db, 2, region_id=27)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
         assert lot_repo.count_active() == 2
 
-    def test_count_active_filters_by_region(self, tmp_db: ConnectionProvider) -> None:
-        _insert_lot_with_region_id(tmp_db, 1, region_id=1)
-        _insert_lot_with_region_id(tmp_db, 2, region_id=1)
-        _insert_lot_with_region_id(tmp_db, 3, region_id=2)
+    def test_count_active_filters_by_subjects(self, tmp_db: ConnectionProvider) -> None:
+        _insert_lot_with_region_id(tmp_db, 1, region_id=72)
+        _insert_lot_with_region_id(tmp_db, 2, region_id=72)
+        _insert_lot_with_region_id(tmp_db, 3, region_id=27)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
-        assert lot_repo.count_active(region_id=1) == 2
-        assert lot_repo.count_active(region_id=2) == 1
+        assert lot_repo.count_active(region_ids=(72,)) == 2
+        assert lot_repo.count_active(region_ids=(27,)) == 1
+        assert lot_repo.count_active(region_ids=(72, 27)) == 3
 
-    def test_count_active_region_none_equals_global(self, tmp_db: ConnectionProvider) -> None:
-        _insert_lot_with_region_id(tmp_db, 1, region_id=1)
-        _insert_lot_with_region_id(tmp_db, 2, region_id=2)
+    def test_count_active_empty_equals_global(self, tmp_db: ConnectionProvider) -> None:
+        _insert_lot_with_region_id(tmp_db, 1, region_id=72)
+        _insert_lot_with_region_id(tmp_db, 2, region_id=27)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
-        assert lot_repo.count_active(region_id=None) == lot_repo.count_active()
+        assert lot_repo.count_active(region_ids=()) == lot_repo.count_active()
 
     def test_count_active_excludes_inactive(self, tmp_db: ConnectionProvider) -> None:
-        _insert_lot_with_region_id(tmp_db, 1, region_id=1, is_active=True)
-        _insert_lot_with_region_id(tmp_db, 2, region_id=1, is_active=False)
+        _insert_lot_with_region_id(tmp_db, 1, region_id=72, is_active=True)
+        _insert_lot_with_region_id(tmp_db, 2, region_id=72, is_active=False)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
-        assert lot_repo.count_active(region_id=1) == 1
+        assert lot_repo.count_active(region_ids=(72,)) == 1
 
     def test_count_active_unknown_region_returns_zero(self, tmp_db: ConnectionProvider) -> None:
-        _insert_lot_with_region_id(tmp_db, 1, region_id=1)
+        _insert_lot_with_region_id(tmp_db, 1, region_id=72)
         lot_repo = SqliteLotRepository(conn_provider=tmp_db, clock=FixedClock())
-        assert lot_repo.count_active(region_id=99) == 0
+        assert lot_repo.count_active(region_ids=(99,)) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +216,12 @@ class TestMigrationDataIntegrity:
         # We do this by creating a fresh DB with the v3 schema.
         v3_schema = (
             schema_sql.replace(
-                "PRAGMA user_version = 9",
+                "PRAGMA user_version = 10",
                 "PRAGMA user_version = 3",
             )
             .replace(
                 "    region_id            INTEGER,"
-                "                    -- macro-region FK (1=ДФО, 2=Арктика); ADR-039\n",
+                "                    -- RF-subject site-id (27–96); ADR-035 §I2, ADR-062\n",
                 "",
             )
             .replace(

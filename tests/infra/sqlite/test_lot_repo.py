@@ -637,16 +637,25 @@ def test_upsert_update_persists_region_id(tmp_db: ConnectionProvider) -> None:
     assert row[0] == 2
 
 
-def test_count_active_filters_by_region_id(tmp_db: ConnectionProvider) -> None:
-    """count_active(region_id=X) counts only lots with matching region_id."""
+def test_count_active_filters_by_region_ids_tuple(tmp_db: ConnectionProvider) -> None:
+    """count_active(region_ids=(...)) counts only lots with matching region_id IN (...)."""
     repo = _make_repo(tmp_db)
-    repo.upsert(make_lot(id=301, region_id=1), tracked=[])
-    repo.upsert(make_lot(id=302, region_id=1), tracked=[])
-    repo.upsert(make_lot(id=303, region_id=2), tracked=[])
+    repo.upsert(make_lot(id=301, region_id=72), tracked=[])
+    repo.upsert(make_lot(id=302, region_id=72), tracked=[])
+    repo.upsert(make_lot(id=303, region_id=27), tracked=[])
+    repo.upsert(make_lot(id=304, region_id=85), tracked=[])
 
-    assert repo.count_active(region_id=1) == 2
-    assert repo.count_active(region_id=2) == 1
-    assert repo.count_active(region_id=99) == 0
+    # single subject
+    assert repo.count_active(region_ids=(72,)) == 2
+    assert repo.count_active(region_ids=(27,)) == 1
+    # multiple subjects
+    assert repo.count_active(region_ids=(72, 27)) == 3
+    # unknown subject → 0
+    assert repo.count_active(region_ids=(99,)) == 0
+    # empty tuple → all active
+    assert repo.count_active(region_ids=()) == 4
+    # default (no arg) → all active
+    assert repo.count_active() == 4
 
 
 def test_region_id_roundtrip_via_get(tmp_db: ConnectionProvider) -> None:

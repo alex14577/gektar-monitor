@@ -303,10 +303,15 @@ class WatchdogConfigSource:
     def _apply_region_diff(self, old_settings: Settings, new_settings: Settings) -> None:
         """Update region_subscriptions based on the diff old→new regions.
 
-        Net-new regions get set_if_absent(region_id, now).
-        Removed regions get delete(region_id) so re-add resets subscribed_at.
+        Net-new macro-regions: insert a row for each subject site-id via
+        set_if_absent(subject_id, now).
+        Removed macro-regions: delete only those subject site-ids that are not
+        covered by any remaining subscribed macro (subjects 87/96 shared between
+        ДФО and Арктика are preserved if the other macro is still active).
         No-op if region_subs_repo is not injected.
         """
+        from fis_monitor.domain.regions import subjects_for_macros
+
         if self._region_subs_repo is None:
             return
 
@@ -314,39 +319,50 @@ class WatchdogConfigSource:
         new_regions = set(new_settings.regions)
 
         now = self._clock.now()
-        for region_id in sorted(new_regions - old_regions):
-            self._region_subs_repo.set_if_absent(region_id, now)
-            log_audit(
-                "subscribed_at.migration_applied",
-                region_id=region_id,
-                subscribed_at=now.isoformat(),
-            )
+        for macro_id in sorted(new_regions - old_regions):
+            for subject_id in subjects_for_macros([macro_id]):
+                self._region_subs_repo.set_if_absent(subject_id, now)
+                log_audit(
+                    "subscribed_at.migration_applied",
+                    region_id=subject_id,
+                    subscribed_at=now.isoformat(),
+                )
 
-        for region_id in sorted(old_regions - new_regions):
-            self._region_subs_repo.delete(region_id)
+        removed_macros = old_regions - new_regions
+        if removed_macros:
+            kept_subjects = set(subjects_for_macros(list(new_regions)))
+            for macro_id in sorted(removed_macros):
+                for subject_id in subjects_for_macros([macro_id]):
+                    if subject_id not in kept_subjects:
+                        self._region_subs_repo.delete(subject_id)
             logger.debug(
-                "config_source: region %d removed from subscription tracking", region_id
+                "config_source: macro-regions %s removed from subscription tracking",
+                sorted(removed_macros),
             )
 
     def _bootstrap_subscriptions(self) -> None:
         """Seed region_subscriptions for startup regions absent from the DB (ADR-039).
 
-        Runs once in __init__ after the initial config is loaded.  Only calls
-        set_if_absent for regions with no existing record — idempotent on restart.
+        Runs once in __init__ after the initial config is loaded.  Expands each
+        macro-region to its subject site-ids via subjects_for_macros and calls
+        set_if_absent for each subject absent from the DB — idempotent on restart.
         """
+        from fis_monitor.domain.regions import subjects_for_macros
+
         if self._region_subs_repo is None:
             return
         now = self._clock.now()
         seeded_count = 0
-        for region_id in sorted(self._current.regions):
-            if self._region_subs_repo.get_subscribed_at(region_id) is None:
-                self._region_subs_repo.set_if_absent(region_id, now)
-                log_audit(
-                    "subscribed_at.migration_applied",
-                    region_id=region_id,
-                    subscribed_at=now.isoformat(),
-                )
-                seeded_count += 1
+        for macro_id in sorted(self._current.regions):
+            for subject_id in subjects_for_macros([macro_id]):
+                if self._region_subs_repo.get_subscribed_at(subject_id) is None:
+                    self._region_subs_repo.set_if_absent(subject_id, now)
+                    log_audit(
+                        "subscribed_at.migration_applied",
+                        region_id=subject_id,
+                        subscribed_at=now.isoformat(),
+                    )
+                    seeded_count += 1
         logger.debug(
             "config.bootstrap_subscriptions",
             extra={"regions_seeded_count": seeded_count},

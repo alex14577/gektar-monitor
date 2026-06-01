@@ -194,7 +194,7 @@ class FakeLotRepository:
     def needing_enrichment(self, limit: int) -> list[int]:
         return []
 
-    def count_active(self, region_id: int | None = None) -> int:
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
         return 0
 
     def latest_new_first_seen(self) -> datetime | None:

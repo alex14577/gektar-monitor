@@ -64,5 +64,5 @@ def test_fake_lot_repository_all_methods_callable() -> None:
     assert repo.needing_enrichment(limit=5) == []
 
     assert repo.count_active() == 7
-    assert repo.count_active(region_id=1) == 7
-    assert repo.count_active_calls == [None, 1]
+    assert repo.count_active(region_ids=(72,)) == 7
+    assert repo.count_active_calls == [(), (72,)]

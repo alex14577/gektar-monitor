@@ -109,7 +109,7 @@ def _make_app(
             return None
 
     class _StubLotRepo:
-        def count_active(self) -> int:
+        def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
             return 0
 
         def latest_new_first_seen(self) -> datetime | None:
