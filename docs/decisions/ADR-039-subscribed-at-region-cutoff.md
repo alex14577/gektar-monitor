@@ -72,6 +72,12 @@ SQL-выражение и Python-предикат разойтись не мог
 
 ### SQL-level feed cutoff (amendment 2026-05-27)
 
+> **Амендировано [[decisions/ADR-065-feed-visibility-subject-membership|ADR-065]]
+> (2026-06-02):** лента `/feed` БОЛЬШЕ НЕ применяет SQL date-cutoff. Видимость в
+> ленте определяется членством-в-подписке (`filter_subscribed_subjects`), date-cutoff
+> остаётся только для email-канала. Описанный ниже `apply_subscription_cutoff`-механизм
+> сохранён как протестированный building-block, но в проде не вызывается. См. ADR-065.
+
 Веб-страница «новые лоты» (feed, `/feed`) применяет cutoff на уровне SQL через
 `LotFilters(apply_subscription_cutoff=True)`, которое устанавливается в
 `_view_filters_to_lot_filters` (`web/feed_context.py`).

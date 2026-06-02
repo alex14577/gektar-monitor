@@ -55,7 +55,7 @@ def _view_filters_to_lot_filters(vf: ViewFilters) -> LotFilters:
         subject_display_names=tuple(subject_display_names),
         area_sqm_min=Decimal(vf.area_min) if vf.area_min is not None else None,
         area_sqm_max=Decimal(vf.area_max) if vf.area_max is not None else None,
-        apply_subscription_cutoff=True,
+        filter_subscribed_subjects=True,
     )
 
 

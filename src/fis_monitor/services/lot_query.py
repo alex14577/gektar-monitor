@@ -104,6 +104,7 @@ class LotFilters:
     status: str | None = None
     fts_query: str | None = None
     apply_subscription_cutoff: bool = False
+    filter_subscribed_subjects: bool = False
 
     def __post_init__(self) -> None:
         if self.regions and self.subject_display_names:
@@ -112,6 +113,10 @@ class LotFilters:
                 "both filter the same 'region' column using incompatible value types "
                 "(int codes vs. display names), so ANDing them always yields zero rows. "
                 "Pass only one of the two."
+            )
+        if self.apply_subscription_cutoff and self.filter_subscribed_subjects:
+            raise ValueError(
+                "apply_subscription_cutoff and filter_subscribed_subjects are mutually exclusive"
             )
         if self.status is not None and self.status not in _KNOWN_STATUSES:
             raise ValueError(
@@ -445,6 +450,12 @@ class LotQueryService:
         if cutoff_condition:
             conditions.append(cutoff_condition)
 
+        if filters.filter_subscribed_subjects:
+            conditions.append(
+                f"({col}region_id IS NULL OR {col}region_id IN "
+                "(SELECT region_id FROM region_subscriptions))"
+            )
+
         where = " AND ".join(conditions)
         from_clause = f"lots{join_clause}"
         return where, params, from_clause
@@ -468,6 +479,9 @@ class LotQueryService:
         - ``apply_subscription_cutoff``: when True, LEFT JOIN region_subscriptions
             and add WHERE predicate mirroring ``passes_subscription_cutoff``
             (ADR-039 day-precision rule).  When False, query is unchanged.
+        - ``filter_subscribed_subjects``: when True, restricts results to lots
+            whose ``region_id`` is present in ``region_subscriptions``, or whose
+            ``region_id`` IS NULL.
 
         ``_build_where`` already calls ``_subscription_cutoff_fragment`` internally
         and returns the complete ``from_clause`` (including any JOIN).  We derive
