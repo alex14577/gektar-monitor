@@ -291,10 +291,9 @@ def _make_service(
 # ---------------------------------------------------------------------------
 
 class TestRunOnceMissingLot:
-    """run_once with 2 regions: seen=[1,2,3], active=[1,2,4] → mark_inactive(4)."""
+    """run_once with 1 region: seen=[1,2,3], active=[1,2,4] → mark_inactive(4)."""
 
     def test_mark_inactive_for_missing_lot(self) -> None:
-        # Arrange — two regions both returning lots 1, 2, 3
         seen_rows = [
             _make_parsed_row(1),
             _make_parsed_row(2),
@@ -307,7 +306,7 @@ class TestRunOnceMissingLot:
         active_lots = {0: [_make_lot(1), _make_lot(2), _make_lot(4)]}
         lot_repo = FakeLotRepository(pages=active_lots)
 
-        settings = Settings(regions=[_REGION_A, _REGION_B])
+        settings = Settings(regions=[_REGION_A])
         config_source = FakeConfigSource(settings=settings)
 
         svc, *_ = _make_service(
@@ -333,7 +332,7 @@ class TestRunOnceMissingLot:
         assert 2 in all_seen
         assert 4 not in all_seen
 
-    def test_http_called_for_each_region(self) -> None:
+    def test_http_called_once_for_first_region(self) -> None:
         settings = Settings(regions=[_REGION_A, _REGION_B])
         config_source = FakeConfigSource(settings=settings)
         http = FakeHttpClient()
@@ -348,7 +347,7 @@ class TestRunOnceMissingLot:
         )
         svc.run_once()
 
-        assert len(http.calls) == 2  # one per region
+        assert len(http.calls) == 1  # single fetch (ADR-064)
 
 
 # ---------------------------------------------------------------------------
@@ -479,74 +478,6 @@ class TestBatching:
         )
 
 
-# ---------------------------------------------------------------------------
-# Test 5: HTTP error in one region → second region still processed
-# ---------------------------------------------------------------------------
-
-class TestOneRegionFails:
-    """HTTP error for region A → region B is still fetched and compared."""
-
-    def test_second_region_processed_on_first_failure(self) -> None:
-        region_a_url_fragment = f"region={_REGION_A}"
-
-        # Build per-url raises: region A → error, region B → success
-
-        def build_http() -> FakeHttpClient:
-            class PerRegionHttpClient(FakeHttpClient):
-                def get(
-                    self,
-                    url: str,
-                    *,
-                    params: Any = None,
-                    headers: Any = None,
-                    timeout: float | None = None,
-                ) -> HttpResponse:
-                    self.calls.append(url)
-                    if region_a_url_fragment in url:
-                        raise UpstreamError("timeout", category="timeout")
-                    # Region B succeeds
-                    return HttpResponse(
-                        status=200,
-                        text="<html/>",
-                        headers={},
-                        final_url=url,
-                    )
-
-            return PerRegionHttpClient()
-
-        http = build_http()
-
-        # Parser returns lot 10 (from region B)
-        list_parser = FakeListParser(rows=[_make_parsed_row(10, region=_REGION_B)])
-
-        # Active lots: 9, 10 — lot 9 is absent from region B listing
-        lot_repo = FakeLotRepository(
-            pages={0: [_make_lot(9, region=_REGION_B), _make_lot(10, region=_REGION_B)]}
-        )
-
-        settings = Settings(regions=[_REGION_A, _REGION_B])
-        config_source = FakeConfigSource(settings=settings)
-
-        svc, *_ = _make_service(
-            http=http,
-            list_parser=list_parser,
-            lot_repo=lot_repo,
-            config_source=config_source,
-        )
-
-        svc.run_once()
-
-        # Region B was still fetched (2 HTTP calls total)
-        assert len(http.calls) == 2
-
-        # Lot 10 (seen in region B) should be marked seen
-        seen_id_sets = [set(call[0]) for call in lot_repo.mark_seen_calls]
-        all_seen = set().union(*seen_id_sets) if seen_id_sets else set()
-        assert 10 in all_seen
-
-        # Lot 9 (absent from region B) should be marked inactive
-        inactive_ids = [call[0] for call in lot_repo.mark_inactive_calls]
-        assert 9 in inactive_ids
 
 
 # ---------------------------------------------------------------------------

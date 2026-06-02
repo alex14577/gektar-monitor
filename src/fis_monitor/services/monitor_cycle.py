@@ -74,7 +74,6 @@ from fis_monitor.domain.models import (
     parsed_row_to_lot as _parsed_row_to_lot,
 )
 from fis_monitor.domain.regions import subject_id_by_title as _subject_id_by_title
-from fis_monitor.domain.regions import subjects_for_macros as _subjects_for_macros
 from fis_monitor.infra.http.url_builder import PJAX_HEADERS as _PJAX_HEADERS
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
 from fis_monitor.services.enrichment import EnrichmentService
@@ -260,10 +259,10 @@ class MonitorCycleService:
             self._trigger_q.put_nowait(None)
 
     def run_forever(self, stop_event: threading.Event) -> None:
-        """Scheduler loop: iterate configured regions, call run_cycle, sleep, repeat.
+        """Scheduler loop: single fetch per pass (ADR-064), call run_cycle, sleep, repeat.
 
-        Exits cleanly when ``stop_event`` is set (checked between regions and
-        via ``stop_event.wait(poll_interval)`` between full passes).
+        Exits cleanly when ``stop_event`` is set (checked before/after the fetch
+        and via ``stop_event.wait(poll_interval)`` between full passes).
 
         Exception handling:
           - ``UpstreamError`` / ``ParseBugError`` / ``ParserVersionMismatch`` from
@@ -272,8 +271,8 @@ class MonitorCycleService:
             re-raise when they escape _run_cycle_inner on uncovered code paths —
             handled here so the loop survives.
           - Any other ``Exception`` (unexpected bug): logged at ERROR level,
-            then a short backoff sleep before the next region.  The loop
-            continues — one bad region must not kill the scheduler.
+            then a short backoff sleep before the next fetch.  The loop
+            continues — one bad fetch must not kill the scheduler.
         """
         logger.info("monitor_cycle: scheduler started")
         self._stop_event = stop_event
@@ -290,53 +289,55 @@ class MonitorCycleService:
                 else self._DEFAULT_POLL_INTERVAL_SEC
             )
 
-            for region in regions:
+            # Single fetch per cycle: donor region= is a no-op,
+            # one pocket set for all regions (ADR-064).
+            if regions:
+                fetch_region = regions[0]
                 if stop_event.is_set():
                     logger.info(
                         "monitor_cycle: stop requested before region=%s — exiting",
-                        region,
+                        fetch_region,
                     )
                     break
 
                 with self._backfill_lock:
-                    in_backfill = region in self._regions_in_backfill
+                    in_backfill = fetch_region in self._regions_in_backfill
                 if in_backfill:
                     logger.debug(
                         "monitor_cycle: region=%s is being backfilled — skipping cycle",
-                        region,
+                        fetch_region,
                     )
-                    continue
-
-                try:
-                    self.run_cycle(region)
-                except UpstreamError:
-                    # Per run_cycle contract: domain errors may re-raise when they
-                    # escape _run_cycle_inner — handled here so the loop survives.
-                    logger.warning(
-                        "monitor_cycle: UpstreamError escaped run_cycle for region=%s "
-                        "(cycle row already closed); continuing loop",
-                        region,
-                        exc_info=True,
-                    )
-                except (ParseBugError, ParserVersionMismatch, SessionExpiredError):
-                    # Per run_cycle contract: parse-domain errors and session expiry may
-                    # re-raise when they escape _run_cycle_inner — data-quality or auth
-                    # issue, not a bug in the loop itself.  Log at WARNING and continue.
-                    logger.warning(
-                        "monitor_cycle: parse/session domain error escaped run_cycle for region=%s "
-                        "(cycle row already closed); continuing loop",
-                        region,
-                        exc_info=True,
-                    )
-                except Exception:
-                    logger.error(
-                        "monitor_cycle: unexpected exception in run_cycle for region=%s; "
-                        "sleeping %.1fs before next region",
-                        region,
-                        self._UNEXPECTED_BACKOFF_SEC,
-                        exc_info=True,
-                    )
-                    stop_event.wait(self._UNEXPECTED_BACKOFF_SEC)
+                else:
+                    try:
+                        self.run_cycle(fetch_region)
+                    except UpstreamError:
+                        # Per run_cycle contract: domain errors may re-raise when they
+                        # escape _run_cycle_inner — handled here so the loop survives.
+                        logger.warning(
+                            "monitor_cycle: UpstreamError escaped run_cycle for region=%s "
+                            "(cycle row already closed); continuing loop",
+                            fetch_region,
+                            exc_info=True,
+                        )
+                    except (ParseBugError, ParserVersionMismatch, SessionExpiredError):
+                        # Per run_cycle contract: parse-domain errors and session expiry may
+                        # re-raise when they escape _run_cycle_inner — data-quality or auth
+                        # issue, not a bug in the loop itself.  Log at WARNING and continue.
+                        logger.warning(
+                            "monitor_cycle: parse/session domain error escaped run_cycle "
+                            "for region=%s (cycle row already closed); continuing loop",
+                            fetch_region,
+                            exc_info=True,
+                        )
+                    except Exception:
+                        logger.error(
+                            "monitor_cycle: unexpected exception in run_cycle for region=%s; "
+                            "sleeping %.1fs before next fetch",
+                            fetch_region,
+                            self._UNEXPECTED_BACKOFF_SEC,
+                            exc_info=True,
+                        )
+                        stop_event.wait(self._UNEXPECTED_BACKOFF_SEC)
 
             if stop_event.is_set():
                 break
@@ -541,7 +542,7 @@ class MonitorCycleService:
         else:
             self._parse_miss_counter.pop(region, None)
             if self._backfill is not None and self._stop_event is not None:
-                db_count = self._lot_repo.count_active(region_ids=_subjects_for_macros([region]))
+                db_count = self._lot_repo.count_active()
                 triggered = self._backfill.maybe_start(
                     region,
                     parsed_page.total_count,

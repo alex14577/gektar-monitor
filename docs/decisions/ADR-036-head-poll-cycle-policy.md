@@ -49,6 +49,8 @@ MonitorCycle fetches only page=1 with `per_page=20`. This is a **head-poll**: it
 
 **H4. Head-poll cost is bounded**: per MonitorCycle pass ≤ `len(settings.regions) × 1 HTTP request`. For the default Far East configuration (regions=[1, 2]), that is 2 requests per pass. FullScan cost is proportional to catalogue size and unbounded (full walk).
 
+> **Амендмент 2026-06-01 ([[decisions/ADR-064-region-param-noop-global-delta-count|ADR-064]]):** донорский `region=` оказался no-op (один pocket-набор на любой регион). Fetch-петля схлопнута — per MonitorCycle pass = **1** HTTP request (единый `settings.regions[0]`), независимо от числа подписанных регионов. FullScan тоже делает один walk. `settings.regions` остаётся только для подписок/notify/view.
+
 ---
 
 ## Consequences

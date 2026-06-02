@@ -26,7 +26,6 @@ from fis_monitor.domain.models import (
     ParsedListRow,
     Settings,
 )
-from fis_monitor.domain.regions import subjects_for_macros
 from fis_monitor.services.monitor_cycle import MonitorCycleService
 from tests.fakes.lot_repository import FakeLotRepository
 from tests.unit.services.conftest import (
@@ -224,7 +223,7 @@ class TestDeltaTriggerColdStart:
         assert call["len_parsed_hint"] == 20
         assert call["stop_event"] is stop_event
 
-    def test_count_active_called_with_subjects_for_region(self) -> None:
+    def test_count_active_called_globally_not_per_subject(self) -> None:
         rows = [_make_parsed_row(i) for i in range(5)]
         svc, lot_repo, _, stop_event = _make_service(
             rows=rows,
@@ -234,9 +233,8 @@ class TestDeltaTriggerColdStart:
         svc._stop_event = stop_event
         svc.run_cycle(_REGION)
 
-        expected = subjects_for_macros([_REGION])
-        assert len(lot_repo.count_active_calls) >= 1
-        assert lot_repo.count_active_calls[0] == expected
+        assert len(lot_repo.count_active_calls) == 1
+        assert lot_repo.count_active_calls[0] == ()
 
 
 class TestDeltaTriggerSteadyState:

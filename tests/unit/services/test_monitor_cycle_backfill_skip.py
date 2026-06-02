@@ -118,10 +118,10 @@ class TestMarkClearRegionInBackfill:
 
 class TestRunForeverSkipsBackfilledRegions:
     def test_backfilled_region_is_skipped(self) -> None:
-        """Region in backfill set → run_cycle is NOT called for it."""
+        """regions[0] in backfill set → run_cycle is NOT called for this pass."""
         svc = _make_service(regions=[_REGION_A, _REGION_B])
 
-        # Mark region A as in backfill before starting the loop
+        # Mark region A (regions[0]) as in backfill before starting the loop
         svc.mark_region_in_backfill(_REGION_A)
 
         stop = threading.Event()
@@ -134,12 +134,9 @@ class TestRunForeverSkipsBackfilledRegions:
 
         svc.run_forever(stop)
 
-        # Region A was in backfill → skipped; Region B was processed.
-        assert _REGION_A not in svc.run_cycle_calls, (
-            f"Region A should have been skipped, got calls: {svc.run_cycle_calls}"
-        )
-        assert _REGION_B in svc.run_cycle_calls, (
-            f"Region B should have been processed, got calls: {svc.run_cycle_calls}"
+        # regions[0] (A) was in backfill → entire pass skipped (single fetch).
+        assert svc.run_cycle_calls == [], (
+            f"Expected no run_cycle calls when fetch region in backfill, got: {svc.run_cycle_calls}"
         )
 
     def test_region_processed_after_clear(self) -> None:

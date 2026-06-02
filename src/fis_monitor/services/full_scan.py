@@ -228,39 +228,41 @@ class FullScanService:
             extra={"regions_count": len(settings.regions)},
         )
 
-        # Step 2 — collect seen ids from list pages (all pages per region via paginator).
-        # Track region completeness: if pagination for any region fails mid-way,
+        # Step 2 — collect seen ids from list pages
+        # (ADR-064: single fetch, donor region= is a no-op).
+        # Track region completeness: if pagination fails mid-way,
         # mass-deactivation is suppressed for that run to avoid false-positive
         # mark_inactive calls (P1-4 bug fix).
         seen_ids: set[int] = set()
         all_regions_completed = True
-        for region in settings.regions:
-            logger.debug("full_scan.region.start", extra={"region_id": region})
+        if settings.regions:
+            fetch_region = settings.regions[0]
+            logger.debug("full_scan.region.start", extra={"region_id": fetch_region})
             try:
-                region_ids, pagination_completed = self._fetch_region_ids(region, _stop)
+                region_ids, pagination_completed = self._fetch_region_ids(fetch_region, _stop)
             except SessionExpiredError:
                 logger.warning(
-                    "full_scan: session expired for region=%s — aborting remaining regions",
-                    region,
+                    "full_scan: session expired for region=%s — suppresses mass-deactivation",
+                    fetch_region,
                 )
                 all_regions_completed = False
-                break
-            seen_ids.update(region_ids)
-            logger.debug(
-                "full_scan.region.finish",
-                extra={
-                    "region_id": region,
-                    "ids_count": len(region_ids),
-                    "pagination_completed": pagination_completed,
-                },
-            )
-            if not pagination_completed:
-                all_regions_completed = False
-                logger.warning(
-                    "full_scan: region=%s pagination incomplete — "
-                    "mass-deactivation suppressed for this run to avoid false positives",
-                    region,
+            else:
+                seen_ids.update(region_ids)
+                logger.debug(
+                    "full_scan.region.finish",
+                    extra={
+                        "region_id": fetch_region,
+                        "ids_count": len(region_ids),
+                        "pagination_completed": pagination_completed,
+                    },
                 )
+                if not pagination_completed:
+                    all_regions_completed = False
+                    logger.warning(
+                        "full_scan: region=%s pagination incomplete — "
+                        "mass-deactivation suppressed for this run to avoid false positives",
+                        fetch_region,
+                    )
 
         # Step 3 — abort if ALL regions failed (seen_ids is empty).
         # This prevents false-positive mass-deactivation of all known lots.
@@ -354,7 +356,7 @@ class FullScanService:
                 region,
             )
             self._event_bus.publish(SseSessionExpired(timestamp=self._clock.now()))
-            # pagination_completed stays False; re-raise so run_once can abort remaining regions
+            # pagination_completed stays False; re-raise so run_once suppresses mass-deactivation
             raise
         except Exception:
             # Exception mid-iteration → ids contains only pages fetched so far.

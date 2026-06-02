@@ -131,35 +131,22 @@ class TestRunForeverExitsImmediately:
 
 
 class TestRunForeverOnePassPerRegion:
-    """run_forever calls run_cycle once per region in a single pass, then sleeps."""
+    """run_forever calls run_cycle once for the first region per pass, then sleeps."""
 
-    def test_run_cycle_called_for_each_region(self) -> None:
+    def test_run_cycle_called_once_for_first_region(self) -> None:
         regions = [_REGION_A, _REGION_B]
         settings = Settings(regions=regions, interval_minutes=15)
         svc = _make_service(settings=settings)
 
         stop_event = threading.Event()
 
-        # After the first full pass completes, stop_event.wait(poll_interval)
-        # is called with ~900 s.  We intercept by setting stop_event after the
-        # first pass: we do this via a threading.Timer that fires quickly.
-        # But since we can't predict exact timing, the cleanest approach is to
-        # run in a thread, let the first pass complete (run_cycle * 2 calls),
-        # then set stop_event.
-
-        # Use a barrier: once run_cycle has been called for all regions, set stop.
-        expected_calls = len(regions)
+        # Use a barrier: once run_cycle has been called once (first region only), set stop.
         barrier_event = threading.Event()
         original_run_cycle = svc.run_cycle
 
-        call_count = 0
-
         def patched_run_cycle(region: int) -> CycleResult:
-            nonlocal call_count
             result = original_run_cycle(region)
-            call_count += 1
-            if call_count >= expected_calls:
-                barrier_event.set()
+            barrier_event.set()
             return result
 
         svc.run_cycle = patched_run_cycle  # type: ignore[method-assign]
@@ -170,14 +157,14 @@ class TestRunForeverOnePassPerRegion:
         t = threading.Thread(target=runner, daemon=True)
         t.start()
 
-        # Wait until both regions have been processed, then stop.
-        assert barrier_event.wait(timeout=5.0), "run_cycle was not called for all regions in time"
+        # Wait until the first region has been processed, then stop.
+        assert barrier_event.wait(timeout=5.0), "run_cycle was not called in time"
         stop_event.set()
         t.join(timeout=5.0)
         assert not t.is_alive(), "run_forever did not exit after stop_event was set"
 
-        assert svc.run_cycle_calls == regions, (
-            f"Expected run_cycle calls {regions}, got {svc.run_cycle_calls}"
+        assert svc.run_cycle_calls == [_REGION_A], (
+            f"Expected run_cycle calls [_REGION_A], got {svc.run_cycle_calls}"
         )
 
 
@@ -203,11 +190,10 @@ class TestRunForeverStopEventMidPass:
         def patched_run_cycle(region: int) -> CycleResult:
             result = original_run_cycle(region)
             calls.append(region)
-            if len(calls) >= len(regions):
-                # Signal that first pass is complete.
-                first_pass_done.set()
-                # Stop immediately so the inter-pass wait returns fast.
-                stop_event.set()
+            # Signal that first pass is complete (single fetch).
+            first_pass_done.set()
+            # Stop immediately so the inter-pass wait returns fast.
+            stop_event.set()
             return result
 
         svc.run_cycle = patched_run_cycle  # type: ignore[method-assign]
@@ -219,8 +205,8 @@ class TestRunForeverStopEventMidPass:
         t.join(timeout=5.0)
         assert not t.is_alive(), "run_forever did not stop after stop_event"
 
-        # Only one pass (2 calls) — no second pass.
-        assert calls == regions, f"Expected exactly one pass {regions}, got {calls}"
+        # Only one pass (1 call for first region only) — no second pass.
+        assert calls == [_REGION_A], f"Expected exactly one pass [_REGION_A], got {calls}"
 
 
 # ---------------------------------------------------------------------------
@@ -327,9 +313,8 @@ class TestRunForeverParseBugErrorSurvival:
         def patched_run_cycle(region: int) -> CycleResult:
             nonlocal call_count
             call_count += 1
-            if call_count >= len(settings.regions):
-                barrier.set()
-                stop_event.set()
+            barrier.set()
+            stop_event.set()
             return original_run_cycle(region)  # raises ParseBugError
 
         svc.run_cycle = patched_run_cycle  # type: ignore[method-assign]
@@ -341,8 +326,8 @@ class TestRunForeverParseBugErrorSurvival:
             t.join(timeout=5.0)
 
         assert not t.is_alive(), "run_forever hung after ParseBugError"
-        # Both regions were processed — loop survived without crashing.
-        assert len(svc.run_cycle_calls) == len(settings.regions)
+        # First region was processed — loop survived without crashing.
+        assert len(svc.run_cycle_calls) == 1
         # No ERROR-level records for parse domain errors.
         error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
         assert not error_records, (
@@ -375,9 +360,8 @@ class TestRunForeverParserVersionMismatchSurvival:
         def patched_run_cycle(region: int) -> CycleResult:
             nonlocal call_count
             call_count += 1
-            if call_count >= len(settings.regions):
-                barrier.set()
-                stop_event.set()
+            barrier.set()
+            stop_event.set()
             return original_run_cycle(region)  # raises ParserVersionMismatch
 
         svc.run_cycle = patched_run_cycle  # type: ignore[method-assign]
@@ -389,8 +373,8 @@ class TestRunForeverParserVersionMismatchSurvival:
             t.join(timeout=5.0)
 
         assert not t.is_alive(), "run_forever hung after ParserVersionMismatch"
-        # Both regions were processed — loop survived without crashing.
-        assert len(svc.run_cycle_calls) == len(settings.regions)
+        # First region was processed — loop survived without crashing.
+        assert len(svc.run_cycle_calls) == 1
         # No ERROR-level records for parse domain errors.
         error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
         messages = [r.message for r in error_records]

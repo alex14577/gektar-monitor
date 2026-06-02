@@ -257,8 +257,8 @@ def _make_service(
 # ---------------------------------------------------------------------------
 
 class TestPaginatedFetcherIsUsed:
-    def test_fetcher_iterate_called_per_region(self) -> None:
-        """When paginated_fetcher is injected, iterate() is called for each region."""
+    def test_fetcher_iterate_called_once_for_first_region(self) -> None:
+        """When paginated_fetcher is injected, iterate() is called once for regions[0] (ADR-064)."""
         paginated = FakePaginatedListFetcher(
             rows_by_region={
                 _REGION_A: [_make_row(1), _make_row(2)],
@@ -276,7 +276,7 @@ class TestPaginatedFetcherIsUsed:
 
         svc.run_once()
 
-        assert set(paginated.iterate_calls) == {_REGION_A, _REGION_B}
+        assert paginated.iterate_calls == [_REGION_A]
         # HTTP client is NOT called when paginated fetcher is in use
         assert http.calls == []
 
