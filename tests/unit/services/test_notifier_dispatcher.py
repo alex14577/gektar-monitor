@@ -179,18 +179,14 @@ class FakeNotificationsRepository:
         }
         return True
 
-    def status_of(
-        self, lot_id: int, channel: str, recipient: str
-    ) -> _StatusLiteral | None:
+    def status_of(self, lot_id: int, channel: str, recipient: str) -> _StatusLiteral | None:
         self._calls.append("status_of")
         row = self._rows.get(self._key(lot_id, channel, recipient))
         if row is None:
             return None
         return row["status"]  # type: ignore[return-value]
 
-    def mark_attempt(
-        self, lot_id: int, channel: str, recipient: str, at: datetime
-    ) -> int | None:
+    def mark_attempt(self, lot_id: int, channel: str, recipient: str, at: datetime) -> int | None:
         self._calls.append("mark_attempt")
         if self._force_mark_attempt_none:
             return None
@@ -204,18 +200,14 @@ class FakeNotificationsRepository:
         row["last_attempt_at"] = at
         return row["attempt_no"]  # type: ignore[return-value]
 
-    def mark_sent(
-        self, lot_id: int, channel: str, recipient: str, at: datetime
-    ) -> None:
+    def mark_sent(self, lot_id: int, channel: str, recipient: str, at: datetime) -> None:
         self._calls.append("mark_sent")
         key = self._key(lot_id, channel, recipient)
         if key in self._rows:
             self._rows[key]["status"] = "sent"
             self._rows[key]["sent_at"] = at
 
-    def mark_permanent_fail(
-        self, lot_id: int, channel: str, recipient: str
-    ) -> None:
+    def mark_permanent_fail(self, lot_id: int, channel: str, recipient: str) -> None:
         self._calls.append("mark_permanent_fail")
         key = self._key(lot_id, channel, recipient)
         if key in self._rows:
@@ -329,6 +321,9 @@ class FakeRegionSubscriptionRepository:
     def delete(self, region_id: int) -> None:
         self._calls.append(f"delete:{region_id}")
         self._rows.pop(region_id, None)
+
+    def list_subscribed_region_ids(self) -> frozenset[int]:
+        return frozenset(self._rows.keys())
 
     def seed(self, region_id: int, subscribed_at: datetime) -> None:
         self._rows[region_id] = subscribed_at
@@ -705,6 +700,7 @@ def test_send_one_stop_event_during_backoff_returns_immediately():
 
     def _set_stop_after_first_send() -> None:
         import time
+
         # Wait until at least one send call happened
         while len(notifier.send_calls) == 0:
             time.sleep(0.001)
@@ -714,6 +710,7 @@ def test_send_one_stop_event_during_backoff_returns_immediately():
     t.start()
 
     import time
+
     start = time.monotonic()
     dispatcher._send_one(lot, notifier, "a@x.com")
     elapsed = time.monotonic() - start
@@ -753,6 +750,7 @@ def test_consumer_loop_drains_queue_until_stop():
     t = _run_consumer(dispatcher, stop_event)
 
     import time
+
     deadline = time.monotonic() + 5.0
     while len(notifier.send_calls) < 5 and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -778,7 +776,9 @@ def test_consumer_loop_recovery_processes_pending():
 
     # Stale pending: last_attempt_at older than recovery_age
     notif_repo.seed_pending(
-        999, "email", "recover@x.com",
+        999,
+        "email",
+        "recover@x.com",
         attempt_no=1,
         last_attempt_at=_MINUTE_AGO - timedelta(seconds=30),
     )
@@ -786,6 +786,7 @@ def test_consumer_loop_recovery_processes_pending():
     t = _run_consumer(dispatcher, stop_event)
 
     import time
+
     deadline = time.monotonic() + 5.0
     while len(notifier.send_calls) == 0 and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -812,6 +813,7 @@ def test_consumer_loop_recovery_zombie_null_last_attempt_at():
     t = _run_consumer(dispatcher, stop_event)
 
     import time
+
     deadline = time.monotonic() + 5.0
     while len(notifier.send_calls) == 0 and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -856,9 +858,7 @@ def test_retry_one_passes_lot_public_dto_not_lot(caplog):
     that the input to the notifier's send() is a LotPublicDTO, not a Lot.
     """
     stop_event = threading.Event()
-    dispatcher, registry, notif_repo, lot_repo, *_ = _make_dispatcher(
-        stop_event=stop_event
-    )
+    dispatcher, registry, notif_repo, lot_repo, *_ = _make_dispatcher(stop_event=stop_event)
 
     notifier = FakeNotifier("email")
     registry.register(notifier)
@@ -877,6 +877,7 @@ def test_retry_one_passes_lot_public_dto_not_lot(caplog):
 
     # The lot passed to send() must be a LotPublicDTO, not a bare Lot
     from fis_monitor.domain.models import Lot, LotPublicDTO
+
     assert isinstance(sent_lot, LotPublicDTO), (
         f"Expected LotPublicDTO but got {type(sent_lot).__name__} — "
         "bare Lot would break BrowserSseNotifier (P0-3 regression)"
@@ -1261,10 +1262,10 @@ def test_all_fake_config_source_methods_invoked():
 _MACRO_REGION_DFO = 1
 # date_create == _NOW (2026-05-13 12:00 UTC) per factories._DEFAULT_NOW.
 # ADR-039 fix (gn89): comparison is day-precision — `date()` of both sides.
-_SUBSCRIBED_AT_PRIOR_DAY = _NOW - timedelta(days=1)        # day-12 → 13: pass (lot day > sub day)
+_SUBSCRIBED_AT_PRIOR_DAY = _NOW - timedelta(days=1)  # day-12 → 13: pass (lot day > sub day)
 _SUBSCRIBED_AT_SAME_DAY_EARLIER = _NOW - timedelta(hours=2)  # same day 10:00: pass (same day)
-_SUBSCRIBED_AT_SAME_DAY_LATER = _NOW + timedelta(hours=1)    # same day 13:00: PASS (gn89 fix)
-_SUBSCRIBED_AT_NEXT_DAY = _NOW + timedelta(days=1)         # day-14: SUPPRESS (lot day < sub day)
+_SUBSCRIBED_AT_SAME_DAY_LATER = _NOW + timedelta(hours=1)  # same day 13:00: PASS (gn89 fix)
+_SUBSCRIBED_AT_NEXT_DAY = _NOW + timedelta(days=1)  # day-14: SUPPRESS (lot day < sub day)
 
 
 def test_filtered_notifier_suppresses_prior_day_lot(caplog):
@@ -1533,9 +1534,9 @@ def test_dispatcher_recovery_path_suppressed_pending_row_promoted_to_permanent_f
     dispatcher._send_one(lot, filtered_email, "user@example.com")
 
     assert len(email_inner.send_calls) == 0, "suppressed lot must not be sent"
-    assert (
-        notif_repo.status_of(lot.id, "email", "user@example.com") == "permanent_fail"
-    ), "stuck pending row must be promoted to permanent_fail to exit recovery"
+    assert notif_repo.status_of(lot.id, "email", "user@example.com") == "permanent_fail", (
+        "stuck pending row must be promoted to permanent_fail to exit recovery"
+    )
 
 
 # ===========================================================================
@@ -1614,9 +1615,7 @@ def test_rf_empty_with_subscribed_at_passes_new_lots():
     subscribed_at = _NOW - timedelta(days=1)  # subscribed yesterday
     region_repo.seed(_REGION_KHABAROVSK, subscribed_at)
 
-    subscribed_wrapper = SubscribedAtFilteredNotifier(
-        inner=smtp, region_sub_repo=region_repo
-    )
+    subscribed_wrapper = SubscribedAtFilteredNotifier(inner=smtp, region_sub_repo=region_repo)
     config = FakeConfigSource(_make_filters_settings(rf_subjects=[]))  # notify-all
     outer = RfSubjectFilteredEmailNotifier(
         inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
@@ -1648,9 +1647,7 @@ def test_rf_empty_with_subscribed_at_drops_old_lots():
     subscribed_at = _NOW + timedelta(days=1)  # subscribed tomorrow → today's lot is old
     region_repo.seed(_REGION_KHABAROVSK, subscribed_at)
 
-    subscribed_wrapper = SubscribedAtFilteredNotifier(
-        inner=smtp, region_sub_repo=region_repo
-    )
+    subscribed_wrapper = SubscribedAtFilteredNotifier(inner=smtp, region_sub_repo=region_repo)
     config = FakeConfigSource(_make_filters_settings(rf_subjects=[]))  # notify-all
     outer = RfSubjectFilteredEmailNotifier(
         inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
@@ -1685,9 +1682,7 @@ def test_rf_non_empty_with_unselected_region_drops_before_subscribed_at():
     # seed subscribed_at for region_y (so if it WERE checked, it would suppress)
     region_repo.seed(region_y, _NOW + timedelta(days=1))
 
-    subscribed_wrapper = SubscribedAtFilteredNotifier(
-        inner=smtp, region_sub_repo=region_repo
-    )
+    subscribed_wrapper = SubscribedAtFilteredNotifier(inner=smtp, region_sub_repo=region_repo)
     config = FakeConfigSource(_make_filters_settings(rf_subjects=[region_x]))
     outer = RfSubjectFilteredEmailNotifier(
         inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
@@ -1718,9 +1713,7 @@ def test_rf_filter_chains_inner_should_suppress():
     smtp = FakeNotifier(channel_id="email")
     region_repo = FakeRegionSubscriptionRepository()
     region_repo.seed(_REGION_KHABAROVSK, _NOW + timedelta(days=1))  # next-day → suppress
-    subscribed_wrapper = SubscribedAtFilteredNotifier(
-        inner=smtp, region_sub_repo=region_repo
-    )
+    subscribed_wrapper = SubscribedAtFilteredNotifier(inner=smtp, region_sub_repo=region_repo)
     config = FakeConfigSource(_make_filters_settings(rf_subjects=[_REGION_KHABAROVSK]))
     outer = RfSubjectFilteredEmailNotifier(
         inner=subscribed_wrapper, config_source=config, matcher=RfSubjectFilterMatcher()
@@ -1761,9 +1754,9 @@ def test_dispatcher_rf_filtered_email_no_db_row_browser_called():
 
     assert len(smtp.send_calls) == 0, "email must be suppressed for non-subscribed region"
     assert len(browser.send_calls) == 1, "browser must receive the lot regardless of rf_subjects"
-    assert (
-        notif_repo.status_of(lot.id, "email", "user@example.com") is None
-    ), "no notifications row for rf_subjects-suppressed lot"
+    assert notif_repo.status_of(lot.id, "email", "user@example.com") is None, (
+        "no notifications row for rf_subjects-suppressed lot"
+    )
 
 
 # ===========================================================================
@@ -1791,6 +1784,9 @@ def test_all_fake_region_sub_repo_methods_invoked():
     assert repo.get_subscribed_at(89) is None
 
     repo.delete(89)  # idempotent
+
+    ids = repo.list_subscribed_region_ids()
+    assert isinstance(ids, frozenset)
 
     assert "get_subscribed_at:89" in repo._calls
     assert "set_if_absent:89" in repo._calls

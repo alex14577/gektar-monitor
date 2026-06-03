@@ -31,12 +31,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from fis_monitor.domain.interfaces import RegionSubscriptionRepository
 from fis_monitor.domain.models import SseEvent
 from fis_monitor.infra.sse.sse_stream import SseStreamer
-from fis_monitor.services.sse_view_filter import make_sse_view_filter
+from fis_monitor.services.sse_view_filter import make_sse_membership_filter, make_sse_view_filter
 from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
 from fis_monitor.web.deps import (
     get_csrf_origin_whitelist,
+    get_region_subscription_repo,
     get_sse_streamer,
     get_view_filters_service,
 )
@@ -57,24 +59,29 @@ _VIEW_FILTERS_COOKIE = "view_filters"
 def _build_event_filter(
     request: Request,
     vf_service: ViewFiltersService,
-) -> Callable[[SseEvent], bool] | None:
-    """Parse the view_filters cookie and return a per-connection predicate.
+    subscribed_ids: frozenset[int],
+) -> Callable[[SseEvent], bool]:
+    """Build a per-connection predicate combining membership and view-filter.
+
+    Membership filter always applies (ADR-065).  View-filter from the
+    ``view_filters`` cookie is composed on top when present and valid.
 
     Returns:
-        A ``Callable[[SseEvent], bool]`` when the cookie is present and valid.
-        ``None`` (pass-through) when the cookie is absent or malformed.
+        A ``Callable[[SseEvent], bool]``.
     """
+    membership = make_sse_membership_filter(subscribed_ids)
+
     raw_cookie: str | None = request.cookies.get(_VIEW_FILTERS_COOKIE)
     if not raw_cookie:
-        return None
+        return membership
 
     vf: ViewFilters | None = vf_service.deserialize(raw_cookie)
     if vf is None:
-        # Malformed cookie → fall back to pass-through (fail-open, not fail-closed).
         logger.debug("sse.view_filter.cookie_malformed", extra={"path": request.url.path})
-        return None
+        return membership
 
-    return make_sse_view_filter(vf)
+    view = make_sse_view_filter(vf)
+    return lambda e: membership(e) and view(e)
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +100,7 @@ async def sse_events(
     streamer: Annotated[SseStreamer, Depends(get_sse_streamer)],
     origin_whitelist: Annotated[frozenset[str], Depends(get_csrf_origin_whitelist)],
     vf_service: Annotated[ViewFiltersService, Depends(get_view_filters_service)],
+    region_sub_repo: Annotated[RegionSubscriptionRepository, Depends(get_region_subscription_repo)],
 ) -> StreamingResponse | PlainTextResponse:
     """Stream SSE events to the browser.
 
@@ -106,7 +114,8 @@ async def sse_events(
       The ``view_filters`` cookie is read once at connection time and converted
       to a per-connection predicate via ``make_sse_view_filter``.  Events that
       do not pass the predicate are silently suppressed inside ``SseStreamer``.
-      A missing or malformed cookie produces ``None`` (pass-through).
+      A missing or malformed cookie yields the membership-only predicate
+      (membership filter always applies).
       Cookie changes while connected require an F5 reload (deferred scope).
 
     Schema drift:
@@ -124,7 +133,8 @@ async def sse_events(
         )
         return PlainTextResponse(content="421 Misdirected Request", status_code=421)
 
-    event_filter = _build_event_filter(request, vf_service)
+    subscribed_ids = region_sub_repo.list_subscribed_region_ids()
+    event_filter = _build_event_filter(request, vf_service, subscribed_ids)
 
     return StreamingResponse(
         content=streamer.stream(event_filter=event_filter),

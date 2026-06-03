@@ -101,6 +101,13 @@ WHERE (lots.region_id IS NULL OR rs.subscribed_at IS NULL
 Real-time уведомления в браузере должны отражать все новые события, не только «новые» из
 subscription-window. Ограничение будет пересмотрено в отдельной задаче при необходимости.
 
+> **Superseded для membership (2026-06-03, ADR-066):** допущение «browser-канал получает
+> все лоты, т.к. в БД только подписанные регионы» сломал ADR-064 (БД содержит все субъекты
+> pocket-набора). Membership-фильтр теперь применяется на SSE-пути — но **не** в
+> `BrowserSseNotifier` (он по-прежнему публикует всё), а на per-connection event-filter слое
+> ([[decisions/ADR-066-sse-membership-filter|ADR-066]]). Date-cutoff (`passes_subscription_cutoff`,
+> email-канал) этим **не затронут** — остаётся как описано ниже.
+
 ### Точка фильтра (email-канал)
 
 `SubscribedAtFilteredNotifier` — decorator-класс в `notifier_dispatcher.py`, оборачивает `SmtpEmailNotifier`.

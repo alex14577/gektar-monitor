@@ -27,7 +27,7 @@ from fis_monitor.domain.models import (
     SseLotNew,
     SseLotStatus,
 )
-from fis_monitor.services.sse_view_filter import make_sse_view_filter
+from fis_monitor.services.sse_view_filter import make_sse_membership_filter, make_sse_view_filter
 from fis_monitor.services.view_filters import ViewFilters
 
 # ---------------------------------------------------------------------------
@@ -295,3 +295,59 @@ class TestCombinedFilters:
         vf = ViewFilters(area_min=1000, area_max=5000)
         pred = make_sse_view_filter(vf)
         assert pred(_make_lot_new(area_sqm=10_000)) is False
+
+
+# ---------------------------------------------------------------------------
+# make_sse_membership_filter (ADR-065)
+# ---------------------------------------------------------------------------
+
+
+class TestMembershipFilter:
+    """Layer 1 invariants for make_sse_membership_filter (V1-V5 per spec)."""
+
+    def test_m1_subscribed_region_passes(self) -> None:
+        """V1-SSE: lot.region_id in subscribed set → pass."""
+        pred = make_sse_membership_filter(frozenset([10, 20]))
+        assert pred(_make_lot_new(region_id=10)) is True
+
+    def test_m2_unsubscribed_region_suppressed(self) -> None:
+        """V2-SSE: lot.region_id not in subscribed set → suppress."""
+        pred = make_sse_membership_filter(frozenset([10]))
+        assert pred(_make_lot_new(region_id=99)) is False
+
+    def test_m3_region_id_none_passes(self) -> None:
+        """V3-SSE: lot.region_id is None → pass (unclassified lot not lost)."""
+        pred = make_sse_membership_filter(frozenset([10]))
+        assert pred(_make_lot_new(region_id=None)) is True
+
+    def test_m4_backfill_unsubscribed_suppressed(self) -> None:
+        """is_backfill=True + unsubscribed region → suppress (membership ignores is_backfill)."""
+        pred = make_sse_membership_filter(frozenset([10]))
+        event = SseLotNew(
+            lot=_make_lot_dto(region_id=99), fragment_template="poster", is_backfill=True
+        )
+        assert pred(event) is False
+
+    def test_m4b_backfill_subscribed_passes(self) -> None:
+        """is_backfill=True + subscribed region → pass."""
+        pred = make_sse_membership_filter(frozenset([10]))
+        event = SseLotNew(
+            lot=_make_lot_dto(region_id=10), fragment_template="poster", is_backfill=True
+        )
+        assert pred(event) is True
+
+    def test_m5_empty_set_region_bearing_suppressed(self) -> None:
+        """V5-SSE: empty subscribed set + region_id set → suppress."""
+        pred = make_sse_membership_filter(frozenset())
+        assert pred(_make_lot_new(region_id=42)) is False
+
+    def test_m6_empty_set_region_id_none_passes(self) -> None:
+        """V5-SSE: empty subscribed set + region_id None → pass."""
+        pred = make_sse_membership_filter(frozenset())
+        assert pred(_make_lot_new(region_id=None)) is True
+
+    def test_m7_non_lot_new_always_passes(self) -> None:
+        """V4-SSE: non-SseLotNew events always pass through."""
+        pred = make_sse_membership_filter(frozenset())
+        evt = SseLotStatus(lot_id=7, new_status="gone", event_type="gone")
+        assert pred(evt) is True  # type: ignore[arg-type]

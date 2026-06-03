@@ -42,7 +42,11 @@ from fis_monitor.domain.models import (
     SsePayloadSchema,
 )
 from fis_monitor.infra.sse.sse_stream import _KNOWN_SSE_EVENTS, SseStreamer
-from fis_monitor.web.deps import get_csrf_origin_whitelist, get_sse_streamer
+from fis_monitor.web.deps import (
+    get_csrf_origin_whitelist,
+    get_region_subscription_repo,
+    get_sse_streamer,
+)
 from fis_monitor.web.routes.events import router
 from fis_monitor.web.sse_encoder import make_html_sse_encoder
 from fis_monitor.web.templates import build_templates
@@ -192,6 +196,17 @@ class _DriftTrackingStreamer:
 # ---------------------------------------------------------------------------
 
 
+class _FakeRegionSubscriptionRepo:
+    """Minimal fake for RegionSubscriptionRepository.
+
+    Returns frozenset() — safe because all test lots have region_id=None,
+    which the V3-SSE rule passes unconditionally (region_id is None → pass).
+    """
+
+    def list_subscribed_region_ids(self) -> frozenset[int]:
+        return frozenset()
+
+
 def _build_app(
     *,
     streamer: Any,
@@ -203,6 +218,7 @@ def _build_app(
 
     app.dependency_overrides[get_sse_streamer] = lambda: streamer
     app.dependency_overrides[get_csrf_origin_whitelist] = lambda: whitelist
+    app.dependency_overrides[get_region_subscription_repo] = lambda: _FakeRegionSubscriptionRepo()
 
     return app
 

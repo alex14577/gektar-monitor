@@ -86,3 +86,11 @@ class SqliteRegionSubscriptionRepository:
         except Exception:
             conn.rollback()
             raise
+
+    def list_subscribed_region_ids(self) -> frozenset[int]:
+        """Return the set of all currently subscribed region IDs."""
+        conn = self._conn_provider.get()
+        cur = conn.execute("SELECT region_id FROM region_subscriptions")
+        result = frozenset(row[0] for row in cur.fetchall())
+        cur.close()
+        return result

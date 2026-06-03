@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         ConfigSource,
         LotRepository,
         NotificationsRepository,
+        RegionSubscriptionRepository,
         SmtpProviderCatalog,
         UserStateRepository,
     )
@@ -226,6 +227,17 @@ def get_smtp_provider_catalog(
     Route tests override via ``app.dependency_overrides[get_smtp_provider_catalog]``.
     """
     return c.infra.smtp_provider_catalog  # type: ignore[return-value]
+
+
+def get_region_subscription_repo(
+    c: Container = Depends(get_container),
+) -> RegionSubscriptionRepository:
+    """Return RegionSubscriptionRepository from the composition root.
+
+    Stored at ``app.state.container.infra.region_sub_repo`` by ``build_container``.
+    Route tests override via ``app.dependency_overrides[get_region_subscription_repo]``.
+    """
+    return c.infra.region_sub_repo  # type: ignore[return-value]
 
 
 def get_view_filters_service() -> ViewFiltersService:

@@ -388,6 +388,15 @@ class RegionSubscriptionRepository(Protocol):
         """Remove the subscription record for ``region_id`` (idempotent)."""
         ...
 
+    def list_subscribed_region_ids(self) -> frozenset[int]:
+        """Return the set of all currently subscribed region IDs.
+
+        Used by the SSE event filter to decide which lots to forward to the
+        client (ADR-065).  Returns an empty frozenset when no regions are
+        subscribed.
+        """
+        ...
+
 
 class UserStateRepository(Protocol):
     """Per-lot user interaction state (submitted, notes, visits)."""

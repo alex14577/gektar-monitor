@@ -42,7 +42,7 @@ from collections.abc import Callable
 from fis_monitor.domain.models import SseEvent, SseLotNew
 from fis_monitor.services.view_filters import ViewFilters
 
-__all__ = ["make_sse_view_filter"]
+__all__ = ["make_sse_membership_filter", "make_sse_view_filter"]
 
 _log = logging.getLogger(__name__)
 
@@ -147,3 +147,36 @@ def make_sse_view_filter(vf: ViewFilters) -> Callable[[SseEvent], bool]:
         return True
 
     return _predicate
+
+
+def make_sse_membership_filter(
+    subscribed_region_ids: frozenset[int],
+) -> Callable[[SseEvent], bool]:
+    """Return a predicate that admits only lots in ``subscribed_region_ids``.
+
+    Semantics (ADR-065):
+      - Non-SseLotNew event → pass (V4-SSE: always forward).
+      - SseLotNew where lot.region_id is None → pass (V3-SSE: unclassified lot).
+      - SseLotNew where lot.region_id in subscribed_region_ids → pass (V1-SSE).
+      - SseLotNew where lot.region_id NOT in subscribed_region_ids → suppress (V2-SSE).
+      - Empty subscribed set: region_id None → pass; any region-bearing lot → suppress (V5-SSE).
+
+    Applies to both live and backfill SSE events (is_backfill is not relevant
+    to membership — the region filter is the same for both paths).
+
+    Args:
+        subscribed_region_ids: Frozen snapshot taken at SSE connection time.
+
+    Returns:
+        A callable ``(SseEvent) -> bool``.
+    """
+
+    def _membership(event: SseEvent) -> bool:
+        if not isinstance(event, SseLotNew):
+            return True
+        region_id = event.lot.region_id
+        if region_id is None:
+            return True
+        return region_id in subscribed_region_ids
+
+    return _membership

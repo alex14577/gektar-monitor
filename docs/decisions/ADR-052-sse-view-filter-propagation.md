@@ -149,6 +149,19 @@ predicate-логика больше не ссылаются на `only_stars`.
 
 ---
 
+## Amendment — i7n (2026-06-03): membership-предикат композится поверх view-фильтра
+
+[[decisions/ADR-066-sse-membership-filter|ADR-066]] добавляет **второй** per-connection
+предикат — membership-фильтр (`make_sse_membership_filter`, читает `region_subscriptions`
+snapshot на connect). `_build_event_filter` теперь **всегда** возвращает `Callable` (не
+`None`): при отсутствующем/битом `view_filters` cookie — membership-only предикат; при
+валидном cookie — `lambda e: membership(e) and view(e)` (short-circuit `and`). Строка
+«missing/malformed cookie → `None` (pass-through)» в §Decision выше относится только к
+view-фильтру; membership применяется безусловно. `make_sse_view_filter` и
+`SseStreamer.stream` — без изменений (фикс аддитивный, OCP).
+
+---
+
 ## References
 
 - `src/fis_monitor/services/sse_view_filter.py` — predicate factory (new)

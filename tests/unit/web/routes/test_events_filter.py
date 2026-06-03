@@ -37,6 +37,7 @@ from fis_monitor.infra.sse.sse_stream import SseStreamer
 from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService, serialize
 from fis_monitor.web.deps import (
     get_csrf_origin_whitelist,
+    get_region_subscription_repo,
     get_sse_streamer,
     get_view_filters_service,
 )
@@ -131,6 +132,14 @@ class _FakeEventBus:
         return _FakeSubscription(list(self._events))
 
 
+class _FakeRegionSubRepo:
+    def __init__(self, subscribed: frozenset[int]) -> None:
+        self._subscribed = subscribed
+
+    def list_subscribed_region_ids(self) -> frozenset[int]:
+        return self._subscribed
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -146,19 +155,27 @@ def _build_app(
     *,
     streamer: SseStreamer,
     cookie: str | None = None,
+    subscribed_ids: frozenset[int] | None = None,
 ) -> FastAPI:
     """Build minimal FastAPI app with the events router and DI overrides."""
+    repo = _FakeRegionSubRepo(subscribed_ids if subscribed_ids is not None else frozenset())
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_sse_streamer] = lambda: streamer
     app.dependency_overrides[get_csrf_origin_whitelist] = lambda: _WHITELIST
     app.dependency_overrides[get_view_filters_service] = lambda: ViewFiltersService()
+    app.dependency_overrides[get_region_subscription_repo] = lambda: repo
     return app
 
 
-def _stream_payload(streamer: SseStreamer, *, cookie: str | None = None) -> str:
+def _stream_payload(
+    streamer: SseStreamer,
+    *,
+    cookie: str | None = None,
+    subscribed_ids: frozenset[int] | None = None,
+) -> str:
     """Run GET /events with optional cookie and return full response body."""
-    app = _build_app(streamer=streamer)
+    app = _build_app(streamer=streamer, subscribed_ids=subscribed_ids)
     cookies = {"view_filters": cookie} if cookie else {}
     client = TestClient(app, raise_server_exceptions=True)
     with client.stream("GET", "/events", cookies=cookies) as resp:
@@ -181,7 +198,7 @@ class TestSseViewFilterIntegration:
         lot_new = _make_lot_new(region_id=34)
         streamer = _make_finite_streamer([lot_new])
 
-        payload = _stream_payload(streamer, cookie=_cookie_for(vf))
+        payload = _stream_payload(streamer, cookie=_cookie_for(vf), subscribed_ids=frozenset([34]))
 
         assert "lot.new" in payload, "lot.new event must be in stream when subject matches"
 
@@ -273,3 +290,50 @@ class TestSseViewFilterIntegration:
         payload = _stream_payload(streamer, cookie="")
 
         assert "lot.new" in payload
+
+
+class TestSseMembershipFilterIntegration:
+    """Layer 4: SSE endpoint enforces membership filter (ADR-065)."""
+
+    def test_w1_unsubscribed_live_suppressed(self) -> None:
+        """W1: live SseLotNew with unsubscribed region_id is suppressed."""
+        lot_new = _make_lot_new(region_id=42)
+        streamer = _make_finite_streamer([lot_new])
+        payload = _stream_payload(streamer, subscribed_ids=frozenset([10]))
+        assert "lot.new" not in payload
+
+    def test_w2_subscribed_passes(self) -> None:
+        """W2: live SseLotNew with subscribed region_id passes."""
+        lot_new = _make_lot_new(region_id=10)
+        streamer = _make_finite_streamer([lot_new])
+        payload = _stream_payload(streamer, subscribed_ids=frozenset([10]))
+        assert "lot.new" in payload
+
+    def test_w3_backfill_unsubscribed_suppressed(self) -> None:
+        """W3: backfill SseLotNew (is_backfill=True) with unsubscribed region suppressed."""
+        lot = _make_lot_new(region_id=99)
+        backfill_event = SseLotNew(lot=lot.lot, fragment_template="poster", is_backfill=True)
+        streamer = _make_finite_streamer([backfill_event])
+        payload = _stream_payload(streamer, subscribed_ids=frozenset([10]))
+        assert "lot.new" not in payload
+
+    def test_w4_region_id_none_passes(self) -> None:
+        """W4: lot.region_id=None passes even with a non-empty subscribed set."""
+        lot_new = _make_lot_new(region_id=None)
+        streamer = _make_finite_streamer([lot_new])
+        payload = _stream_payload(streamer, subscribed_ids=frozenset([10]))
+        assert "lot.new" in payload
+
+    def test_w5_empty_subscription_region_lot_suppressed(self) -> None:
+        """W5: empty subscribed set → region-bearing lot suppressed."""
+        lot_new = _make_lot_new(region_id=55)
+        streamer = _make_finite_streamer([lot_new])
+        payload = _stream_payload(streamer, subscribed_ids=frozenset())
+        assert "lot.new" not in payload
+
+    def test_w6_non_lot_new_unaffected(self) -> None:
+        """W6: non-lot.new event (lot.status) passes through regardless of membership."""
+        lot_status = SseLotStatus(lot_id=99, new_status="gone", event_type="gone")
+        streamer = _make_finite_streamer([lot_status])
+        payload = _stream_payload(streamer, subscribed_ids=frozenset())
+        assert "lot.status" in payload

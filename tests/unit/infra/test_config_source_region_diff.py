@@ -10,6 +10,7 @@ Invariants tested:
 5. Cold-start: empty old, new=[1,2] → set_if_absent for both.
 6. Audit log INFO subscribed_at.migration_applied for each net-new; no log on skip.
 """
+
 from __future__ import annotations
 
 import json
@@ -65,6 +66,9 @@ class _FakeRegionSubRepo:
         self.delete_calls.append(region_id)
         self._store.pop(region_id, None)
 
+    def list_subscribed_region_ids(self) -> frozenset[int]:
+        return frozenset(self._store.keys())
+
 
 # ---------------------------------------------------------------------------
 # Factory helpers
@@ -87,6 +91,7 @@ def _make_source(
 
     with patch("fis_monitor.infra.config_source.Observer") as MockObserver:
         from unittest.mock import MagicMock
+
         mock_obs = MagicMock()
         MockObserver.return_value = mock_obs
         src = WatchdogConfigSource(
@@ -229,7 +234,7 @@ class TestRegionDiffOnReload:
         _write_regions(cfg, [1, 2])
         src._do_reload()
 
-        reload_calls = repo.set_if_absent_calls[len(bootstrap_calls):]
+        reload_calls = repo.set_if_absent_calls[len(bootstrap_calls) :]
         reload_called_ids = {sid for sid, _ in reload_calls}
         # _do_reload diff: [1] → [1,2] — only subjects of macro 2 are net-new.
         assert reload_called_ids == set(subjects_for_macros([2]))
@@ -412,6 +417,7 @@ class TestNullRepoIsNoOp:
 
         with patch("fis_monitor.infra.config_source.Observer") as MockObserver:
             from unittest.mock import MagicMock
+
             mock_obs = MagicMock()
             MockObserver.return_value = mock_obs
             src = WatchdogConfigSource(
