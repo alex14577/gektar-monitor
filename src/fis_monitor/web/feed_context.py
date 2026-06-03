@@ -173,6 +173,7 @@ def build_feed_context(
         "archive_count": archive_count,  # deprecated: always 0; kept for template compat
         "next_cursor": page.next_cursor,
         "lot_count": lot_count,
+        "active_lot_count": active_lot_count,
         "filters_active": _filters_are_active(filters),
         "health": SimpleNamespace(
             last_cycle_human="—",

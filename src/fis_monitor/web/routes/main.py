@@ -333,11 +333,12 @@ def feed_count(
     request: Request,
     filters_svc: ViewFiltersService = Depends(get_view_filters_service),
     lot_query: LotQueryService = Depends(get_lot_query),
+    lot_repo: LotRepository = Depends(get_lot_repo),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
-    """Return the #feed-lot-count span fragment for OOB re-sync on SSE (re)connect.
+    """Return the M span (#feed-lot-count) + OOB #registry-count for SSE (re)connect resync.
 
-    Called by JS on htmx:sseOpen so the counter re-syncs from the DB after a
+    Called by JS on htmx:sseOpen so both counters re-sync from the DB after a
     reconnect gap (variant B1 of ADR-060 amendment 2026-06-01).
 
     Reads the same view_filters cookie and uses the same _view_filters_to_lot_filters
@@ -347,8 +348,9 @@ def feed_count(
     parsed_filters = filters_svc.deserialize(cookie_value) or ViewFilters()
     lot_filters = _view_filters_to_lot_filters(parsed_filters)
     lot_count = lot_query.count(lot_filters)
+    active_lot_count = lot_repo.count_active()
     return templates.TemplateResponse(
         request,
-        "partials/_feed_lot_count.html.jinja",
-        {"lot_count": lot_count},
+        "partials/_feed_count_resync.html.jinja",
+        {"lot_count": lot_count, "active_lot_count": active_lot_count},
     )

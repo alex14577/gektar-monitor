@@ -20,24 +20,15 @@
    zones.today|length (which is capped at page size).  js-lot-count class allows
    the JS layer to increment the counter on each incoming lot.new SSE event.
 
-   #feed-lot-count is ALWAYS rendered (even when lot_count=0) so that the first
-   incoming SSE lot.new can find .js-lot-count and display the counter without
-   requiring a page reload.  When lot_count==0 the element is hidden via CSS
-   (data-count="0" → display:none) but remains in the DOM. #}
+   The counter/feed-scope is ALWAYS rendered (visible at 0 for cold-start "Показано 0 из 0")
+   so that the first incoming SSE lot.new can find .js-lot-count and increment it. #}
 <div class="filter-bar">
-  <div class="filter-bar__right">
-    {% include 'partials/_feed_lot_count.html.jinja' %}
+  <div class="feed-scope" data-registry-count="{{ active_lot_count }}">
+    <div class="feed-scope__primary">Показано <span class="js-shown-count" data-count="{{ zones.today|length }}">{{ zones.today|length }}</span> из {% include 'partials/_feed_lot_count.html.jinja' %}</div>
+    <div class="feed-scope__secondary">Всего в реестре: <span id="registry-count" class="js-registry-count" data-count="{{ active_lot_count }}">{{ active_lot_count }}</span></div>
+    <div class="feed-scope__notice" hidden>Заполняем реестр…</div>
   </div>
-</div>
-
-{# Backfill spinner — упрощённый вариант (hiq3): только spinner + label, без детализации region/page/lots #}
-<div id="backfill-progress" style="display:none; text-align:center; padding: 10px 0 4px;">
-  <span class="spinner-dots" aria-label="Загружаем каталог" style="display:inline-flex; vertical-align: middle;">
-    <span class="spinner-dots__dot"></span>
-    <span class="spinner-dots__dot"></span>
-    <span class="spinner-dots__dot"></span>
-  </span>
-  <span style="margin-left: 8px; font-size: 0.875rem; color: var(--ink-2);">Загружаем каталог…</span>
+  <div class="filter-bar__right"></div>
 </div>
 
 <div id="feed"

@@ -1,0 +1,4 @@
+{# Feed count resync partial — rendered by GET /feed/count on SSE (re)connect.
+   Outputs the M span (#feed-lot-count) plus an OOB swap for #registry-count (X).
+   Requires lot_count (M) and active_lot_count (X) in context. #}
+{% include 'partials/_feed_lot_count.html.jinja' %}<span id="registry-count" hx-swap-oob="true" class="js-registry-count" data-count="{{ active_lot_count }}">{{ active_lot_count }}</span>

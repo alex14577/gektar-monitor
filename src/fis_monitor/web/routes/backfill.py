@@ -22,9 +22,10 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from fis_monitor.domain.interfaces import LotRepository
 from fis_monitor.services.backfill import BackfillService, BackfillStatus
 from fis_monitor.web._helpers import client_ip
-from fis_monitor.web.deps import get_backfill
+from fis_monitor.web.deps import get_backfill, get_lot_repo
 from fis_monitor.web.rate_limit import RateLimiter
 
 __all__ = ["router"]
@@ -83,6 +84,7 @@ def backfill_start(
 @router.get("/status")
 def backfill_status(
     svc: BackfillService = Depends(get_backfill),
+    lot_repo: LotRepository = Depends(get_lot_repo),
 ) -> dict:
     """Return a JSON snapshot of the current backfill progress.
 
@@ -97,6 +99,7 @@ def backfill_status(
         "regions_total": snap.regions_total,
         "started_at": snap.started_at,
         "updated_at": snap.updated_at,
+        "active_lot_count": lot_repo.count_active(),
     }
 
 

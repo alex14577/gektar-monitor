@@ -137,9 +137,60 @@ render and incremented per `lot.new` SSE event.
 
 **Consequences.** Counter self-heals on every SSE (re)connect, not only on full page reload. No change to `SseLotNew`, `SseStreamer`, or the domain event union. `only_new` remains ignored by `count()` (unchanged §3 limitation). Filter parity guaranteed by reusing `_view_filters_to_lot_filters`.
 
+## Amendment (2026-06-03, bd gektar-monitor-6jg) — counter semantics «Показано N из M» + «Всего в реестре: X» + 3-state cold-start indicator
+
+Decision §3/§4 defined a **single** counter (`#feed-lot-count` = true filtered total M). 6jg
+splits the display into a two-line `div.feed-scope` block inside `.filter-bar` and replaces the
+perpetual «Загружаем каталог…» banner with a 3-state indicator. Builds on
+[[decisions/ADR-065-feed-visibility-subject-membership|ADR-065]] + [[decisions/ADR-066-sse-membership-filter|ADR-066]]:
+after ADR-066 the SSE `lot.new` stream delivers **only** subscribed lots, so the DOM card count
+is a trustworthy «shown» number (this was the i7n prerequisite that blocked 6jg).
+
+**Three counters:**
+- **N — «Показано N»** = live DOM count `document.querySelectorAll('#feed article.lot').length`.
+  New `.js-shown-count` span; `updateShownCount()` (app.js) recomputes from the DOM on
+  `lot.new` (live + backfill), after load-more swap, and on `DOMContentLoaded`. N is **not** a
+  stored accumulator — the DOM is the source of truth for «shown» (unlike M, where DB is
+  authoritative; cf. §86 rejected «recompute M from DOM»). Initial server value =
+  `zones.today|length` (the only zone rendering `article.lot`).
+- **M — «из M»** = `LotQueryService.count(filters)` (subscribed-filtered total). UNCHANGED
+  canonical `#feed-lot-count` (`js-lot-count`, `data-count`); `incrementLotCounters()` unchanged
+  (+1 per `lot.new`); re-synced on SSE (re)connect via `GET /feed/count` (§z15). The M element is
+  embedded inside the «Показано N из {M}» primary line.
+- **X — «Всего в реестре: X»** = `LotRepository.count_active()` (GLOBAL, filter-independent
+  `SELECT COUNT(*) WHERE is_active=1`). New `#registry-count` (`js-registry-count`,
+  `data-count`). Server-rendered on page / `POST /filters/view` / `POST /filters/clear` (via new
+  flat `active_lot_count` key in `build_feed_context`); resynced on SSE reconnect via the OOB span
+  in the new `partials/_feed_count_resync.html.jinja` rendered by `GET /feed/count`; **live-updated
+  during backfill** by `feed.js` polling `GET /backfill/status` (now carries `active_lot_count`).
+
+**3-state loading indicator (`feed.js`, driven by `GET /backfill/status` `{status, active_lot_count}`):**
+`coldStart` = `.feed-scope[data-registry-count] == "0"` at page render.
+- **A ROUTINE** (registry non-empty): silence — no notice, no toast. The `#backfill-progress`
+  «Загружаем каталог…» banner is **removed**. (Polling still runs while `status==running` to keep X live.)
+- **B COLD-START** (registry empty, running): show `.feed-scope__notice` «Заполняем реестр…»;
+  N/M/X grow live. Counter stays visible at 0 («Показано 0 из 0») — the
+  `.filter-bar__count[data-count="0"]{display:none}` rule was removed.
+- **C DONE** (cold-start, `running→done|idle`): `window.Monitor.toast('Каталог обновлён')` ONCE
+  (`_toastFired` guard), hide notice, `coldStart=false`. Timer lifecycle unified:
+  `shouldPoll = coldStart || status==='running'` (catches `idle→running→done` even when backfill
+  starts after page load).
+
+**«Показать ещё»** visibility stays server-authoritative via `{% if next_cursor %}` — UNCHANGED
+(not driven by JS `N>=M`, avoiding SSE races).
+
+**Backend deltas:** `GET /backfill/status` +`active_lot_count`; `GET /feed/count` renders M span +
+OOB `#registry-count`; `build_feed_context` exposes flat `active_lot_count`. `POST /filters/view`,
+`SseLotNew`, `SseStreamer`, `LotQueryService.count` — unchanged.
+
+**Test scope (per [[architecture/09-test-strategy]]):** Layer-4 only — `GET /backfill/status`
+returns `active_lot_count`; `GET /feed/count` returns M + OOB X. `feed.js`/`app.js` state machine,
+toast, N-from-DOM = **smoke-only** (Playwright excluded by strategy).
+
 ## See also
 
 - [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] — per-connection view-filter
+- [[decisions/ADR-065-feed-visibility-subject-membership|ADR-065]], [[decisions/ADR-066-sse-membership-filter|ADR-066]] — membership visibility (page-load + SSE); prerequisite for trustworthy DOM «shown» count
 - [[decisions/ADR-028-paginated-catalogue-backfill|ADR-028]] — BackfillService design
 - [[data-model/sse]] — `SseLotNew.is_backfill` field documentation
 - [[glossary#backfill lot]] — term definition

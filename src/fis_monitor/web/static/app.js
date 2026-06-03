@@ -345,6 +345,23 @@
     });
   }
 
+  // Update .js-shown-count to the current DOM card count in #feed.
+  function updateShownCount() {
+    const count = document.querySelectorAll('#feed article.lot').length;
+    document.querySelectorAll('.js-shown-count').forEach((el) => {
+      el.dataset.count = String(count);
+      el.textContent = String(count);
+    });
+  }
+
+  // Sync on initial load and after load-more swaps.
+  document.addEventListener('DOMContentLoaded', updateShownCount);
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    if (e.detail && e.detail.target && e.detail.target.id === 'load-more-trigger') {
+      updateShownCount();
+    }
+  });
+
   // ---------- SSE wiring via htmx:sseMessage ----------
   // htmx-sse extension fires a synthetic "htmx:sseMessage" on document.body
   // for every incoming SSE event AFTER performing its own sse-swap.
@@ -374,6 +391,7 @@
         // No sound, no browser notification, no escalation.
         // Counter incremented here: card is real and in DOM.
         incrementLotCounters();
+        updateShownCount();
         const loadMoreTrigger = document.getElementById('load-more-trigger');
         if (loadMoreTrigger && loadMoreTrigger.parentNode) {
           loadMoreTrigger.parentNode.insertBefore(node, loadMoreTrigger);
@@ -386,6 +404,7 @@
         // --- Live lot: standard notification path. ---
         // Counter incremented here: card is real and in DOM.
         incrementLotCounters();
+        updateShownCount();
         onLotNew(node);
       } else {
         // Fallback: node not found or #feed absent — do NOT increment counter

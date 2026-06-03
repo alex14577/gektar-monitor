@@ -843,8 +843,14 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
 }
 .filter-bar__right { margin-left: auto; }
 .filter-bar__count { color: var(--ink-2); font-size: 0.8125rem; }
-/* Hide lot counter when backfill hasn't delivered any lots yet (lot_count=0). */
-.filter-bar__count[data-count="0"] { display: none; }
+
+/* ---------- feed-scope counter block ---------- */
+.feed-scope { display: flex; flex-direction: column; gap: 2px; }
+.feed-scope__primary { color: var(--ink); font-size: 0.875rem; }
+.feed-scope__primary .js-shown-count,
+.feed-scope__primary .filter-bar__count { font-weight: 600; }
+.feed-scope__secondary { color: var(--ink-2); font-size: 0.75rem; }
+.feed-scope__notice { color: var(--muted); font-size: 0.75rem; }
 
 /* ---------- C3 onboarding filter hint ---------- */
 .filter-hint {

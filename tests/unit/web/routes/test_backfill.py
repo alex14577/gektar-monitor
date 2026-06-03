@@ -16,9 +16,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from fis_monitor.services.backfill import BackfillStatus
-from fis_monitor.web.deps import get_backfill
+from fis_monitor.web.deps import get_backfill, get_lot_repo
 from fis_monitor.web.rate_limit import RateLimiter
 from fis_monitor.web.routes.backfill import router
+from tests.unit.web.routes.conftest import FakeLotRepo
 
 # ---------------------------------------------------------------------------
 # Fake BackfillService
@@ -108,12 +109,14 @@ def test_fake_backfill_service_all_methods() -> None:
 def _build_app(
     fake: FakeBackfillService,
     rate_limiter: RateLimiter | None = None,
+    active_count: int = 0,
 ) -> FastAPI:
     import fis_monitor.web.routes.backfill as backfill_module
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_backfill] = lambda: fake
+    app.dependency_overrides[get_lot_repo] = lambda: FakeLotRepo(active_count=active_count)
 
     # Always inject an isolated limiter to prevent cross-test contamination via
     # the module-level singleton.  Callers that need a specific budget pass one
@@ -199,6 +202,19 @@ class TestBackfillStatus:
         assert "lots_seen" not in body
         assert "regions_done" not in body
         assert "total_pages_seen" not in body
+
+    def test_status_includes_active_lot_count(self) -> None:
+        """active_lot_count key is present and matches lot_repo.count_active()."""
+        fake = FakeBackfillService(running=False)
+        app = _build_app(fake, active_count=42)
+
+        with TestClient(app) as client:
+            resp = client.get("/backfill/status")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "active_lot_count" in body
+        assert body["active_lot_count"] == 42
 
     def test_running_status(self) -> None:
         """running: status='running', progress fields populated."""
