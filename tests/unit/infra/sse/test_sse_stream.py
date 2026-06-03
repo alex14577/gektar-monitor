@@ -345,6 +345,41 @@ async def _consume_indefinitely(streamer: SseStreamer) -> None:
         pass
 
 
+@pytest.mark.asyncio
+async def test_stream_terminates_on_shutdown_flag():
+    """Bound shutdown predicate True → stream() returns and unsubscribes (wi4).
+
+    Without shutdown-awareness the generator would loop yielding pings forever
+    and only the 2s timeout would end it (clean_exit stays False).
+    """
+    bus = ThreadEventBus()
+    streamer, executor = make_streamer(bus, ping_interval=0.05)
+
+    shutting_down = threading.Event()
+    streamer.bind_shutdown_flag(shutting_down.is_set)
+
+    clean_exit = False
+
+    async def consume() -> None:
+        nonlocal clean_exit
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(2.0):
+                async for _chunk in streamer.stream():
+                    pass
+            clean_exit = True
+
+    async def signal_shutdown() -> None:
+        await asyncio.sleep(0.08)  # subscriber registered + first drain in flight
+        shutting_down.set()
+
+    await asyncio.gather(consume(), signal_shutdown())
+    await asyncio.sleep(0.02)  # allow finally to run
+    executor.shutdown(wait=False)
+
+    assert clean_exit, "stream() must return on shutdown flag, not hit timeout"
+    assert len(bus._subscribers) == 0, "stream() must unsubscribe on shutdown exit"
+
+
 # ===========================================================================
 # 6. encode_sse_event format
 # ===========================================================================

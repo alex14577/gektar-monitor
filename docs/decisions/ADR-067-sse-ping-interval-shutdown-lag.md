@@ -77,6 +77,38 @@ Acceptance задачи: worker-треды завершаются за **≤2с*
 
 ---
 
+## Amendment (2026-06-03, gektar-monitor-wi4): ASGI-слой — shutdown-predicate в `stream()`
+
+Вариант A покрыл **executor-тред**, но не **ASGI-корутину**: `SseStreamer.stream()`
+(`while True … yield ping`) не завершался сам, пока клиент подключён → uvicorn ждал
+`timeout_graceful_shutdown=5с`, force-cancel'ил задачу → `CancelledError`-трейсбек
+(`ERROR: Exception in ASGI application`) на **каждом** рестарте (наблюдалось на проде).
+
+**Уточнение отказа от Варианта B:** отвергнут был именно **sentinel-push** дизайн
+(хранение ref активных подписок в `SseStreamer` → дублирование
+`ThreadEventBus._subscribers`). Lifecycle-сигнал **без** хранения подписок — другой,
+чистый концерн (1 callable, 0 дублирования state) — и принят здесь:
+
+- `SseStreamer._is_shutting_down: Callable[[], bool]` (default `lambda: False`),
+  late-bind `bind_shutdown_flag()` (паттерн `bind_executor`).
+- `stream()` опрашивает предикат после каждого drain → `return` ≤ `ping_interval`
+  (≤2с); `finally → unsubscribe()` отрабатывает.
+- **Точка подцепа — НЕ lifespan-shutdown** (он выполняется ПОСЛЕ uvicorn
+  connection-drain → поздно), а `lambda: server.should_exit` (bind в
+  lifespan-startup): `should_exit` ставится в момент сигнала (`handle_exit`,
+  incl. Windows SIGBREAK) и через `UvicornShutdownRequester` (license-expiry) —
+  единый источник, один хук покрывает оба пути. Во время drain event-loop жив →
+  генератор завершается ДО 5с force-cancel → нет трейсбека, drain выходит досрочно.
+- `except CancelledError`-страховка **не добавлена** (SRE-review): при force-exit
+  (двойной Ctrl+C) трейсбек — намеренное поведение, глотать его = код «на вырост».
+
+**Known limitation:** при запуске мимо `main()` (например `uvicorn app:app`)
+`app.state._uvicorn_server` отсутствует → флаг остаётся no-op, трейсбек вернётся.
+Прод-путь (`fis-monitor` entrypoint) покрыт. `FIS_MONITOR_SSE_PING_INTERVAL`
+теперь влияет и на скорость реакции ASGI-выхода, не только на exit-lag треда.
+
+Тест: `tests/unit/infra/sse/test_sse_stream.py::test_stream_terminates_on_shutdown_flag` (Layer 3).
+
 ## References
 
 - `src/fis_monitor/infra/sse/sse_stream.py` — `_DEFAULT_PING_INTERVAL = 2.0`, `SseStreamer.__init__(ping_interval=...)`, `_drain_one`

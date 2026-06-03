@@ -98,6 +98,10 @@ class SseStreamer:
         # Guards _active_subscribers read-modify-write. Required for no-GIL
         # runtimes (PyPy / free-threaded CPython) where inc/dec is not atomic.
         self._subscribers_lock = threading.Lock()
+        # Shutdown-awareness predicate, late-bound in lifespan via
+        # bind_shutdown_flag (gektar-monitor-wi4). Default no-op: stream()
+        # self-terminates on shutdown only when a real flag is bound.
+        self._is_shutting_down: Callable[[], bool] = lambda: False
 
     def bind_executor(self, executor: ThreadPoolExecutor) -> None:
         """Bind the executor pool (called in lifespan, ADR-014 late-binding pattern).
@@ -136,6 +140,21 @@ class SseStreamer:
         applies to all subsequent calls.
         """
         self._event_encoder = encoder
+
+    def bind_shutdown_flag(self, is_shutting_down: Callable[[], bool]) -> None:
+        """Bind a server-shutdown predicate (lifespan, ADR-067 amendment).
+
+        ``stream()`` polls this after each drain; when it returns ``True`` the
+        generator returns promptly, so the SSE response completes within one
+        ``ping_interval`` of shutdown being signalled — before uvicorn's
+        ``timeout_graceful_shutdown`` force-cancels the ASGI task (which would
+        otherwise surface as a CancelledError traceback). Bound to
+        ``lambda: server.should_exit`` — the single source of truth set by both
+        uvicorn's signal handler and ``UvicornShutdownRequester``.
+
+        See: gektar-monitor-wi4, ADR-067.
+        """
+        self._is_shutting_down = is_shutting_down
 
     async def stream(
         self,
@@ -188,6 +207,10 @@ class SseStreamer:
                     self._drain_one,
                     subscription,
                 )
+                if self._is_shutting_down():
+                    # Server shutting down — exit before uvicorn force-cancels
+                    # the ASGI task (wi4); finally runs unsubscribe().
+                    return
                 if events is None:
                     # Bus force-unsubscribed us (slow consumer or explicit removal).
                     logger.debug(

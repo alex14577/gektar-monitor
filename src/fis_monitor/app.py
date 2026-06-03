@@ -280,6 +280,12 @@ async def _lifespan_impl(
                     triggered_event=_license_expiry_triggered,
                 )
             )
+            # SSE shutdown-awareness: stream() polls server.should_exit so SSE
+            # generators self-terminate within one ping_interval of shutdown,
+            # before uvicorn's graceful force-cancel (gektar-monitor-wi4).
+            container.infra.sse_streamer.bind_shutdown_flag(
+                lambda: _lic_server.should_exit
+            )
         else:
             # Dev / test path: no uvicorn server (e.g. lifespan called directly).
             # Cell remains unbound — any shutdown request will fail-closed (os._exit).
