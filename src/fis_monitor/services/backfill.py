@@ -25,7 +25,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from fis_monitor.domain.errors import SessionExpiredError
@@ -44,6 +44,7 @@ from fis_monitor.domain.regions import subject_id_by_title as _subject_id_by_tit
 
 if TYPE_CHECKING:
     from fis_monitor.domain.interfaces import (
+        Clock,
         ConfigSource,
         EventBus,
         LotRepository,
@@ -144,6 +145,7 @@ class BackfillService:
         config_source: ConfigSource,
         monitor_cycle: MonitorCycleHandle,
         event_bus: EventBus,
+        clock: Clock,
         sleep_between_pages: float = 2.0,
     ) -> None:
         self._fetcher = fetcher
@@ -151,6 +153,7 @@ class BackfillService:
         self._config_source = config_source
         self._monitor_cycle = monitor_cycle
         self._event_bus = event_bus
+        self._clock = clock
         self._sleep_between_pages = sleep_between_pages
 
         # Single-flight lock: held while a backfill thread is running.
@@ -415,7 +418,7 @@ class BackfillService:
         if regions is None:
             settings = self._config_source.current()
             regions = list(settings.regions)
-        now = datetime.now(UTC)
+        now = self._clock.now()
 
         with self._progress_lock:
             self._progress = _Progress(
@@ -462,7 +465,7 @@ class BackfillService:
         if not cancelled:
             with self._progress_lock:
                 self._progress.done = True
-                self._progress.updated_at = datetime.now(UTC)
+                self._progress.updated_at = self._clock.now()
             try:
                 self._monitor_cycle.request_run_now()
                 logger.debug(
@@ -502,7 +505,7 @@ class BackfillService:
             lots_upserted_per_page.setdefault(page_num, 0)
             with self._progress_lock:
                 self._progress.current_page = page_num
-                self._progress.updated_at = datetime.now(UTC)
+                self._progress.updated_at = self._clock.now()
             logger.debug(
                 "backfill.region.page",
                 extra={
@@ -529,7 +532,7 @@ class BackfillService:
                     break
 
                 rows_processed += 1
-                now = datetime.now(UTC)
+                now = self._clock.now()
                 try:
                     lot = _parsed_row_to_lot(row, now, region_id=_subject_id_by_title(row.region))
                 except Exception:
@@ -583,7 +586,7 @@ class BackfillService:
                 region,
                 current_page_num,
             )
-            self._event_bus.publish(SseSessionExpired(timestamp=datetime.now(UTC)))
+            self._event_bus.publish(SseSessionExpired(timestamp=self._clock.now()))
             raise
         except Exception:
             logger.error(

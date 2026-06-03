@@ -26,6 +26,7 @@ from fis_monitor.domain.models import (
     SseLotNew,
 )
 from fis_monitor.services.backfill import BackfillService
+from tests.fakes.clock import FakeClock
 
 _NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 _REGION_A = 77
@@ -143,6 +144,7 @@ def _run_backfill(rows: list[ParsedListRow]) -> list[SseLotNew]:
         config_source=_FakeConfigSource(),
         monitor_cycle=_FakeMonitorCycle(),
         event_bus=bus,
+        clock=FakeClock(),
         sleep_between_pages=0.0,
     )
     stop = threading.Event()

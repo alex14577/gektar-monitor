@@ -17,6 +17,7 @@
 - [[decisions/ADR-007-per-connection-pragma|ADR-007]] — Per-connection PRAGMA vs persistent
 - [[decisions/ADR-014-two-phase-shutdown|ADR-014]] — Two-phase shutdown policy
 - [[decisions/ADR-016-repository-invariants-begin-immediate|ADR-016]] — Repository invariants — BEGIN IMMEDIATE + identifier whitelist + private _sync_geo
+- [[decisions/ADR-067-sse-ping-interval-shutdown-lag|ADR-067]] — SSE ping interval 15→2с — граница shutdown exit-lag
 
 **Уведомления и события:**
 - [[decisions/ADR-003-error-strategy-exceptions-result-for-notifier|ADR-003]] — Error strategy — Exception для всего, Result только для Notifier

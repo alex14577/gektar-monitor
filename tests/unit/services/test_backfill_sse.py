@@ -29,6 +29,7 @@ from fis_monitor.domain.models import (
     SseSessionExpired,
 )
 from fis_monitor.services.backfill import BackfillService
+from tests.fakes.clock import FakeClock
 
 _NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 _REGION_A = 77
@@ -170,6 +171,7 @@ def _make_service(
         config_source=FakeConfigSource(),
         monitor_cycle=FakeMonitorCycle(),
         event_bus=bus,
+        clock=FakeClock(),
         sleep_between_pages=0.0,
     )
     return svc, lot_repo, bus
@@ -316,6 +318,7 @@ def test_backfill_session_expired_publishes_sse_session_expired() -> None:
         config_source=FakeConfigSource(),
         monitor_cycle=FakeMonitorCycle(),
         event_bus=bus,
+        clock=FakeClock(),
         sleep_between_pages=0.0,
     )
 
@@ -345,6 +348,7 @@ def test_backfill_session_expired_aborts_remaining_regions() -> None:
         config_source=FakeConfigSourceTwoRegions(),
         monitor_cycle=FakeMonitorCycle(),
         event_bus=bus,
+        clock=FakeClock(),
         sleep_between_pages=0.0,
     )
 

@@ -522,6 +522,7 @@ def build_container(
         config_source=config_source,
         monitor_cycle=monitor_cycle,
         event_bus=event_bus,
+        clock=clock,
     )
     # Late-bind backfill into monitor_cycle (breaks circular dep: monitor_cycle
     # was built before backfill, so it received backfill=None in its constructor).

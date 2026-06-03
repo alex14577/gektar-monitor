@@ -74,7 +74,7 @@ Decisions-log говорит «приоритет: monitor > enrichment > full_s
                    ▼        ▼
              [SSE gen #1] [SSE gen #2]   ← async generators в FastAPI
                   │            │
-                  │ await loop.run_in_executor(None, q.get, timeout=15)
+                  │ await loop.run_in_executor(None, q.get, timeout=2)
                   │ if timeout → yield ping
                   │ else      → yield event
                   ▼            ▼
@@ -88,7 +88,7 @@ Decisions-log говорит «приоритет: monitor > enrichment > full_s
   > **TODO (follow-up [[#12y]])**: state-table persistence не реализован в tic.1. Текущее поведение — in-memory slots, lost on restart. `last_critical()` — process-lifetime best-effort: при перезапуске история слотов теряется, SSE reconnect не восстановит критические события предыдущего процесса. Persistence будет реализован после создания `StateRepository`.
 - **Watchdog на slow consumer**: если очередь подписчика > 50 — маркер `slow`. После 3 публикаций со slow — force-unsubscribe + `subscription.close()`.
 - **Subscription** — context-manager: при дисконнекте удаляет свой Queue из набора.
-- **SSE-generator** в роуте: `await asyncio.wait_for(loop.run_in_executor(sse_executor, q.get), timeout=15)` → keep-alive ping при timeout. В `finally` ГАРАНТИРОВАННО `subscription.unsubscribe()`.
+- **SSE-generator** в роуте: `await asyncio.wait_for(loop.run_in_executor(sse_executor, q.get), timeout=_DEFAULT_PING_INTERVAL)` → keep-alive ping при timeout. В `finally` ГАРАНТИРОВАННО `subscription.unsubscribe()`. `_DEFAULT_PING_INTERVAL = 2.0` сек — двойное назначение: keepalive-каденс **и** верхняя граница shutdown exit-lag (worker-тред `sse_executor` non-daemon, `shutdown(wait=False)` не прерывает уже запущенный `q.get` → живёт до `ping_interval` сек после lifespan-shutdown). См. [[decisions/ADR-067-sse-ping-interval-shutdown-lag|ADR-067]].
 
 **SSE security:**
 - Принудительная проверка `Origin === http://127.0.0.1:8080` или `http://localhost:8080`; без Origin → 403. EventSource всегда same-origin Origin шлёт, поэтому это безопасно.

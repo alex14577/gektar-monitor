@@ -60,7 +60,7 @@ def _derive_known_sse_events() -> frozenset[str]:
 #: union at import time.  Unknown discriminators trigger schema-drift logging + drop.
 _KNOWN_SSE_EVENTS: frozenset[str] = _derive_known_sse_events()
 
-_DEFAULT_PING_INTERVAL = 15.0  # seconds between keep-alive pings
+_DEFAULT_PING_INTERVAL = 2.0  # keep-alive ping; bounds shutdown drain exit-lag
 
 
 class SseStreamer:

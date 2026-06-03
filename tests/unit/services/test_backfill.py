@@ -27,6 +27,7 @@ from fis_monitor.domain.models import (
     Settings,
 )
 from fis_monitor.services.backfill import BackfillService
+from tests.fakes.clock import FakeClock
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -193,6 +194,7 @@ def _make_service(
         config_source=config,
         monitor_cycle=mc,
         event_bus=bus,
+        clock=FakeClock(),
         sleep_between_pages=0.0,
     )
     return svc, lot_repo, mc, fetcher
@@ -351,6 +353,7 @@ class TestPageCallbackUpdatesProgress:
             config_source=config,
             monitor_cycle=mc,
             event_bus=FakeEventBus(),
+            clock=FakeClock(),
             sleep_between_pages=0.0,
         )
 
@@ -1035,6 +1038,7 @@ class TestRegionPageLog:
             config_source=FakeConfigSource(regions=[_REGION_A]),
             monitor_cycle=FakeMonitorCycleService(),
             event_bus=FakeEventBus(),
+            clock=FakeClock(),
             sleep_between_pages=0.0,
         )
         stop = threading.Event()
