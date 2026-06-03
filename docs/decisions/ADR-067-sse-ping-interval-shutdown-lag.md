@@ -66,10 +66,14 @@ Acceptance задачи: worker-треды завершаются за **≤2с*
 
 ## Follow-up
 
-- **Вынести `ping_interval` в `Settings`** (низкий приоритет): `SseStreamer.__init__` уже
-  принимает `ping_interval` (DI-seam есть), нужно лишь прокинуть через `Settings` →
-  composition root. Делает значение оперируемым без пересборки (актуально при переходе
-  на контейнерный деплой с агрессивным proxy). Вариант B в этот follow-up **не включать**.
+- **✅ Реализовано (gektar-monitor-5z8):** `ping_interval` оперируем через env-var
+  **`FIS_MONITOR_SSE_PING_INTERVAL`** (НЕ user-facing `Settings` — это операционный/
+  deployment-параметр той же семьи, что `FIS_MONITOR_HOST`/`FIS_MONITOR_PORT`).
+  Читается **один раз** на boot в `build_container()` у точки сборки `SseStreamer`;
+  отсутствует/пусто → дефолт `_DEFAULT_PING_INTERVAL` из `sse_stream.py` (единственный
+  источник, не дублируется); невалидное значение → **fail-fast** `ValueError` на старте
+  (как `int()` для `FIS_MONITOR_PORT`; live-reload для этого knob нет → тихий fallback
+  не нужен). Вариант B (`stop_event`) в follow-up **не включался**.
 
 ---
 

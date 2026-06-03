@@ -28,6 +28,7 @@ See: docs/architecture/04-composition-root.md §4.2
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -395,7 +396,13 @@ def build_container(
 
     # SseStreamer: constructed without executor (late-binding, ADR-014).
     # Executor is bound in lifespan via container.infra.sse_streamer.bind_executor().
-    sse_streamer = SseStreamer(event_bus=event_bus)
+    # ping_interval overridable via env for deployment tuning (ADR-067 follow-up,
+    # operational like FIS_MONITOR_HOST/PORT); absent/empty → SseStreamer default.
+    _ping_env = os.environ.get("FIS_MONITOR_SSE_PING_INTERVAL")
+    sse_streamer = SseStreamer(
+        event_bus=event_bus,
+        **({"ping_interval": float(_ping_env)} if _ping_env else {}),
+    )
 
     infra = Infra(
         clock=clock,
