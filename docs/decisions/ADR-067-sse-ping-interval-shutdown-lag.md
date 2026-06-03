@@ -109,6 +109,14 @@ Acceptance задачи: worker-треды завершаются за **≤2с*
 
 Тест: `tests/unit/infra/sse/test_sse_stream.py::test_stream_terminates_on_shutdown_flag` (Layer 3).
 
+**Финальный residual (gektar-monitor-rcg):** post-serve replay пойманного SIGINT
+(uvicorn `capture_signals`) → `KeyboardInterrupt` из `asyncio.Runner` после
+«Finished server process». Подавлен в `main()` через
+`contextlib.suppress(KeyboardInterrupt)` вокруг `server.run()` — зеркало
+собственного `uvicorn.run()` (main.py: `except KeyboardInterrupt: pass`);
+наш `main()` зовёт `server.run()` напрямую ради `UvicornShutdownRequester`-шва
+и vendor-обёртку не получал. Shutdown к этому моменту полностью завершён.
+
 ## References
 
 - `src/fis_monitor/infra/sse/sse_stream.py` — `_DEFAULT_PING_INTERVAL = 2.0`, `SseStreamer.__init__(ping_interval=...)`, `_drain_one`

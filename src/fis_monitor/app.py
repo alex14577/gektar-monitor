@@ -704,7 +704,13 @@ def main() -> None:
     )
     server = uvicorn.Server(config)
     application.state._uvicorn_server = server
-    server.run()
+    # uvicorn's capture_signals re-raises the captured SIGINT after serve()
+    # completes (exit-code semantics); asyncio.Runner converts it to
+    # KeyboardInterrupt. Suppress it exactly like uvicorn.run() does
+    # (uvicorn/main.py: `except KeyboardInterrupt: pass`) — shutdown is
+    # already complete at this point (gektar-monitor-rcg).
+    with contextlib.suppress(KeyboardInterrupt):
+        server.run()
 
 
 if __name__ == "__main__":
