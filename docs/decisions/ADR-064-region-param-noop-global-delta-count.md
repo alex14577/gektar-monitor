@@ -189,6 +189,16 @@ tech debt, что A2 выше.
 
 ---
 
+## Amendment (2026-06-04, bd gektar-monitor-fsm) — delta-trigger basis: `total_last` вместо `count_active()`
+
+**Decision-секция этого ADR в части «db_count = count_active()»** superseded by [[decisions/ADR-068-month-window-backfill-done-flag-gate|ADR-068]] §5.
+
+После введения месячного окна backfill `count_active()` структурно меньше `total_count` (в БД только лоты за 30 дней, у донора — весь pocket). Использование `count_active()` как правой части delta снова давало бесконечный backfill.
+
+**Новая база**: `maybe_start` сравнивает `site_total` с персистентным `STATE_KEY_TOTAL = "backfill.total_last"` — донорским `total_count` с первой страницы последнего успешного прогона. При его отсутствии (cold-start) fallback = `db_count` (инвариант D3 сохранён). Отрицательная дельта не триггерит, но обновляет базу (last-writer-wins). Инварианты D1–D4 этого ADR применимы к связке `site_total / total_last`, а не `site_total / count_active()`.
+
+---
+
 ## References
 
 - `src/fis_monitor/services/monitor_cycle.py` — delta-check: `count_active()` (глобально)

@@ -124,3 +124,18 @@ ensures idempotency.  `GET /backfill/status` exposes progress; `POST
 - `src/fis_monitor/app.py` — auto-trigger in lifespan
 - ADR-019: notification state-machine (dispatcher not called by backfill)
 - docs/architecture/04-composition-root.md §4.4
+
+---
+
+## Amendment (2026-06-04, bd gektar-monitor-fsm/k31/1iw) — месячное окно, персистентная галка, единый проход
+
+**Supersedes §PaginatedListFetcher (walk contract) и §Auto-trigger heuristic (generation 3 delta baseline).** Детали в [[decisions/ADR-068-month-window-backfill-done-flag-gate|ADR-068]].
+
+**Что изменилось:**
+
+- **Неограниченный обход заменён месячным окном** (`cutoff = now − 30 дней`): ранний выход на первом лоте старше cutoff = успех; страховочный потолок `max_pages=5`. `BackfillService` больше не обходит весь каталог — только лоты за последние 30 дней.
+- **Единый глобальный проход**: `BackfillService` делает один проход по `settings.regions[0]` (донорский `region=` no-op, ADR-064). Не итерирует регионы.
+- **Resume всегда со стр. 1**: `start_resume()` = `start()` (idempotent upsert, без вычисления `page_start`).
+- **Персистентная галка `backfill.done`** в state-таблице (через `StateRepository`): ставится ТОЛЬКО при полном успехе (ранний выход, потолок, нормальное завершение). Cancel/SessionExpired/сетевые/ParseBug-ошибки галку не ставят.
+- **Гейт `MonitorCycleService`**: ноль head-poll циклов пока галка не установлена; публикуется `SseStatus(state="awaiting_backfill")`.
+- **Delta-trigger basis изменён**: `maybe_start` сравнивает `site_total` с персистентным `backfill.total_last` (донорский total со стр. 1 последнего успешного прогона), а не с `count_active()`. Устраняет структурную несходимость при ограниченном окне.

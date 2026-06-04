@@ -18,6 +18,7 @@
 - [[decisions/ADR-014-two-phase-shutdown|ADR-014]] — Two-phase shutdown policy
 - [[decisions/ADR-016-repository-invariants-begin-immediate|ADR-016]] — Repository invariants — BEGIN IMMEDIATE + identifier whitelist + private _sync_geo
 - [[decisions/ADR-067-sse-ping-interval-shutdown-lag|ADR-067]] — SSE ping interval 15→2с — граница shutdown exit-lag
+- [[decisions/ADR-068-month-window-backfill-done-flag-gate|ADR-068]] — Месячное окно backfill (early-stop на лоте >30 дней, потолок max_pages=5); персистентная галка `backfill.done` в state-таблице (ставится только при полном успехе); гейт `MonitorCycleService` — ноль циклов до галки; `SseStatus.state=awaiting_backfill`; delta-trigger сравнивает `site_total` с `backfill.total_last` (а не `count_active()`). Единый глобальный проход backfill; resume всегда со стр. 1; HTTP-таймаут fetcher + `raise_on_network_error/parse_error`. Амендирует ADR-028 §walk, ADR-064 §delta-basis (bd gektar-monitor-fsm/k31/1iw)
 
 **Уведомления и события:**
 - [[decisions/ADR-003-error-strategy-exceptions-result-for-notifier|ADR-003]] — Error strategy — Exception для всего, Result только для Notifier

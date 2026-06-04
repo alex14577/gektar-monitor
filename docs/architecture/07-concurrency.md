@@ -138,6 +138,6 @@ MonitorCycleService, FullScanService и BackfillService используют `Pa
 
 - **MonitorCycleService** (`T-cycle` поток): **head-poll** — `iterate(region, per_page=20, max_pages=1)`. Только первая страница, 2 HTTP-запроса на проход (2 макрорегиона). Bound cost; discovery-latency ≤1 min.
 - **FullScanService** (`T-fullscan` поток): **full walk** — `iterate(region, per_page=50)`. Unlimited pages; весь каталог для active-set + mass-deactivation. Запускается раз в сутки, высокий SQLite write-pressure → именно поэтому пейсится inter-batch sleep и имеет наинизший приоритет по ADR-005.
-- **BackfillService** (on-demand поток): **full walk** — `iterate(region, per_page=50)`. Bootstrap; занимает write-lock на всё время работы; MonitorCycleService пропускает регионы в `_regions_in_backfill` на это время.
+- **BackfillService** (on-demand поток): **month-window walk** — `iterate(region, per_page=50, max_pages=5)`, newest-first, early-stop на лоте старше 30 дней. Bootstrap; занимает write-lock на время работы. После успешного прогона устанавливает галку `backfill.done` в state DB и будит монитор через `request_run_now()`. До установки галки `MonitorCycleService` приостанавливает head-poll циклы (`SseStatus.state = "awaiting_backfill"`). См. [[decisions/ADR-068-month-window-backfill-done-flag-gate|ADR-068]].
 
 Стоимость конкурентности: head-poll (2 req/min) не конкурирует с FullScan по HTTP — они работают в разное время суток. Конкуренция только за SQLite-writer-lock (ADR-005 busy_timeout достаточно).
