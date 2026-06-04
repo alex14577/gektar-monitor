@@ -56,16 +56,7 @@ bd close <id>         # Complete work
 
 1. Тесты зелёные, `ruff check` чистый, код закоммичен
 2. `bd close <id>`
-3. **Obsidian vault обновлён** (`docs/` = vault, `.obsidian/` внутри) — ТОЛЬКО когда таска принесла новые знания о проекте:
-   - **`docs/decisions/ADR-NNN-<slug>.md`** — новый ADR-файл если принято архитектурное решение (rationale + alternatives + consequences). Затем добавить ссылку в `docs/decisions-log.md` (stub-MOC).
-   - **`docs/glossary.md`** — запись если введён новый термин/класс/паттерн.
-   - **`docs/architecture/<NN-section>.md`** / **`docs/data-model/<topic>.md`** / другие существующие доки — обновить если изменилось то, что они описывают (контракты, потоки, инварианты).
-   - Связи через `[[wiki-links]]`: `[[architecture/03-protocols]]`, `[[decisions/ADR-NNN-<slug>|ADR-NNN]]`, `[[glossary#Term]]`.
-   - **НЕ создавать** task-логи / per-task файлы. Контекст работы хранится в bd (description/notes) и git-логе коммитов — это SSOT.
-
-Тривиальный fix без новых решений/терминов → vault трогать не нужно, достаточно `bd close` + информативного commit-сообщения.
-
-**При делегировании задачи саб-агенту** оркестратор обязан включить в промпт инструкцию обновить Obsidian-vault (если есть что добавить) и явно запретить создание `docs/tasks/<id>.md`.
+3. **Obsidian vault обновлён** по глобальному правилу «Docs = Single Source of Truth» (`~/.claude/CLAUDE.md`) — апдейт после правок кода и после брейнштормов, инициализация vault при отсутствии, запрет `docs/tasks/<id>.md`. Project-specific детали: ссылку на новый ADR добавлять в `docs/decisions-log.md` (stub-MOC); wiki-links вида `[[architecture/03-protocols]]`, `[[decisions/ADR-NNN-<slug>|ADR-NNN]]`, `[[glossary#Term]]`.
 
 ## Sub-agent orchestration & doc-reading
 

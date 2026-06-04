@@ -59,3 +59,4 @@ data
 beads-dump.jsonl
 data.save
 .playwright-mcp/
+.code-index/
