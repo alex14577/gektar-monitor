@@ -173,6 +173,13 @@ class _StubService:
     def cancel(self) -> None:
         """No-op for BackfillService.cancel() called in lifespan shutdown."""
 
+    def is_done(self) -> bool:
+        """Stub: galka always set (no backfill resume needed in smoke tests)."""
+        return True
+
+    def start_resume(self, stop_event: object) -> bool:
+        return True
+
     def bind_executor(self, executor: object) -> None:
         """No-op for EnrichmentService.bind_executor() called in lifespan (dmu)."""
 

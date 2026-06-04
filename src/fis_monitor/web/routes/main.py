@@ -38,12 +38,14 @@ from fis_monitor.domain.interfaces import Clock, LotRepository, UserStateReposit
 if TYPE_CHECKING:
     from fis_monitor.container import SessionProbe
 from fis_monitor.domain.models import SessionStatus, Settings
+from fis_monitor.services.backfill import BackfillService
 from fis_monitor.services.catchup_dismiss import CatchupDismissService
 from fis_monitor.services.dnd import DndService
 from fis_monitor.services.login import LoginService
 from fis_monitor.services.lot_query import LotQueryService
 from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService
 from fis_monitor.web.deps import (
+    get_backfill,
     get_catchup_dismiss,
     get_clock,
     get_config_source,
@@ -176,6 +178,7 @@ def feed_page(
     lot_query: LotQueryService = Depends(get_lot_query),
     clock: Clock = Depends(get_clock),
     templates: Jinja2Templates = Depends(get_templates),
+    backfill_svc: BackfillService = Depends(get_backfill),
 ) -> HTMLResponse:
     """Render the main feed page (state=COMPLETED guaranteed by middleware).
 
@@ -240,6 +243,7 @@ def feed_page(
             session=session_ctx,
             lot_repo=lot_repo,
             now=now,
+            awaiting_backfill=not backfill_svc.is_done(),
         ),
         # MVP-stub: lot-feed query — separate bd
         "last_cycle": SimpleNamespace(

@@ -25,12 +25,13 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
-from fis_monitor.domain.errors import SessionExpiredError
+from fis_monitor.domain.errors import ParseBugError, SessionExpiredError
 from fis_monitor.domain.models import (
     DEFAULT_TRACKED_FIELDS,
+    SseCycleError,
     SseLotNew,
     SseSessionExpired,
 )
@@ -49,11 +50,17 @@ if TYPE_CHECKING:
         EventBus,
         LotRepository,
         PaginatedListFetcherProto,
+        StateRepository,
     )
 
 logger = logging.getLogger(__name__)
 
 _DELTA_THRESHOLD = 3
+_BACKFILL_MAX_PAGES = 5
+_BACKFILL_WINDOW_DAYS = 30
+
+STATE_KEY_DONE = "backfill.done"
+STATE_KEY_TOTAL = "backfill.total_last"
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +153,7 @@ class BackfillService:
         monitor_cycle: MonitorCycleHandle,
         event_bus: EventBus,
         clock: Clock,
+        state_repo: StateRepository,
         sleep_between_pages: float = 2.0,
     ) -> None:
         self._fetcher = fetcher
@@ -154,6 +162,7 @@ class BackfillService:
         self._monitor_cycle = monitor_cycle
         self._event_bus = event_bus
         self._clock = clock
+        self._state_repo = state_repo
         self._sleep_between_pages = sleep_between_pages
 
         # Single-flight lock: held while a backfill thread is running.
@@ -225,6 +234,17 @@ class BackfillService:
         t.start()
         return True
 
+    def start_resume(
+        self,
+        stop_event_external: threading.Event,
+    ) -> bool:
+        """Start backfill in resume mode (always from page 1, k31).
+
+        Delegates to ``start()`` — behaviour is identical (single-flight,
+        always from page 1).
+        """
+        return self.start(stop_event_external)
+
     def maybe_start(
         self,
         region_id: int,
@@ -236,15 +256,39 @@ class BackfillService:
     ) -> bool:
         """Conditionally start a backfill for a single region (delta-trigger gate).
 
+        Delta is computed as ``site_total - total_last_backfill`` where
+        ``total_last_backfill`` is the persisted donor total from the last
+        completed backfill run (STATE_KEY_TOTAL).  When no persisted value exists
+        (cold-start, before any backfill completes), ``db_count`` is used as the
+        reference (ADR-064 invariant D3: cold-start triggers backfill).
+
+        Negative delta: lots were removed upstream.  Skip the trigger but update
+        the persisted total so the next comparison starts from the new baseline.
+
         All checks are performed atomically inside ``_flight_lock`` to prevent
         TOCTOU races with concurrent callers.
 
         Returns ``True`` and fires backfill if triggered; ``False`` otherwise.
         """
+        # Read persisted total BEFORE acquiring _flight_lock (StateRepository is
+        # thread-safe; reading outside the lock avoids holding it during I/O).
+        raw_total_last = self._state_repo.get(STATE_KEY_TOTAL)
+        total_last: int | None = int(raw_total_last) if raw_total_last is not None else None
+
+        # _decision: one of "skip_none"|"skip_running"|"skip_negative"|"skip_threshold"|"trigger"
+        # Computed inside _flight_lock; acted on after lock release.
+        _decision: str = "skip_none"
+        _delta: int | None = None
+        _threshold_computed: int = 0
+        _negative_total_to_write: int | None = None
+
         with self._flight_lock:
-            threshold_computed = len_parsed_hint + _DELTA_THRESHOLD
+            _threshold_computed = len_parsed_hint + _DELTA_THRESHOLD
             currently_running = self._running
-            delta = (site_total - db_count) if site_total is not None else None
+            # Use persisted donor total as the baseline; fall back to db_count
+            # when no backfill has run yet (cold-start path per ADR-064 D3).
+            reference = total_last if total_last is not None else db_count
+            delta = (site_total - reference) if site_total is not None else None
 
             logger.debug(
                 "backfill.maybe_start.entry",
@@ -252,83 +296,61 @@ class BackfillService:
                     "region_id": region_id,
                     "site_total": site_total,
                     "db_count": db_count,
+                    "total_last": total_last,
+                    "reference": reference,
                     "len_hint": len_parsed_hint,
-                    "threshold_computed": threshold_computed,
+                    "threshold_computed": _threshold_computed,
                     "currently_running": currently_running,
                 },
             )
 
             if site_total is None:
-                logger.info(
-                    "backfill.maybe_start.decision",
-                    extra={
-                        "region_id": region_id,
-                        "decision": "skip_none",
-                        "delta": None,
-                        "threshold": threshold_computed,
-                    },
-                )
-                return False
+                _decision = "skip_none"
+            elif currently_running:
+                _decision = "skip_running"
+                _delta = delta
+            elif delta is not None and delta < 0:
+                _decision = "skip_negative"
+                _delta = delta
+                # Store value to write AFTER lock release (lock protects in-memory
+                # single-flight flag only, not I/O; last-writer-wins TOCTOU is
+                # acceptable for this approximate baseline).
+                _negative_total_to_write = site_total
+            elif delta is not None and delta <= _threshold_computed:
+                _decision = "skip_threshold"
+                _delta = delta
+            else:
+                _decision = "trigger"
+                _delta = delta
+                self._running = True
+                self._stop_event = threading.Event()
 
-            if currently_running:
-                logger.info(
-                    "backfill.maybe_start.decision",
-                    extra={
-                        "region_id": region_id,
-                        "decision": "skip_running",
-                        "delta": delta,
-                        "threshold": threshold_computed,
-                    },
-                )
-                return False
+        logger.info(
+            "backfill.maybe_start.decision",
+            extra={
+                "region_id": region_id,
+                "decision": _decision,
+                "delta": _delta,
+                "threshold": _threshold_computed,
+            },
+        )
 
-            # delta is int here: site_total is not None (guarded above)
-            assert delta is not None
+        if _decision == "skip_negative":
+            # Write persisted baseline outside lock (I/O must not hold _flight_lock).
+            self._state_repo.set(STATE_KEY_TOTAL, str(_negative_total_to_write))
+            return False
 
-            if delta < 0:
-                logger.info(
-                    "backfill.maybe_start.decision",
-                    extra={
-                        "region_id": region_id,
-                        "decision": "skip_negative",
-                        "delta": delta,
-                        "threshold": threshold_computed,
-                    },
-                )
-                return False
+        if _decision != "trigger":
+            return False
 
-            if delta <= threshold_computed:
-                logger.info(
-                    "backfill.maybe_start.decision",
-                    extra={
-                        "region_id": region_id,
-                        "decision": "skip_threshold",
-                        "delta": delta,
-                        "threshold": threshold_computed,
-                    },
-                )
-                return False
-
-            # Trigger: acquire the flight lock for real start.
-            self._running = True
-            self._stop_event = threading.Event()
-            logger.info(
-                "backfill.maybe_start.decision",
-                extra={
-                    "region_id": region_id,
-                    "decision": "trigger",
-                    "delta": delta,
-                    "threshold": threshold_computed,
-                },
-            )
-            logger.info(
-                "backfill.delta_triggered",
-                extra={
-                    "region_id": region_id,
-                    "delta": delta,
-                    "threshold": threshold_computed,
-                },
-            )
+        logger.info(
+            "backfill.delta_triggered",
+            extra={
+                "region_id": region_id,
+                "delta": _delta,
+                "threshold": _threshold_computed,
+            },
+        )
 
         def _worker() -> None:
             try:
@@ -382,6 +404,10 @@ class BackfillService:
         with self._flight_lock:
             return self._running
 
+    def is_done(self) -> bool:
+        """Return ``True`` if the persistent backfill-done flag is set."""
+        return self._state_repo.get(STATE_KEY_DONE) is not None
+
     # ------------------------------------------------------------------
     # Private
     # ------------------------------------------------------------------
@@ -412,49 +438,74 @@ class BackfillService:
         *,
         regions: list[int] | None = None,
     ) -> None:
-        """Inner backfill loop — runs in the caller's thread."""
+        """Inner backfill loop — runs in the caller's thread.
+
+        ADR-064: region= is a no-op on the donor — single-region pass with
+        _BACKFILL_MAX_PAGES pages (5 × 20 items).  ``regions`` is still
+        accepted for the maybe_start path (delta-backfill), but only the
+        first element is used for the HTTP fetch.
+        """
         stop = self._combined_stop(stop_event_external)
 
         if regions is None:
             settings = self._config_source.current()
             regions = list(settings.regions)
+        # Single-region pass: donor region= is no-op (ADR-064).
+        fetch_region = regions[0] if regions else 1
         now = self._clock.now()
 
         with self._progress_lock:
             self._progress = _Progress(
                 running=True,
-                regions_total=len(regions),
+                regions_total=1,
                 started_at=now,
                 updated_at=now,
             )
 
+        cutoff = self._clock.now() - timedelta(days=_BACKFILL_WINDOW_DAYS)
         logger.info(
             "backfill.run.start",
-            extra={"regions_list": regions, "regions_count": len(regions)},
+            extra={
+                "fetch_region": fetch_region,
+                "cutoff": cutoff.isoformat(),
+                "max_pages": _BACKFILL_MAX_PAGES,
+            },
         )
 
-        for region in regions:
-            if stop.is_set():
-                logger.info(
-                    "backfill.run.cancelled_before_region",
-                    extra={"region_id": region},
-                )
-                break
-
-            self._monitor_cycle.mark_region_in_backfill(region)
+        errored = False
+        early_stopped = False
+        total_seen: int | None = None
+        if not stop.is_set():
+            self._monitor_cycle.mark_region_in_backfill(fetch_region)
             try:
-                self._process_region(region, stop)
-            except SessionExpiredError:
-                logger.warning(
-                    "backfill: session expired — aborting remaining regions",
+                from fis_monitor.domain.errors import ParseBugError as _ParseBugError
+                early_stopped, total_seen = self._process_region(
+                    fetch_region, stop, cutoff=cutoff, max_pages=_BACKFILL_MAX_PAGES
                 )
-                break
+            except SessionExpiredError:
+                logger.warning("backfill: session expired — aborting")
+                errored = True
+            except _ParseBugError:
+                logger.warning("backfill: ParseBugError — aborting, galka NOT set")
+                self._event_bus.publish(
+                    SseCycleError(
+                        timestamp=self._clock.now(),
+                        cycle_id=0,
+                        error_category="parse",
+                    )
+                )
+                errored = True
+            except Exception:
+                logger.error("backfill.run.network_or_unexpected_error", exc_info=True)
+                errored = True
             finally:
-                self._monitor_cycle.clear_region_in_backfill(region)
+                self._monitor_cycle.clear_region_in_backfill(fetch_region)
 
             with self._progress_lock:
                 self._progress.current_region = None
                 self._progress.current_page = None
+        else:
+            logger.info("backfill.run.cancelled_before_start", extra={"fetch_region": fetch_region})
 
         # Mark done (normal completion only — cancel keeps done=False so the UI
         # can distinguish a successful finish from an interrupted one).
@@ -462,10 +513,18 @@ class BackfillService:
         # directly — the combined `stop` event relies on a polling watcher that
         # may lag by up to 0.1 s, creating a TOCTOU window.
         cancelled = self._stop_event.is_set() or stop_event_external.is_set()
-        if not cancelled:
+        if not cancelled and not errored:  # early_stopped also counts as success
             with self._progress_lock:
                 self._progress.done = True
                 self._progress.updated_at = self._clock.now()
+            # Persist galka and donor total for gating + delta-trigger.
+            self._state_repo.set(STATE_KEY_DONE, "1")
+            if total_seen is not None:
+                self._state_repo.set(STATE_KEY_TOTAL, str(total_seen))
+            logger.info(
+                "backfill.run.done_persisted",
+                extra={"total_persisted": total_seen},
+            )
             try:
                 self._monitor_cycle.request_run_now()
                 logger.debug(
@@ -480,15 +539,22 @@ class BackfillService:
                 )
 
         # Signal the stop-watcher thread to exit on normal completion.
-        # Without this, the watcher spins forever waiting for `combined` to be
-        # set, since neither `internal` nor `external` is set on a clean finish.
-        # Setting the internal stop-event here causes the watcher to detect it
-        # and exit promptly.  Idempotent: safe if cancel() was already called.
         self._stop_event.set()
-        logger.info("backfill.run.finished", extra={"cancelled": cancelled})
+        logger.info(
+            "backfill.run.finished",
+            extra={"cancelled": cancelled, "errored": errored, "early_stopped": early_stopped},
+        )
 
-    def _process_region(self, region: int, stop: threading.Event) -> None:
-        """Iterate all pages for ``region`` and upsert each lot."""
+    def _process_region(
+        self, region: int, stop: threading.Event, *, cutoff: datetime, max_pages: int | None = None
+    ) -> tuple[bool, int | None]:
+        """Iterate pages for ``region`` and upsert lots within 30-day window.
+
+        Returns ``(date_stopped, total_seen)`` where ``date_stopped`` is ``True``
+        if early-stopped by date boundary (success) and ``total_seen`` is the
+        donor total_count from the first page callback (authoritative), or
+        ``None`` if the callback was never invoked.
+        """
         region_start = time.monotonic()
         logger.info("backfill.region.start", extra={"region_id": region})
 
@@ -518,6 +584,15 @@ class BackfillService:
 
         rows_processed = 0
         cancelled = False
+        date_stopped = False
+        # Capture total from FIRST total_callback invocation (page 1 is authoritative);
+        # do NOT overwrite on subsequent pages.
+        _total_seen: int | None = None
+
+        def _on_total(t: int) -> None:
+            nonlocal _total_seen
+            if _total_seen is None:
+                _total_seen = t
 
         try:
             for row in self._fetcher.iterate(
@@ -525,10 +600,31 @@ class BackfillService:
                 stop,
                 sleep_between_pages=self._sleep_between_pages,
                 per_page=20,  # ADR-036 updated 2026-05-16: reduced from 50 (timeout risk)
+                max_pages=max_pages,
                 page_callback=_on_page,
+                total_callback=_on_total,
+                raise_on_network_error=True,
+                raise_on_parse_error=True,
             ):
                 if stop.is_set():
                     cancelled = True
+                    break
+
+                # Monthly window early-stop (sort=-DATE_CREATE, newest-first).
+                # First lot older than cutoff → all remaining are older → stop.
+                # F6: guard against naive date_create (parser contract is UTC-aware,
+                # but tolerate any naive value from legacy data by assuming UTC).
+                dc = row.date_create
+                if dc.tzinfo is None:
+                    dc = dc.replace(tzinfo=UTC)
+                if dc < cutoff:
+                    logger.info(
+                        "backfill.region.date_cutoff",
+                        extra={"region_id": region, "lot_id": row.id,
+                               "date_create": dc.isoformat(),
+                               "cutoff": cutoff.isoformat()},
+                    )
+                    date_stopped = True
                     break
 
                 rows_processed += 1
@@ -588,11 +684,21 @@ class BackfillService:
             )
             self._event_bus.publish(SseSessionExpired(timestamp=self._clock.now()))
             raise
+        except ParseBugError:
+            # _run публикует SseCycleError(parse); network-событие здесь было бы неверным
+            raise
         except Exception:
             logger.error(
                 "backfill.region.exception",
                 exc_info=True,
                 extra={"region_id": region, "page_num": current_page_num},
+            )
+            self._event_bus.publish(
+                SseCycleError(
+                    timestamp=self._clock.now(),
+                    cycle_id=0,
+                    error_category="network",
+                )
             )
             raise
 
@@ -606,5 +712,7 @@ class BackfillService:
                 "total_pages": total_pages,
                 "duration_ms": duration_ms,
                 "cancelled": cancelled,
+                "date_stopped": date_stopped,
             },
         )
+        return date_stopped, _total_seen

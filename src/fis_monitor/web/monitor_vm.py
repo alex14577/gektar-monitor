@@ -24,11 +24,13 @@ from fis_monitor.domain.models import Settings
 from fis_monitor.services.humanize import format_local_time
 
 
-def _state_from_session(session: SimpleNamespace) -> str:
+def _state_from_session(session: SimpleNamespace, *, awaiting_backfill: bool = False) -> str:
     """Map session flags → header traffic-light state.
 
-    Order matters: expired beats expiring; default is active.
+    Order matters: awaiting_backfill beats session states; expired beats expiring.
     """
+    if awaiting_backfill:
+        return "awaiting_backfill"
     if getattr(session, "expired", False):
         return "error"
     if getattr(session, "expires_soon", False):
@@ -42,6 +44,7 @@ def build_monitor_vm(
     session: SimpleNamespace,
     lot_repo: LotRepository,
     now: datetime,
+    awaiting_backfill: bool = False,
 ) -> SimpleNamespace:
     """Build the header-status view-model for an initial template render.
 
@@ -66,7 +69,7 @@ def build_monitor_vm(
     )
 
     return SimpleNamespace(
-        state=_state_from_session(session),
+        state=_state_from_session(session, awaiting_backfill=awaiting_backfill),
         interval_minutes=settings.interval_minutes,
         last_new_human=last_new_human,
         expires_at_hhmm=getattr(session, "expires_at_hhmm", ""),

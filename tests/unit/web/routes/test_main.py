@@ -27,6 +27,7 @@ from fis_monitor.domain.models import LotUserState, SessionStatus, Settings
 from fis_monitor.services.login import LoginStatus
 from fis_monitor.services.view_filters import ViewFilters, serialize
 from fis_monitor.web.deps import (
+    get_backfill,
     get_catchup_dismiss,
     get_clock,
     get_config_source,
@@ -206,6 +207,10 @@ def _make_app(
         def status(self) -> LoginStatus:
             return LoginStatus(running=False, last_outcome=None)
 
+    class _StubBackfill:
+        def is_done(self) -> bool:
+            return True
+
     app = FastAPI()
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(router)
@@ -219,6 +224,7 @@ def _make_app(
     app.dependency_overrides[get_lot_repo] = lambda: fake_lot_repo
     app.dependency_overrides[get_lot_query] = lambda: fake_lot_query
     app.dependency_overrides[get_clock] = lambda: fake_clock
+    app.dependency_overrides[get_backfill] = lambda: _StubBackfill()
     return app, fake_cfg, fake_probe
 
 

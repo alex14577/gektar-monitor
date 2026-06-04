@@ -310,6 +310,13 @@ async def _lifespan_impl(
         if _cell is not None:
             _cell[0] = supervisor
 
+        # k31: if backfill galka not set → auto-resume (always from page 1,
+        # early-stop by 30-day window in BackfillService._process_region).
+        _backfill_svc = container.services.backfill
+        if not _backfill_svc.is_done():
+            logger.info("lifespan: backfill galka not set — resuming backfill from page 1")
+            _backfill_svc.start_resume(supervisor.stop_event)
+
         yield
 
     finally:

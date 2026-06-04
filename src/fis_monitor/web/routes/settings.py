@@ -35,9 +35,11 @@ from fis_monitor.domain.regions import (
     REGION_TITLE_NOMINATIVE_BY_SLUG,
     SUBJECT_TITLE_BY_ID,
 )
+from fis_monitor.services.backfill import BackfillService
 from fis_monitor.services.settings import SettingsService
 from fis_monitor.services.smtp_test import SmtpTestService
 from fis_monitor.web.deps import (
+    get_backfill,
     get_clock,
     get_config_source,
     get_lot_repo,
@@ -239,6 +241,7 @@ def get_settings(
     templates: Jinja2Templates = Depends(get_templates),
     lot_repo: LotRepository = Depends(get_lot_repo),
     clock: Clock = Depends(get_clock),
+    backfill_svc: BackfillService = Depends(get_backfill),
 ) -> Response:
     """Return the current Settings snapshot.
 
@@ -265,6 +268,7 @@ def get_settings(
                 session=_session_ctx,
                 lot_repo=lot_repo,
                 now=clock.now(),
+                awaiting_backfill=not backfill_svc.is_done(),
             ),
         }
         return templates.TemplateResponse(request, "settings.html.jinja", ctx)

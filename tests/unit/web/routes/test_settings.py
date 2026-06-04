@@ -136,6 +136,13 @@ def _make_app(
 
     app.dependency_overrides[get_lot_repo] = lambda: FakeLotRepository()
     app.dependency_overrides[get_clock] = lambda: _FixedClock()
+    from fis_monitor.web.deps import get_backfill
+
+    class _StubBackfill:
+        def is_done(self) -> bool:
+            return True
+
+    app.dependency_overrides[get_backfill] = lambda: _StubBackfill()
     return app, fc, fs, ft
 
 

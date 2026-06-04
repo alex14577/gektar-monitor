@@ -27,6 +27,7 @@ from fis_monitor.domain.models import (
 )
 from fis_monitor.services.backfill import BackfillService
 from tests.fakes.clock import FakeClock
+from tests.fakes.state_repository import FakeStateRepository as _FakeStateRepository
 
 _NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 _REGION_A = 77
@@ -65,7 +66,11 @@ class _FakePaginatedListFetcher:
         sleep_between_pages: float = 0.0,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_start: int = 1,
         page_callback: object = None,
+        total_callback: object = None,
+        raise_on_network_error: bool = False,
+        raise_on_parse_error: bool = False,
     ) -> Iterator[ParsedListRow]:
         if page_callback is not None:
             page_callback(1, len(self._rows))  # type: ignore[operator]
@@ -136,6 +141,9 @@ class _FakeConfigSource:
 # ---------------------------------------------------------------------------
 
 
+
+
+
 def _run_backfill(rows: list[ParsedListRow]) -> list[SseLotNew]:
     bus = _FakeEventBus()
     svc = BackfillService(
@@ -145,6 +153,7 @@ def _run_backfill(rows: list[ParsedListRow]) -> list[SseLotNew]:
         monitor_cycle=_FakeMonitorCycle(),
         event_bus=bus,
         clock=FakeClock(),
+        state_repo=_FakeStateRepository(),
         sleep_between_pages=0.0,
     )
     stop = threading.Event()

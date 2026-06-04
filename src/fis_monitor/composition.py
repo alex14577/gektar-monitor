@@ -496,6 +496,7 @@ def build_container(
         clock=clock,
         cycle_progress_signal=cycle_progress_signal,
         url_builder=url_builder,
+        state_repo=state_repo,
     )
 
     paginated_fetcher = PaginatedListFetcher(
@@ -530,6 +531,7 @@ def build_container(
         monitor_cycle=monitor_cycle,
         event_bus=event_bus,
         clock=clock,
+        state_repo=state_repo,
     )
     # Late-bind backfill into monitor_cycle (breaks circular dep: monitor_cycle
     # was built before backfill, so it received backfill=None in its constructor).

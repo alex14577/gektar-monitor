@@ -624,7 +624,11 @@ class PaginatedListFetcherProto(Protocol):
         sleep_between_pages: float = ...,
         per_page: int | None = ...,
         max_pages: int | None = ...,
+        page_start: int = ...,
         page_callback: Callable[[int, int], None] | None = ...,
+        total_callback: Callable[[int], None] | None = ...,
+        raise_on_network_error: bool = ...,
+        raise_on_parse_error: bool = ...,
     ) -> Iterator[ParsedListRow]: ...
 
 

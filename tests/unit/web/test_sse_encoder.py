@@ -217,6 +217,32 @@ class TestSseStatusAbsoluteTime:
         )
 
 
+class TestSseStatusAwaitingBackfill:
+    """Layer 4: _header_status renders 'awaiting_backfill' state correctly (k31)."""
+
+    def test_awaiting_backfill_renders_text(self) -> None:
+        """state='awaiting_backfill' → шаблон рендерит 'ожидание первоначальной загрузки'."""
+        templates = build_templates()
+        encoder = make_html_sse_encoder(templates.env)
+
+        event = SseStatus(
+            timestamp=_TS,
+            state="awaiting_backfill",
+            interval_minutes=5,
+            last_new_human="—",
+            expires_at_hhmm="",
+        )
+
+        payload = encoder(event).decode()
+
+        assert "awaiting_backfill" in payload, (
+            "data-state='awaiting_backfill' must appear in rendered HTML"
+        )
+        assert "ожидание первоначальной загрузки" in payload, (
+            "Russian label must appear in rendered header-status for awaiting_backfill"
+        )
+
+
 class TestSseLoginSucceededEncoder:
     """SseLoginSucceeded encoder contract (fplb).
 

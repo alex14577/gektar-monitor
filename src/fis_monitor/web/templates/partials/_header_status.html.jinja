@@ -6,11 +6,12 @@
    через monitor.state. lw5s убрал дублирующий pulse-dot индикатор.
    ======================================================================== #}
 <span class="status" data-state="{{ monitor.state }}"
-      title="{% if monitor.state == 'active' %}Все системы в норме{% elif monitor.state == 'warning' %}Сессия скоро истечёт{% elif monitor.state == 'error' %}Сессия истекла{% else %}Пауза{% endif %}">
+      title="{% if monitor.state == 'active' %}Все системы в норме{% elif monitor.state == 'warning' %}Сессия скоро истечёт{% elif monitor.state == 'error' %}Сессия истекла{% elif monitor.state == 'awaiting_backfill' %}Ожидание первоначальной загрузки{% else %}Пауза{% endif %}">
   <span class="status__dot" aria-hidden="true"></span>
   {% if monitor.state == 'active' %}Мониторинг активен
   {% elif monitor.state == 'warning' %}Сессия истекает в {{ monitor.expires_at_hhmm }}
   {% elif monitor.state == 'error' %}Сессия истекла, нужен вход
+  {% elif monitor.state == 'awaiting_backfill' %}ожидание первоначальной загрузки
   {% else %}Пауза{% endif %}
 </span>
 

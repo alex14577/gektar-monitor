@@ -140,3 +140,32 @@ def test_no_countdown_fields_in_initial_render_vm() -> None:
     )
 
 
+
+
+# ---------------------------------------------------------------------------
+# k31: awaiting_backfill flag
+# ---------------------------------------------------------------------------
+
+
+def test_awaiting_backfill_state_when_flag_true() -> None:
+    """k31: awaiting_backfill=True → state='awaiting_backfill' beats session state."""
+    vm = build_monitor_vm(
+        settings=Settings(),
+        session=_session(),
+        lot_repo=FakeLotRepository(),
+        now=_NOW,
+        awaiting_backfill=True,
+    )
+    assert vm.state == "awaiting_backfill"
+
+
+def test_awaiting_backfill_false_does_not_override_active() -> None:
+    """k31: awaiting_backfill=False (galka set) → normal session-based state."""
+    vm = build_monitor_vm(
+        settings=Settings(),
+        session=_session(),
+        lot_repo=FakeLotRepository(),
+        now=_NOW,
+        awaiting_backfill=False,
+    )
+    assert vm.state == "active"

@@ -30,6 +30,7 @@ from fis_monitor.domain.models import (
 )
 from fis_monitor.services.backfill import BackfillService
 from tests.fakes.clock import FakeClock
+from tests.fakes.state_repository import FakeStateRepository
 
 _NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 _REGION_A = 77
@@ -73,11 +74,18 @@ class FakePaginatedListFetcher:
         sleep_between_pages: float = 0.0,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_start: int = 1,
         page_callback: object = None,
+        total_callback: object = None,
+        raise_on_network_error: bool = False,
+        raise_on_parse_error: bool = False,
     ) -> Iterator[ParsedListRow]:
         if page_callback is not None:
             page_callback(1, len(self._rows))  # type: ignore[operator]
         yield from self._rows
+
+
+
 
 
 class FakeLotRepository:
@@ -172,6 +180,7 @@ def _make_service(
         monitor_cycle=FakeMonitorCycle(),
         event_bus=bus,
         clock=FakeClock(),
+        state_repo=FakeStateRepository(),
         sleep_between_pages=0.0,
     )
     return svc, lot_repo, bus
@@ -296,7 +305,11 @@ class FakePaginatedListFetcherSessionExpired:
         sleep_between_pages: float = 0.0,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_start: int = 1,
         page_callback: object = None,
+        total_callback: object = None,
+        raise_on_network_error: bool = False,
+        raise_on_parse_error: bool = False,
     ) -> Iterator[ParsedListRow]:
         self._call_count += 1
         if self._call_count == 1:
@@ -319,6 +332,7 @@ def test_backfill_session_expired_publishes_sse_session_expired() -> None:
         monitor_cycle=FakeMonitorCycle(),
         event_bus=bus,
         clock=FakeClock(),
+        state_repo=FakeStateRepository(),
         sleep_between_pages=0.0,
     )
 
@@ -349,6 +363,7 @@ def test_backfill_session_expired_aborts_remaining_regions() -> None:
         monitor_cycle=FakeMonitorCycle(),
         event_bus=bus,
         clock=FakeClock(),
+        state_repo=FakeStateRepository(),
         sleep_between_pages=0.0,
     )
 

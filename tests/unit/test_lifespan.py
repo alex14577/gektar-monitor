@@ -118,15 +118,22 @@ class FakeLoginService:
 class FakeBackfillService:
     """Fake BackfillService — records cancel() calls."""
 
-    def __init__(self) -> None:
+    def __init__(self, already_done: bool = True) -> None:
         self.cancel_calls = 0
         self._running = False
+        self._done = already_done
 
     def cancel(self) -> None:
         self.cancel_calls += 1
 
     def is_running(self) -> bool:
         return self._running
+
+    def is_done(self) -> bool:
+        return self._done
+
+    def start_resume(self, stop_event: threading.Event) -> bool:
+        return True
 
     def start(self, stop_event: threading.Event) -> bool:
         return True
@@ -180,13 +187,39 @@ class FakeSessionExpiredEmailService:
 
 
 @dataclass
+class _FakeLotRepoForLifespan:
+    def count_active(self, region_ids: tuple[int, ...] = ()) -> int:
+        return 200  # Simulate already-loaded catalogue → galka set without requests
+
+
+class _FakeStateRepoForLifespan:
+    def __init__(self) -> None:
+        self._store: dict[str, str] = {}
+
+    def get(self, key: str) -> str | None:
+        return self._store.get(key)
+
+    def set(self, key: str, value: str) -> None:
+        self._store[key] = value
+
+    def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
+
+@dataclass
 class FakeInfra:
     conn_provider: FakeConnProvider
     sse_streamer: FakeSseStreamer = None  # type: ignore[assignment]
+    lot_repo: _FakeLotRepoForLifespan = None  # type: ignore[assignment]
+    state_repo: _FakeStateRepoForLifespan = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.sse_streamer is None:
             self.sse_streamer = FakeSseStreamer()
+        if self.lot_repo is None:
+            self.lot_repo = _FakeLotRepoForLifespan()
+        if self.state_repo is None:
+            self.state_repo = _FakeStateRepoForLifespan()
 
 
 class FakeLicenseExpirySupervisor:

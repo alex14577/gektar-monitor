@@ -73,7 +73,11 @@ class PaginatedListFetcher:
         sleep_between_pages: float = 2.0,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_start: int = 1,
         page_callback: Callable[[int, int], None] | None = None,
+        total_callback: Callable[[int], None] | None = None,
+        raise_on_network_error: bool = False,
+        raise_on_parse_error: bool = False,
     ) -> Iterator[ParsedListRow]:
         """Yield every ``ParsedListRow`` from pages 1..N for ``region``.
 
@@ -109,7 +113,7 @@ class PaginatedListFetcher:
         maintaining a parallel counter.  The callback runs synchronously in the
         iterator's thread; it must not block.
         """
-        page = 1
+        page = page_start if page_start >= 1 else 1
         pages_walked = 0
 
         while True:
@@ -140,6 +144,8 @@ class PaginatedListFetcher:
                     page,
                     exc_info=True,
                 )
+                if raise_on_network_error:
+                    raise
                 return
             except Exception:
                 logger.warning(
@@ -149,11 +155,15 @@ class PaginatedListFetcher:
                     page,
                     exc_info=True,
                 )
+                if raise_on_network_error:
+                    raise
                 return
 
             try:
                 parsed_page = self._list_parser.parse(response.text)
                 rows = parsed_page.rows
+                if total_callback is not None and parsed_page.total_count is not None:
+                    total_callback(parsed_page.total_count)
             except SessionExpiredError:
                 logger.warning(
                     "paginated_list_fetcher: SessionExpiredError on region=%s page=%d"
@@ -169,6 +179,8 @@ class PaginatedListFetcher:
                     page,
                     exc_info=True,
                 )
+                if raise_on_parse_error:
+                    raise
                 return
             except Exception:
                 logger.warning(

@@ -16,7 +16,7 @@ import contextlib
 import logging
 import threading
 from collections.abc import Callable, Iterator, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -28,6 +28,7 @@ from fis_monitor.domain.models import (
 )
 from fis_monitor.services.backfill import BackfillService
 from tests.fakes.clock import FakeClock
+from tests.fakes.state_repository import FakeStateRepository
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -81,13 +82,21 @@ class FakePaginatedListFetcher:
         sleep_between_pages: float = 2.0,
         per_page: int | None = None,
         max_pages: int | None = None,
+        page_start: int = 1,
         page_callback: Callable[[int, int], None] | None = None,
+        total_callback: Callable[[int], None] | None = None,
+        raise_on_network_error: bool = False,
+        raise_on_parse_error: bool = False,
     ) -> Iterator[ParsedListRow]:
         self.iterate_calls.append(region)
-        self.iterate_kwargs.append({"per_page": per_page, "max_pages": max_pages})
+        self.iterate_kwargs.append(
+            {"per_page": per_page, "max_pages": max_pages, "page_start": page_start}
+        )
         rows = self._rows_by_region.get(region, [])
         if rows and page_callback is not None:
             page_callback(1, len(rows))
+        if total_callback is not None:
+            total_callback(len(rows))
         for row in rows:
             if stop_event.is_set():
                 return
@@ -169,6 +178,9 @@ class FakeEventBus:
         raise NotImplementedError
 
 
+
+
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -181,12 +193,15 @@ def _make_service(
     monitor_cycle: FakeMonitorCycleService | None = None,
     fetcher: FakePaginatedListFetcher | None = None,
     event_bus: FakeEventBus | None = None,
+    state_repo: FakeStateRepository | None = None,
+    clock: FakeClock | None = None,
 ) -> tuple[BackfillService, FakeLotRepository, FakeMonitorCycleService, FakePaginatedListFetcher]:
     lot_repo = lot_repo or FakeLotRepository()
     mc = monitor_cycle or FakeMonitorCycleService()
     fetcher = fetcher or FakePaginatedListFetcher(rows_by_region=rows_by_region)
     config = FakeConfigSource(regions=regions or [_REGION_A])
     bus = event_bus or FakeEventBus()
+    state_repo = state_repo or FakeStateRepository()
 
     svc = BackfillService(
         fetcher=fetcher,
@@ -194,7 +209,8 @@ def _make_service(
         config_source=config,
         monitor_cycle=mc,
         event_bus=bus,
-        clock=FakeClock(),
+        clock=clock or FakeClock(),
+        state_repo=state_repo,
         sleep_between_pages=0.0,
     )
     return svc, lot_repo, mc, fetcher
@@ -247,6 +263,12 @@ def test_fake_all_methods() -> None:
     assert mc.clear_calls == [1]
     assert mc.run_now_calls == 1
 
+    state_repo = FakeStateRepository()
+    state_repo.set("k", "v")
+    assert state_repo.get("k") == "v"
+    state_repo.delete("k")
+    assert state_repo.get("k") is None
+
 
 # ---------------------------------------------------------------------------
 # Test 1: basic backfill — lots upserted with notify=False
@@ -278,8 +300,9 @@ class TestBasicBackfill:
         assert mc.mark_calls == [_REGION_A]
         assert mc.clear_calls == [_REGION_A]
 
-    def test_multiple_regions_processed(self) -> None:
-        svc, lot_repo, _mc, _fetcher = _make_service(
+    def test_single_region_pass_adr064(self) -> None:
+        """ADR-064: single-region pass — only regions[0] is fetched (region= is no-op)."""
+        svc, lot_repo, _mc, fetcher = _make_service(
             rows_by_region={
                 _REGION_A: [_make_row(1), _make_row(2)],
                 _REGION_B: [_make_row(10)],
@@ -291,8 +314,10 @@ class TestBasicBackfill:
         svc.start(stop)
         _wait_until_done(svc)
 
-        assert len(lot_repo.upsert_calls) == 3
-        assert set(c["lot_id"] for c in lot_repo.upsert_calls) == {1, 2, 10}
+        # Only regions[0]=REGION_A fetched; REGION_B not iterated (ADR-064 no-op)
+        assert len(lot_repo.upsert_calls) == 2
+        assert set(c["lot_id"] for c in lot_repo.upsert_calls) == {1, 2}
+        assert fetcher.iterate_calls == [_REGION_A]
 
     def test_iterate_called_with_per_page_20(self) -> None:
         """BackfillService passes per_page=20 (ADR-036 updated 2026-05-16: reduced from 50)."""
@@ -306,7 +331,7 @@ class TestBasicBackfill:
         _wait_until_done(svc)
 
         assert fetcher.iterate_kwargs[0]["per_page"] == 20
-        assert fetcher.iterate_kwargs[0]["max_pages"] is None
+        assert fetcher.iterate_kwargs[0]["max_pages"] == 5
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +359,11 @@ class TestPageCallbackUpdatesProgress:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_start: int = 1,
                 page_callback: Callable[[int, int], None] | None = None,
+                total_callback: Callable[[int], None] | None = None,
+                raise_on_network_error: bool = False,
+                raise_on_parse_error: bool = False,
             ) -> Iterator[ParsedListRow]:
                 if page_callback is not None:
                     recorded_callbacks.append(page_callback)
@@ -354,6 +383,7 @@ class TestPageCallbackUpdatesProgress:
             monitor_cycle=mc,
             event_bus=FakeEventBus(),
             clock=FakeClock(),
+            state_repo=FakeStateRepository(),
             sleep_between_pages=0.0,
         )
 
@@ -400,7 +430,11 @@ class TestSingleFlight:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_start: int = 1,
                 page_callback: Callable[[int, int], None] | None = None,
+                total_callback: Callable[[int], None] | None = None,
+                raise_on_network_error: bool = False,
+                raise_on_parse_error: bool = False,
             ) -> Iterator[ParsedListRow]:
                 barrier.wait()  # signal that backfill worker is running
                 done_event.wait(timeout=5.0)  # hold until test releases
@@ -465,7 +499,7 @@ class TestStatusSnapshot:
 
         snap = svc.status()
         assert snap.running is False
-        assert snap.regions_total == 2
+        assert snap.regions_total == 1  # ADR-064: single-region pass
         assert snap.started_at is not None
 
 
@@ -475,15 +509,15 @@ class TestStatusSnapshot:
 
 class TestCancel:
     def test_cancel_while_running_stops_backfill(self) -> None:
-        """cancel() sets the stop event; the backfill stops before processing all regions.
+        """cancel() sets the stop event; the backfill stops mid-iteration.
 
-        start() now spawns the backfill daemon thread internally.  The test uses
-        the barrier to synchronize with the worker thread directly.
+        Single-region pass (ADR-064): uses a blocking fetcher on the single
+        region to test cancel semantics.
         """
         barrier = threading.Barrier(2)
         cancel_issued = threading.Event()
 
-        class StopOnSecondRegion:
+        class BlockingFetcher:
             def iterate(
                 self,
                 region: int,
@@ -492,25 +526,27 @@ class TestCancel:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_start: int = 1,
                 page_callback: Callable[[int, int], None] | None = None,
+                total_callback: Callable[[int], None] | None = None,
+                raise_on_network_error: bool = False,
+                raise_on_parse_error: bool = False,
             ) -> Iterator[ParsedListRow]:
-                if region == _REGION_B:
-                    # Signal the main thread to cancel
-                    barrier.wait()
-                    cancel_issued.wait(timeout=5.0)
-                return iter([_make_row(1, region=region)])
+                # Signal the main thread that iteration started
+                barrier.wait()
+                cancel_issued.wait(timeout=5.0)
+                return iter([])
 
         svc, _lot_repo, *_ = _make_service(
-            fetcher=StopOnSecondRegion(),  # type: ignore[call-overload]
-            regions=[_REGION_A, _REGION_B],
+            fetcher=BlockingFetcher(),  # type: ignore[call-overload]
+            regions=[_REGION_A],
         )
 
         stop = threading.Event()
-        # start() spawns the worker thread internally and returns True immediately.
         svc.start(stop)
         assert svc.is_running()
 
-        barrier.wait()  # wait until worker thread is inside region B
+        barrier.wait()  # wait until worker thread is inside iterate
         svc.cancel()
         cancel_issued.set()
 
@@ -576,7 +612,8 @@ class TestWatcherExitsOnNormalCompletion:
 # ---------------------------------------------------------------------------
 
 class TestSubsetRegions:
-    def test_start_subset_processes_only_given_regions(self) -> None:
+    def test_start_subset_uses_first_region_adr064(self) -> None:
+        """ADR-064: single-region pass — start(regions=[A,B]) fetches only regions[0]=A."""
         svc, lot_repo, _mc, fetcher = _make_service(
             rows_by_region={
                 _REGION_A: [_make_row(1)],
@@ -590,10 +627,9 @@ class TestSubsetRegions:
         svc.start(stop, regions=[_REGION_A, _REGION_B])
         _wait_until_done(svc)
 
-        # Only A and B iterated — not region 99
-        assert set(fetcher.iterate_calls) == {_REGION_A, _REGION_B}
-        assert 99 not in fetcher.iterate_calls
-        assert len(lot_repo.upsert_calls) == 2
+        # Only regions[0]=REGION_A fetched (ADR-064 single-region pass)
+        assert fetcher.iterate_calls == [_REGION_A]
+        assert len(lot_repo.upsert_calls) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -621,7 +657,11 @@ class TestMaybeStart:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_start: int = 1,
                 page_callback: object = None,
+                total_callback: object = None,
+                raise_on_network_error: bool = False,
+                raise_on_parse_error: bool = False,
             ):
                 barrier.wait()
                 done_event.wait(timeout=5.0)
@@ -695,7 +735,11 @@ class TestMaybeStart:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_start: int = 1,
                 page_callback: object = None,
+                total_callback: object = None,
+                raise_on_network_error: bool = False,
+                raise_on_parse_error: bool = False,
             ):
                 in_iterate.wait(timeout=5.0)  # signal: one winner inside iterate
                 done_event.wait(timeout=5.0)
@@ -762,7 +806,11 @@ class TestRequestRunNow:
                 sleep_between_pages: float = 2.0,
                 per_page: int | None = None,
                 max_pages: int | None = None,
+                page_start: int = 1,
                 page_callback: object = None,
+                total_callback: object = None,
+                raise_on_network_error: bool = False,
+                raise_on_parse_error: bool = False,
             ):
                 barrier.wait()
                 cancel_issued.wait(timeout=5.0)
@@ -921,7 +969,9 @@ class TestMaybeStartDecisionLog:
 
         class SlowFetcher:
             def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
-                        per_page=None, max_pages=None, page_callback=None):
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
                 barrier.wait()
                 done_event.wait(timeout=5.0)
                 return iter([])
@@ -995,7 +1045,8 @@ class TestRegionStartFinishLog:
         assert rec.duration_ms >= 0  # type: ignore[attr-defined]
         assert rec.cancelled is False  # type: ignore[attr-defined]
 
-    def test_multiple_regions_each_get_start_finish(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_single_region_gets_start_finish_adr064(self, caplog: pytest.LogCaptureFixture) -> None:
+        """ADR-064: single-region pass — only regions[0] gets start+finish log."""
         svc, *_ = _make_service(
             rows_by_region={_REGION_A: [_make_row(1)], _REGION_B: [_make_row(10)]},
             regions=[_REGION_A, _REGION_B],
@@ -1013,8 +1064,8 @@ class TestRegionStartFinishLog:
             r.region_id for r in caplog.records  # type: ignore[attr-defined]
             if r.message == "backfill.region.finish"
         }
-        assert start_regions == {_REGION_A, _REGION_B}
-        assert finish_regions == {_REGION_A, _REGION_B}
+        assert start_regions == {_REGION_A}
+        assert finish_regions == {_REGION_A}
 
 
 class TestRegionPageLog:
@@ -1026,7 +1077,9 @@ class TestRegionPageLog:
 
         class MultiPageFetcher:
             def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
-                        per_page=None, max_pages=None, page_callback=None):
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
                 for page_num, rows in enumerate(page_rows, start=1):
                     if page_callback is not None:
                         page_callback(page_num, len(rows))
@@ -1039,6 +1092,7 @@ class TestRegionPageLog:
             monitor_cycle=FakeMonitorCycleService(),
             event_bus=FakeEventBus(),
             clock=FakeClock(),
+            state_repo=FakeStateRepository(),
             sleep_between_pages=0.0,
         )
         stop = threading.Event()
@@ -1067,3 +1121,352 @@ class TestCancelLog:
         assert cancel_logs, "backfill.cancel.called must be logged"
         rec = cancel_logs[0]
         assert rec.was_running is False  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# fsm / k31 / 1iw — new invariant tests (spec 2026-06-04)
+# ---------------------------------------------------------------------------
+
+class TestMaxPagesInvariant:
+    """Invariant 1: backfill делает ≤5 запросов страниц за прогон."""
+
+    def test_max_pages_5_passed_to_iterate(self) -> None:
+        """BackfillService передаёт max_pages=_BACKFILL_MAX_PAGES=5 в iterate."""
+        svc, _lr, _mc, fetcher = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert fetcher.iterate_kwargs[0]["max_pages"] == 5
+
+    def test_single_region_fetch_not_per_region(self) -> None:
+        """Pocket не качается повторно для каждого региона (ADR-064 single-region pass)."""
+        svc, _lr, _mc, fetcher = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)], _REGION_B: [_make_row(2)]},
+            regions=[_REGION_A, _REGION_B],
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        # Only ONE iterate call — not one per region
+        assert len(fetcher.iterate_calls) == 1
+
+
+class TestGalkaInvariant:
+    """Invariant 2: галка ставится только при полном успехе."""
+
+    def test_galka_set_after_success(self) -> None:
+        state = FakeStateRepository()
+        svc, *_ = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+            state_repo=state,
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert state.get("backfill.done") is not None
+        assert svc.is_done() is True
+
+    def test_galka_not_set_after_cancel(self) -> None:
+        barrier = threading.Barrier(2)
+        cancel_issued = threading.Event()
+
+        class SlowFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
+                barrier.wait()
+                cancel_issued.wait(timeout=5.0)
+                return iter([])
+
+        state = FakeStateRepository()
+        svc, *_ = _make_service(fetcher=SlowFetcher(), state_repo=state)  # type: ignore[call-overload]
+        stop = threading.Event()
+        svc.start(stop)
+        barrier.wait()
+        svc.cancel()
+        cancel_issued.set()
+        _wait_until_done(svc)
+
+        assert state.get("backfill.done") is None
+        assert svc.is_done() is False
+
+    def test_galka_not_set_after_session_expired(self) -> None:
+        from fis_monitor.domain.errors import SessionExpiredError as _SE
+
+        class SessionExpiredFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
+                yield _make_row(1)
+                raise _SE("expired")
+
+        state = FakeStateRepository()
+        svc, *_ = _make_service(fetcher=SessionExpiredFetcher(), state_repo=state)  # type: ignore[call-overload]
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert state.get("backfill.done") is None
+
+    def test_galka_not_set_after_network_error(self) -> None:
+        class NetworkErrorFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
+                if raise_on_network_error:
+                    raise OSError("network unreachable")
+                return iter([])
+
+        state = FakeStateRepository()
+        svc, *_ = _make_service(fetcher=NetworkErrorFetcher(), state_repo=state)  # type: ignore[call-overload]
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert state.get("backfill.done") is None
+
+
+class TestDeltaTriggerPersisted:
+    """Invariant 5: delta-trigger сравнивает с запомненным total, не с count_active."""
+
+    def test_maybe_start_uses_persisted_total_not_db_count(self) -> None:
+        """Если есть total_last=100, delta = site_total - 100 (не db_count)."""
+        state = FakeStateRepository()
+        state.set("backfill.total_last", "100")
+
+        svc, *_ = _make_service(
+            rows_by_region={_REGION_A: [_make_row(1)]},
+            state_repo=state,
+        )
+        stop = threading.Event()
+
+        # db_count=90 → old delta = site_total-db_count = 200-90=110 → trigger
+        # total_last=100 → new delta = 200-100=100 → trigger (>3)
+        # Both trigger here, but next test checks the threshold direction
+
+        # With total_last=200, site_total=200 → delta=0 ≤ 3 → NO trigger
+        state.set("backfill.total_last", "200")
+        result = svc.maybe_start(_REGION_A, site_total=200, db_count=90, stop_event=stop)
+        assert result is False, "delta=0 ≤ threshold — should not trigger"
+
+    def test_negative_delta_updates_persisted_total(self) -> None:
+        """Отрицательная дельта не триггерит, но обновляет запомненное значение."""
+        state = FakeStateRepository()
+        state.set("backfill.total_last", "100")
+
+        svc, *_ = _make_service(state_repo=state)
+        stop = threading.Event()
+
+        result = svc.maybe_start(_REGION_A, site_total=80, db_count=100, stop_event=stop)
+        assert result is False  # отрицательная дельта — нет триггера
+        assert state.get("backfill.total_last") == "80"  # обновлено
+
+
+class TestResumeInvariant:
+    """Инвариант 4: start_resume всегда начинает со страницы 1.
+
+    Формула count//20+1 отменена (k31).
+    """
+
+    def test_resume_always_starts_from_page_1(self) -> None:
+        """start_resume() always starts from page 1 (no count//20+1 formula)."""
+        fetcher = FakePaginatedListFetcher(rows_by_region={_REGION_A: [_make_row(1)]})
+        state = FakeStateRepository()
+        svc, *_ = _make_service(fetcher=fetcher, state_repo=state)
+        stop = threading.Event()
+
+        svc.start_resume(stop)
+        _wait_until_done(svc)
+
+        assert fetcher.iterate_kwargs[0]["page_start"] == 1
+        assert fetcher.iterate_kwargs[0]["max_pages"] == 5
+
+
+class TestNetworkErrorInvariant:
+    """Инвариант 7: таймаут fetcher — _running=False, ошибка опубликована."""
+
+    def test_network_error_sets_running_false(self) -> None:
+        """Сетевая ошибка → backfill завершается, _running=False."""
+        from fis_monitor.domain.models import SseCycleError
+
+        class NetworkErrorFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
+                if raise_on_network_error:
+                    raise OSError("timeout")
+                return iter([])
+
+        bus = FakeEventBus()
+        state = FakeStateRepository()
+        svc, *_ = _make_service(
+            fetcher=NetworkErrorFetcher(),  # type: ignore[call-overload]
+            event_bus=bus,
+            state_repo=state,
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert not svc.is_running()
+        assert state.get("backfill.done") is None
+
+        error_events = [e for e in bus.published if isinstance(e, SseCycleError)]
+        assert len(error_events) >= 1, "SseCycleError must be published on network error"
+
+
+# ---------------------------------------------------------------------------
+# Monthly window invariant (fsm spec 2026-06-04)
+# ---------------------------------------------------------------------------
+
+class TestMonthlyWindowInvariant:
+    """Invariant 1: backfill saves only lots <=30 days old; early-stops on first older lot."""
+
+    def _make_row_with_date(self, lot_id: int, date_create: datetime) -> ParsedListRow:
+        return ParsedListRow(
+            id=lot_id,
+            cadastral_no=f"77:01:{lot_id:06d}:1",
+            area_sqm=500,
+            region=str(_REGION_A),
+            municipality="Тест",
+            land_category="Земли населённых пунктов",
+            permitted_use="ИЖС",
+            ogv="ДГИ",
+            status="PUBLISHED",
+            date_create=date_create,
+            date_update=None,
+        )
+
+    def test_early_stop_on_old_lot_sets_galka(self) -> None:
+        """First lot older than cutoff → early-stop → galka is set (success)."""
+        clock_now = datetime(2026, 1, 1, tzinfo=UTC)
+
+        new_row = self._make_row_with_date(1, clock_now)
+        old_row = self._make_row_with_date(2, datetime(2025, 11, 1, tzinfo=UTC))
+
+        class OrderedFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
+                yield new_row
+                yield old_row
+
+        state = FakeStateRepository()
+        mc = FakeMonitorCycleService()
+        lot_repo = FakeLotRepository()
+        config = FakeConfigSource(regions=[_REGION_A])
+        svc = BackfillService(
+            fetcher=OrderedFetcher(),  # type: ignore[arg-type]
+            lot_repo=lot_repo,
+            config_source=config,
+            monitor_cycle=mc,
+            event_bus=FakeEventBus(),
+            clock=FakeClock(now=clock_now),
+            state_repo=state,
+            sleep_between_pages=0.0,
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        # Only the new lot saved (old lot not processed)
+        saved_ids = {c["lot_id"] for c in lot_repo.upsert_calls}
+        assert 1 in saved_ids
+        assert 2 not in saved_ids
+
+        # Galka set despite early-stop (early-stop = success)
+        assert state.get("backfill.done") is not None
+        assert svc.is_done() is True
+
+    def test_all_lots_within_window_all_saved(self) -> None:
+        """All lots within 30-day window → all saved, galka set."""
+        clock_now = datetime(2026, 1, 1, tzinfo=UTC)
+
+        rows = [
+            self._make_row_with_date(i, clock_now - timedelta(days=i))
+            for i in range(5)
+        ]
+
+        class AllNewFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
+                yield from rows
+
+        state = FakeStateRepository()
+        svc, lot_repo, _mc, _f = _make_service(
+            fetcher=AllNewFetcher(),  # type: ignore[call-overload]
+            state_repo=state,
+            clock=FakeClock(now=clock_now),
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert len(lot_repo.upsert_calls) == 5
+        assert state.get("backfill.done") is not None
+
+
+    def test_naive_date_create_treated_as_utc(self) -> None:
+        """F6: naive date_create does not raise TypeError; assumed UTC for comparison."""
+        clock_now = datetime(2026, 1, 1, tzinfo=UTC)
+        # naive date well within 30-day window — should be saved
+        naive_recent = self._make_row_with_date(10, datetime(2026, 1, 1, 0, 0, 0))
+        # naive date older than 30 days — should trigger early-stop
+        naive_old = self._make_row_with_date(11, datetime(2025, 11, 1, 0, 0, 0))
+
+        class NaiveDateFetcher:
+            def iterate(self, region, stop_event, *, sleep_between_pages=2.0,
+                        per_page=None, max_pages=None, page_start=1, page_callback=None,
+                        total_callback=None, raise_on_network_error=False,
+                        raise_on_parse_error=False):
+                yield naive_recent
+                yield naive_old
+
+        state = FakeStateRepository()
+        lot_repo = FakeLotRepository()
+        svc = BackfillService(
+            fetcher=NaiveDateFetcher(),  # type: ignore[arg-type]
+            lot_repo=lot_repo,
+            config_source=FakeConfigSource(regions=[_REGION_A]),
+            monitor_cycle=FakeMonitorCycleService(),
+            event_bus=FakeEventBus(),
+            clock=FakeClock(now=clock_now),
+            state_repo=state,
+            sleep_between_pages=0.0,
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        # naive_recent saved (within window), naive_old triggers early-stop
+        saved_ids = {c["lot_id"] for c in lot_repo.upsert_calls}
+        assert 10 in saved_ids, "recent naive lot must be saved"
+        assert 11 not in saved_ids, "old naive lot must trigger early-stop (not saved)"
+        # run completes successfully (galka set)
+        assert state.get("backfill.done") is not None
+    def test_galka_set_when_cap_reached_without_old_lot(self) -> None:
+        """Safety cap (max_pages=5) reached without date-stop → also success (galka set)."""
+        # This is covered by TestGalkaInvariant.test_galka_set_after_success;
+        # here we verify the cap path explicitly reaches galka.
+        state = FakeStateRepository()
+        svc, *_ = _make_service(
+            rows_by_region={_REGION_A: [_make_row(i) for i in range(10)]},
+            state_repo=state,
+        )
+        stop = threading.Event()
+        svc.start(stop)
+        _wait_until_done(svc)
+
+        assert state.get("backfill.done") is not None

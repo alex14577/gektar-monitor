@@ -55,6 +55,7 @@ from fis_monitor.domain.interfaces import (
     HttpClient,
     ListParser,
     LotRepository,
+    StateRepository,
 )
 from fis_monitor.domain.models import (
     DEFAULT_TRACKED_FIELDS,
@@ -169,6 +170,7 @@ class MonitorCycleService:
         url_builder: TorgiUrlBuilder = _DEFAULT_URL_BUILDER,
         enrichment_workers: int = 4,
         backfill: BackfillHandle | None = None,
+        state_repo: StateRepository | None = None,
     ) -> None:
         self._http = http
         self._list_parser = list_parser
@@ -183,6 +185,7 @@ class MonitorCycleService:
         self._url_builder = url_builder
         self._enrichment_workers = enrichment_workers
         self._backfill: BackfillHandle | None = backfill
+        self._state_repo: StateRepository | None = state_repo
         # Trigger queue: request_run_now() places a sentinel here; _wait_for_next_pass()
         # consumes it to wake the scheduler early.  maxsize=1 ensures at most one
         # pending sentinel exists; a second put_nowait raises queue.Full which is
@@ -276,6 +279,7 @@ class MonitorCycleService:
         """
         logger.info("monitor_cycle: scheduler started")
         self._stop_event = stop_event
+        _awaiting_published = False
 
         while not stop_event.is_set():
             settings = self._config_source.current()
@@ -289,9 +293,31 @@ class MonitorCycleService:
                 else self._DEFAULT_POLL_INTERVAL_SEC
             )
 
-            # Single fetch per cycle: donor region= is a no-op,
-            # one pocket set for all regions (ADR-064).
-            if regions:
+            # k31 gate: skip ALL cycles until backfill galka is persisted.
+            # Read once; reuse for both gate and backfill_done check.
+            backfill_done = (
+                self._state_repo is None
+                or self._state_repo.get("backfill.done") is not None
+            )
+            if not backfill_done:
+                if not _awaiting_published:
+                    now = self._clock.now()
+                    settings_snap = self._config_source.current()
+                    self._event_bus.publish(
+                        SseStatus(
+                            timestamp=now,
+                            state="awaiting_backfill",
+                            interval_minutes=int(settings_snap.interval_minutes),
+                            last_new_human="—",
+                            expires_at_hhmm="",
+                        )
+                    )
+                    _awaiting_published = True
+                    logger.info("monitor_cycle: awaiting backfill galka — cycles suspended")
+            else:
+                _awaiting_published = False  # reset so next awaiting publishes again
+
+            if regions and backfill_done:
                 fetch_region = regions[0]
                 if stop_event.is_set():
                     logger.info(
