@@ -187,6 +187,27 @@ OOB `#registry-count`; `build_feed_context` exposes flat `active_lot_count`. `PO
 returns `active_lot_count`; `GET /feed/count` returns M + OOB X. `feed.js`/`app.js` state machine,
 toast, N-from-DOM = **smoke-only** (Playwright excluded by strategy).
 
+## Amendment (2026-06-04, bd gektar-monitor-azc) — page-guard on §z15 re-sync handler
+
+**Problem.** The §z15 `htmx:sseOpen` handler lives in `app.js` and `#sse-root` lives in
+`base.html.jinja`, so the handler fired on **every** page — including `/settings`, where
+`#feed-lot-count` does not exist. htmx 1.9.12 falls back to `document.body` when the
+`target` selector resolves to null, so the `GET /feed/count` response
+(`_feed_count_resync.html.jinja`) replaced the entire page content: user saw only
+«36 лотов» instead of the settings page (reported during a running backfill, but the
+mechanism is page-load/SSE-connect-bound, not backfill-bound; backfill only raises
+reconnect frequency).
+
+**Resolution.** Guard added in `app.js`: `htmx.ajax('GET', '/feed/count', …)` is issued
+only if `document.getElementById('feed-lot-count')` is present. On non-feed pages the
+re-sync is a silent no-op; feed-page behaviour (initial connect + reconnect after
+`filter-changed` / `#feed-wrapper` outerHTML swap) is unchanged — the span is
+server-rendered before any EventSource opens, so the guard cannot falsely skip.
+
+**Invariant for future client-side `htmx.ajax` calls:** any programmatic call whose
+target element exists only on some pages MUST verify the target's presence first —
+htmx's null-target fallback swaps into `document.body` and destroys the page.
+
 ## See also
 
 - [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] — per-connection view-filter

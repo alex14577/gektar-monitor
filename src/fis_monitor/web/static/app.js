@@ -193,7 +193,7 @@
   // while SSE was disconnected. _reconnectTimer already coalesces filter-changed
   // reconnects; sseOpen fires at most once per actual connection, so no extra debounce.
   document.body.addEventListener('htmx:sseOpen', function() {
-    if (window.htmx) {
+    if (window.htmx && document.getElementById('feed-lot-count')) {
       htmx.ajax('GET', '/feed/count', { target: '#feed-lot-count', swap: 'outerHTML' });
     }
   });
