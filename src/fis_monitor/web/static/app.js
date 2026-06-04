@@ -505,15 +505,16 @@
   // ---------- escalation timer ----------
   // first pop quiet → 60s later louder → 2min later title pulses
   let escState = null;
+  const PULSE_TITLE = 'Доступен новый лот';
   function escalationStart() {
     if (escState) return;
     const baseTitle = document.title;
     escState = {
       t1: setTimeout(() => { playNotificationSound(1); }, 60_000),
       t2: setTimeout(() => {
-        // pulse title every 1s with a red dot favicon
+        // pulse title every 1s with the new-lot message
         escState.pulse = setInterval(() => {
-          document.title = document.title.startsWith('⚠ ') ? baseTitle : '⚠ ' + baseTitle;
+          document.title = document.title === PULSE_TITLE ? baseTitle : PULSE_TITLE;
         }, 1000);
       }, 180_000),
       baseTitle,
