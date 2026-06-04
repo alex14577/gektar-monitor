@@ -14,7 +14,7 @@ Coverage:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 
 from fis_monitor.domain.interfaces import ConfigSubscription
 from fis_monitor.domain.models import LotUserState, SessionStatus, Settings
+from fis_monitor.licensing import LicenseResult, LicenseStatus
 from fis_monitor.services.login import LoginStatus
 from fis_monitor.services.view_filters import ViewFilters, serialize
 from fis_monitor.web.deps import (
@@ -32,6 +33,7 @@ from fis_monitor.web.deps import (
     get_clock,
     get_config_source,
     get_dnd_service,
+    get_license_result,
     get_login,
     get_lot_query,
     get_lot_repo,
@@ -188,6 +190,7 @@ def _make_app(
     lot_repo: FakeLotRepo | None = None,
     lot_query: FakeLotQuery | None = None,
     clock: FakeClock | None = None,
+    license_result: object | None = None,
 ) -> tuple[FastAPI, FakeConfigSource, FakeSessionProbe]:
     """Build a minimal FastAPI app with main router + injected fakes."""
     fake_cfg = FakeConfigSource(settings=settings)
@@ -225,6 +228,8 @@ def _make_app(
     app.dependency_overrides[get_lot_query] = lambda: fake_lot_query
     app.dependency_overrides[get_clock] = lambda: fake_clock
     app.dependency_overrides[get_backfill] = lambda: _StubBackfill()
+    _lic = license_result
+    app.dependency_overrides[get_license_result] = lambda: _lic
     return app, fake_cfg, fake_probe
 
 
@@ -560,3 +565,110 @@ def test_get_root_with_spoofed_host_does_not_reflect_in_static_urls() -> None:
     assert "evil.com" not in resp.text
     # Verify root-relative static refs are present (regression guard)
     assert 'href="/static/' in resp.text or 'src="/static/' in resp.text
+
+
+# ---------------------------------------------------------------------------
+# License sidebar tests (bd 49i + 9t9)
+# ---------------------------------------------------------------------------
+
+
+def _make_valid_license(expires_on: date) -> LicenseResult:
+    return LicenseResult(
+        status=LicenseStatus.VALID, expires_at=expires_on, licensee="test"
+    )
+
+
+def _make_expired_license(expires_on: date) -> LicenseResult:
+    return LicenseResult(
+        status=LicenseStatus.EXPIRED, expires_at=expires_on, licensee="test"
+    )
+
+
+def _make_invalid_license() -> LicenseResult:
+    return LicenseResult(status=LicenseStatus.INVALID, expires_at=None, licensee=None)
+
+
+def test_license_valid_shows_expiry_date_and_days_left() -> None:
+    """VALID license: sidebar shows expiry date and days remaining (inclusive)."""
+    expires_on = date(2026, 6, 15)
+    # Inclusive: expires_on - today = 5 days remaining
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    fake_clock = FakeClock(now=now)
+    lic = _make_valid_license(expires_on)
+    app, _, _ = _make_app(clock=fake_clock, license_result=lic)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    # Date rendered via dateformat filter: "15 июня 2026"
+    assert "15" in resp.text and "июня" in resp.text and "2026" in resp.text
+    # Days remaining: 5 (inclusive boundary: expires_on is today+5 days)
+    assert "осталось 5 дн." in resp.text
+
+
+def test_license_expires_today_shows_zero_days() -> None:
+    """VALID license expiring today: days_left = 0 (expires today = still valid)."""
+    today = date(2026, 6, 10)
+    now = datetime(2026, 6, 10, 9, 0, tzinfo=UTC)
+    lic = _make_valid_license(today)
+    app, _, _ = _make_app(clock=FakeClock(now=now), license_result=lic)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    assert "осталось 0 дн." in resp.text
+
+
+def test_license_expired_shows_error_text() -> None:
+    """EXPIRED license: sidebar shows expired message with date, no days remaining."""
+    expires_on = date(2026, 5, 1)
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    lic = _make_expired_license(expires_on)
+    app, _, _ = _make_app(clock=FakeClock(now=now), license_result=lic)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    assert "истекла" in resp.text
+    # Date still shown
+    assert "1" in resp.text and "мая" in resp.text and "2026" in resp.text
+    # days remaining text NOT shown when expired
+    assert "осталось" not in resp.text
+
+
+def test_license_invalid_hides_license_block_shows_version() -> None:
+    """INVALID license (or no key): license block hidden, version still shown."""
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    lic = _make_invalid_license()
+    app, _, _ = _make_app(clock=FakeClock(now=now), license_result=lic)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    # License block hidden
+    assert "Лицензия до" not in resp.text
+    assert "Лицензия истекла" not in resp.text
+    # Version always shown
+    import importlib.metadata
+    expected_version = importlib.metadata.version("fis-monitor")
+    assert f"Версия {expected_version}" in resp.text
+
+
+def test_license_none_result_hides_license_block_shows_version() -> None:
+    """None license_result (no app.state set): license block hidden, version shown."""
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    app, _, _ = _make_app(clock=FakeClock(now=now), license_result=None)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Лицензия до" not in resp.text
+    import importlib.metadata
+    expected_version = importlib.metadata.version("fis-monitor")
+    assert f"Версия {expected_version}" in resp.text
+
+
+def test_version_in_sidebar_matches_canonical_source() -> None:
+    """Version in sidebar matches importlib.metadata.version('fis-monitor')."""
+    import importlib.metadata
+    expected_version = importlib.metadata.version("fis-monitor")
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    app, _, _ = _make_app(clock=FakeClock(now=now), license_result=None)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/")
+    assert f"Версия {expected_version}" in resp.text

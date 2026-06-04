@@ -27,3 +27,24 @@
   </div>
   {% endif %}
 </form>
+
+{% if license and license.expires_at %}
+<div class="sidebar__group">
+  {% if license.expired %}
+  <p style="color: var(--err); font-size: .85rem;">
+    Лицензия истекла &middot; {{ license.expires_at | dateformat }}
+  </p>
+  {% else %}
+  <p style="color: var(--muted); font-size: .85rem;">
+    Лицензия до {{ license.expires_at | dateformat }}
+  </p>
+  <p style="color: var(--muted); font-size: .85rem;">
+    осталось {{ license.days_left }} дн.
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="sidebar__group">
+  <p style="color: var(--muted); font-size: .85rem;">Версия {{ app_version }}</p>
+</div>

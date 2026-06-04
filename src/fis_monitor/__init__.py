@@ -1,3 +1,8 @@
 """fis-monitor — мониторинг свободных гектаров."""
 
-__version__ = "0.1.0"
+import importlib.metadata
+
+try:
+    __version__ = importlib.metadata.version("fis-monitor")
+except importlib.metadata.PackageNotFoundError:  # пакет не установлен (dev-окружение)
+    __version__ = "dev"

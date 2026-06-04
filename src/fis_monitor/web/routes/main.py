@@ -25,6 +25,7 @@ MVP-stub, переезжающие в follow-up bd:
 
 from __future__ import annotations
 
+import importlib.metadata
 from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -50,6 +51,7 @@ from fis_monitor.web.deps import (
     get_clock,
     get_config_source,
     get_dnd_service,
+    get_license_result,
     get_login,
     get_lot_query,
     get_lot_repo,
@@ -66,6 +68,11 @@ from fis_monitor.web.feed_context import (
 )
 from fis_monitor.web.monitor_vm import build_monitor_vm
 from fis_monitor.web.sse_encoder import LotUserViewModel
+
+try:
+    _APP_VERSION: str = importlib.metadata.version("fis-monitor")
+except importlib.metadata.PackageNotFoundError:  # пакет не установлен (dev-окружение)
+    _APP_VERSION = "dev"
 
 router = APIRouter(prefix="", tags=["main"])
 
@@ -159,6 +166,23 @@ def _build_catchup_context(
     )
 
 
+def _build_license_context(license_result: object, now: datetime) -> SimpleNamespace | None:
+    """Build template-friendly namespace from LicenseResult.
+
+    Returns None when expires_at is None (INVALID / missing key) so
+    the template can hide the license block entirely.
+    """
+    from fis_monitor.licensing import LicenseStatus
+
+    expires_at = getattr(license_result, "expires_at", None)
+    if expires_at is None:
+        return None
+    status = getattr(license_result, "status", None)
+    expired = status == LicenseStatus.EXPIRED
+    days_left = max(0, (expires_at - now.date()).days)
+    return SimpleNamespace(expires_at=expires_at, expired=expired, days_left=days_left)
+
+
 # ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
@@ -179,6 +203,7 @@ def feed_page(
     clock: Clock = Depends(get_clock),
     templates: Jinja2Templates = Depends(get_templates),
     backfill_svc: BackfillService = Depends(get_backfill),
+    license_result: object = Depends(get_license_result),
 ) -> HTMLResponse:
     """Render the main feed page (state=COMPLETED guaranteed by middleware).
 
@@ -257,6 +282,8 @@ def feed_page(
         "dnd": _build_dnd_context(dnd_svc, now),
         # MVP-stub: browser tab title — separate bd (lot counter from SSE)
         "title_format": "(0) Монитор гектара",
+        "license": _build_license_context(license_result, now),
+        "app_version": _APP_VERSION,
     }
 
     return templates.TemplateResponse(request, "feed.html.jinja", ctx)

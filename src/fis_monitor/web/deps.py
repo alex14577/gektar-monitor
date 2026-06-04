@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         UserStateRepository,
     )
     from fis_monitor.infra.sse.sse_stream import SseStreamer
+    from fis_monitor.licensing import LicenseResult
     from fis_monitor.services.backfill import BackfillService
     from fis_monitor.services.catchup_dismiss import CatchupDismissService
     from fis_monitor.services.diagnostics import DiagnosticsService
@@ -268,3 +269,11 @@ def get_csrf_origin_whitelist(request: Request) -> frozenset[str]:
     ``loopback_csrf_config`` → no case-folding needed here.
     """
     return request.app.state.csrf_origin_whitelist
+
+
+def get_license_result(request: Request) -> LicenseResult:
+    """Return the LicenseResult stored at startup in app.state.license_result.
+
+    Route tests override this via app.dependency_overrides[get_license_result].
+    """
+    return request.app.state.license_result

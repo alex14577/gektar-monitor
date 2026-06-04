@@ -70,21 +70,27 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import sys
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from fis_monitor._license_loader import load_license_key
+from fis_monitor._license_loader import resolve_base_dir as _resolve_base_dir
 from fis_monitor.container import Container
 from fis_monitor.domain.models import Settings
 from fis_monitor.infra.clock import SystemClock
 from fis_monitor.infra.lock import FileLocker
 from fis_monitor.infra.thread_supervisor import ThreadSupervisor
 from fis_monitor.infra.uvicorn_shutdown import UvicornShutdownRequester
+from fis_monitor.licensing import LicenseResult, LicenseStatus, verify_license
+from fis_monitor.licensing._secret import _assemble_secret
 from fis_monitor.utils.log import setup_logging
 from fis_monitor.utils.log_filters import StackPIIFilter
 from fis_monitor.utils.log_level import default_log_level
@@ -155,6 +161,27 @@ class _LazyOnboardingProxy:
 # ---------------------------------------------------------------------------
 
 
+def _startup_verify_license(app: FastAPI, base_dir: Path) -> None:
+    """Set app.state.license_result on every startup path.
+
+    Fail-open for display: any exception stores INVALID so the UI can render
+    without crashing. The enforcement fail-fast already happened in main()
+    before the ASGI server started.
+    """
+    app.state.license_result = LicenseResult(
+        status=LicenseStatus.INVALID, expires_at=None, licensee=None
+    )
+    try:
+        key = load_license_key(base_dir)
+        app.state.license_result = verify_license(
+            key,
+            secret=_assemble_secret(),
+            now=datetime.now(UTC),
+        )
+    except Exception:
+        logger.warning("lifespan: license verification failed — running as INVALID", exc_info=True)
+
+
 @asynccontextmanager
 async def _lifespan_impl(
     app: FastAPI,
@@ -207,6 +234,15 @@ async def _lifespan_impl(
 
         container = container_factory(settings, data_dir)
         app.state.container = container
+
+        # Verify license once at startup so every request can read
+        # app.state.license_result without touching disk or HMAC on each hit.
+        _lic_base_dir = _resolve_base_dir(
+            frozen=getattr(sys, "frozen", False),
+            executable=Path(sys.executable),
+            module_file=Path(__file__),
+        )
+        _startup_verify_license(app, _lic_base_dir)
 
         # Pre-flight: verify Playwright Chromium binary is present.
         # On failure, mark login service unavailable without crashing — other

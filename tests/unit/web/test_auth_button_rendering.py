@@ -137,13 +137,14 @@ def _make_app(
     app.dependency_overrides[get_lot_repo] = lambda: _StubLotRepo()
     app.dependency_overrides[get_lot_query] = lambda: _StubLotQuery()
     app.dependency_overrides[get_clock] = lambda: _StubClock()
-    from fis_monitor.web.deps import get_backfill
+    from fis_monitor.web.deps import get_backfill, get_license_result
 
     class _StubBackfill:
         def is_done(self) -> bool:
             return True
 
     app.dependency_overrides[get_backfill] = lambda: _StubBackfill()
+    app.dependency_overrides[get_license_result] = lambda: None
     return app
 
 
