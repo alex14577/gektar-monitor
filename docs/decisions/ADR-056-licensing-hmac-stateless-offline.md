@@ -105,3 +105,21 @@ Both startup sites use a single frozen-aware `resolve_base_dir()` from `fis_moni
 - [[licensing/crypto-hmac|HMAC-SHA256 детали]]
 - [[licensing/secret-obfuscation|XOR-обфускация]]
 - [[superpowers/specs/2026-05-28-licensing-system-design|Spec v1]]
+
+---
+
+## Amendment (2026-06-04): display-path лицензии в UI
+
+Дата окончания, «осталось N дн.» и версия программы отображаются в сайдбаре
+feed-страницы (bd gektar-monitor-49i/9t9):
+
+- `_startup_verify_license` (app.py) выполняет verify_license **один раз** в
+  lifespan после `app.state.container` и кладёт результат в
+  `app.state.license_result`. Fail-open для отображения: любое исключение →
+  `LicenseResult(INVALID)` (enforcement fail-fast остаётся в `main()` ДО
+  старта ASGI). Роуты читают через `get_license_result` (web/deps.py).
+- Семантика дней — включительная: `days_left = max(0, exp − today)`;
+  в последний день действия показывается «осталось 0 дн.».
+- Состояния: VALID → дата+дни (muted); EXPIRED → «Лицензия истекла · дата»
+  (var(--err), декоративно — shutdown делает supervisor); INVALID/нет ключа →
+  блок скрыт. Версия — из `importlib.metadata` (fallback `"dev"`).
