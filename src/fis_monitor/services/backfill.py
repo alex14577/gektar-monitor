@@ -491,7 +491,7 @@ class BackfillService:
                     SseCycleError(
                         timestamp=self._clock.now(),
                         cycle_id=0,
-                        error_category="parse",
+                        error_category="parse_bug",
                     )
                 )
                 errored = True
