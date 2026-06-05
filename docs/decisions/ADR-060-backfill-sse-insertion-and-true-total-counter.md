@@ -208,6 +208,23 @@ server-rendered before any EventSource opens, so the guard cannot falsely skip.
 target element exists only on some pages MUST verify the target's presence first —
 htmx's null-target fallback swaps into `document.body` and destroys the page.
 
+## Amendment (2026-06-05, bd gektar-monitor-gdo) — третий триггер `_poll()`: lot.new → debounced resync X
+
+**Прод-баг.** Счётчик X («Всего в реестре», `#registry-count`) замораживался, когда лоты приходили
+по SSE `lot.new` при живом соединении: `incrementLotCounters()` инкрементирует только `.js-lot-count`
+(M), а поллинг `GET /backfill/status` (§6jg) стартует лишь если на initial fetch `coldStart=true`
+или `status='running'`. Если страница открыта ДО старта backfill (idle, реестр непустой), переход
+idle→running никогда не ловится — комментарий §6jg «catches idle→running→done» верен только для
+cold-start. Путь «лоты пришли по SSE при живом соединении» обновления X не имел вовсе.
+
+**Resolution.** В `feed.js` добавлен третий триггер `_poll()` (к initial fetch и интервал-таймеру):
+слушатель `htmx:sseMessage` на `document.body` (тот же `e.detail.type === 'lot.new'`-контракт, что в
+`app.js`), debounced trailing 400 мс → `_poll()`. Burst backfill-карточек коллапсирует в один запрос;
+`_update()` при `status='running'` перезапускает интервал-таймер — лечит мёртвый idle→running.
+X всегда берётся абсолютом из БД (`active_lot_count`), поэтому гонки с OOB-resync (§z15) и
+интервал-поллингом безопасны: `_updateRegistry` не кеширует узел (`getElementById` на каждый вызов).
+`incrementLotCounters()`, `app.js`, backend — без изменений. Слой smoke-only (§6jg test scope).
+
 ## Amendment (2026-06-05, bd gektar-monitor-gyn): SSE insertion target = section#feed-zone-list, сортировочное позиционирование
 
 ### Прод-баг

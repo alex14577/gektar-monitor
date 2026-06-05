@@ -74,4 +74,13 @@
       _update(data);
     })
     .catch(function () { /* ignore */ });
+
+  // lot.new → debounced _poll() (trailing, 400 ms).
+  // Keeps #registry-count live and heals idle→running transition missed on cold load.
+  var _lotNewTimer = null;
+  document.body.addEventListener('htmx:sseMessage', function (e) {
+    if (!e.detail || e.detail.type !== 'lot.new') return;
+    clearTimeout(_lotNewTimer);
+    _lotNewTimer = setTimeout(_poll, 400);
+  });
 }());
