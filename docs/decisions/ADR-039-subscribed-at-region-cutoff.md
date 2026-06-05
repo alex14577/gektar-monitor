@@ -1,6 +1,6 @@
 # ADR-039 — subscribed_at region cutoff: per-region filter для подавления старых лотов
 
-**Status**: Accepted (amended 2026-05-18, gn89: day-precision compare + pre-reserve hook; amended 2026-05-27: shared predicate SSOT + SQL-level feed cutoff)
+**Status**: Accepted (amended 2026-05-18, gn89: day-precision compare + pre-reserve hook; amended 2026-05-27: shared predicate SSOT + SQL-level feed cutoff; amended 2026-06-05, nhj: suppress для регионов вне подписки)
 **Date**: 2026-05-15
 **Deciders**: Backend Architect
 **Tags**: notifications, suppression, region_subscriptions, filter, backfill, delta-trigger
@@ -113,13 +113,16 @@ subscription-window. Ограничение будет пересмотрено 
 `SubscribedAtFilteredNotifier` — decorator-класс в `notifier_dispatcher.py`, оборачивает `SmtpEmailNotifier`.
 Применяет subscribed_at check **только для email-канала** через `passes_subscription_cutoff`.
 
-**Сравнение — day-precision** (amendment 2026-05-18, gn89):
+**Сравнение — day-precision** (amendment 2026-05-18, gn89; правила suppress расширены
+amendment 2026-06-05, nhj — см. §Amendment ниже):
 
 ```python
 if lot.region_id is not None:
     subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
-    if subscribed_at is not None and lot.date_create.date() < subscribed_at.date():
-        # suppress
+    if subscribed_at is None:
+        return True  # region known but no subscription record → SUPPRESS (nhj)
+    if lot.date_create.date() < subscribed_at.date():
+        return True  # suppress historical lots (gn89 day-precision)
 ```
 
 Обоснование calendar-date compare: `lot.date_create` парсится из upstream-формата `DD.MM.YYYY` и
@@ -211,6 +214,39 @@ Recovery-promotion suppressed `pending` → `permanent_fail` (см. §«Точк
 - **`tests/unit/domain/test_subscription_cutoff.py`**: Layer-1 тест предиката (5 случаев).
 - **`tests/integration/services/test_lot_query_cutoff.py`**: Layer-3 equivalence-тест SQL vs Python
   на реальном SQLite (all 5 scenarios + gn89 regression guard).
+
+---
+
+## Amendment (2026-06-05, bd gektar-monitor-nhj) — suppress для регионов вне подписки
+
+**Прод-инцидент.** Пользователь с подпиской «Арктика» получал email по лотам регионов ДФО
+(Хабаровск, Забайкалье и др.), на которые подписка отсутствовала. Причина: в `should_suppress`
+ветка `subscribed_at is None` означала **fail-open** — лот пропускался в email без проверки.
+Источник ошибки: `passes_subscription_cutoff(date_create, subscribed_at=None)` возвращает
+`True` (pass-through) — это зеркалирует SQL LEFT JOIN в `LotQueryService` (ADR-065), где
+`rs.subscribed_at IS NULL` означает «регион не в подписке → не показывать в ленте».
+Для email-канала семантика должна быть противоположной: нет подписки → не отправлять.
+
+**Новое правило email-канала (`SubscribedAtFilteredNotifier.should_suppress`):**
+
+| `lot.region_id` | `get_subscribed_at(region_id)` | Действие |
+|---|---|---|
+| `None` | — | Fail-open: пропустить (ADR-035 I2, region_id неизвестен) |
+| известен | `None` (нет записи подписки) | **SUPPRESS** — регион вне подписки |
+| известен | datetime | Применить day-precision cutoff (gn89) |
+
+**Что НЕ изменилось:**
+
+- `passes_subscription_cutoff(date_create, subscribed_at)` в `domain/subscription_cutoff.py`
+  **не изменён** — остаётся fail-open при `subscribed_at=None`. Функция зеркалит SQL LEFT JOIN
+  feed-пути и менять её семантику нельзя без риска сломать `LotQueryService._build_query`.
+- Строгость (`subscribed_at is None → suppress`) живёт **только** в
+  `SubscribedAtFilteredNotifier.should_suppress` — единственная точка фильтра email-канала.
+- Browser-канал по-прежнему без фильтра по подписке (ADR-035 I5, membership — через
+  [[decisions/ADR-066-sse-membership-filter|ADR-066]]).
+
+**At-least-once SLO (ADR-019):** suppression «нет подписки» — намеренная, документируется
+наравне с gn89. SLO применяется только к лотам, прошедшим suppression-check.
 
 ---
 
