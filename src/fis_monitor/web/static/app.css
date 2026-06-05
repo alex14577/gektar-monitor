@@ -192,6 +192,10 @@ code, kbd, .mono { font-family: var(--font-mono); }
 .status[data-state="error"] .status__dot { background: var(--hot); animation: pulseDot 1.2s ease-in-out infinite; }
 .status[data-state="paused"]  { color: var(--muted); }
 .status[data-state="paused"] .status__dot { background: var(--muted); }
+.status[data-state="awaiting_backfill"] { color: var(--cool); border-color: color-mix(in oklab, var(--cool) 35%, var(--line)); background: var(--cool-soft); }
+.status[data-state="awaiting_backfill"] .status__dot { background: var(--cool); animation: pulseDot 1.8s ease-in-out infinite; }
+.status[data-state="checking"] { color: var(--cool); border-color: color-mix(in oklab, var(--cool) 35%, var(--line)); background: var(--cool-soft); }
+.status[data-state="checking"] .status__dot { background: var(--cool); animation: pulseDot 1.8s ease-in-out infinite; }
 
 @keyframes pulseDot {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 40%, transparent); }
