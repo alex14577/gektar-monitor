@@ -204,6 +204,11 @@ class MonitorCycleService:
         # otherwise the decision string returned by BackfillHandle.maybe_start.
         # Written only by _run_cycle_inner; read by last_delta_decision().
         self._last_delta_decision: dict[int, str] = {}
+        # Guard flag: True once _publish_status has published a terminal SseStatus
+        # (active/error) for the current cycle.  Reset at the top of run_cycle;
+        # checked in the domain-exception except-branch to detect an escape without
+        # terminal event.  Safe: cycles are single-flight (run_forever serialises).
+        self._terminal_status_published: bool = False
 
     # Default poll interval used when ``interval_minutes`` is 0 (continuous mode).
     _DEFAULT_POLL_INTERVAL_SEC: float = 60.0
@@ -447,6 +452,7 @@ class MonitorCycleService:
         except Exception:
             logger.warning("monitor_cycle.cycle_started.publish_failed", exc_info=True)
 
+        self._terminal_status_published = False
         try:
             return self._run_cycle_inner(
                 region=region,
@@ -457,6 +463,26 @@ class MonitorCycleService:
             # Already handled inside _run_cycle_inner; these should not escape.
             # If they do (e.g. from an uncovered code path), re-raise so the
             # supervisor's run_forever can backoff.
+            if not self._terminal_status_published:
+                logger.warning(
+                    "monitor_cycle.status.terminal_guard.fallback",
+                    extra={"cycle_id": cycle_id},
+                )
+                try:
+                    self._event_bus.publish(
+                        SseStatus(
+                            timestamp=self._clock.now(),
+                            state="error",
+                            interval_minutes=0,
+                            last_new_human="—",
+                            expires_at_hhmm="",
+                        )
+                    )
+                except Exception:
+                    logger.warning(
+                        "monitor_cycle.status.terminal_guard.publish_failed",
+                        exc_info=True,
+                    )
             raise
         except Exception as exc:
             self._close_with_unexpected_error(
@@ -475,6 +501,12 @@ class MonitorCycleService:
         started_at: datetime,
     ) -> CycleResult:
         """Inner cycle logic — called from ``run_cycle`` which wraps for unexpected errors."""
+
+
+        # ---------- Step 1b: publish checking status -----------------------
+        # Best-effort: publish SseStatus(state="checking") so the header-status
+        # widget shows "Опрашиваю сайт…" for the duration of the HTTP + parse.
+        self._publish_checking_status(cycle_id=cycle_id)
 
         # ---------- Step 2: fetch list page --------------------------------
         # ADR-036: head-poll — page=1 with per_page=20 (newest lots first).
@@ -779,6 +811,54 @@ class MonitorCycleService:
             },
         )
 
+    def _build_status_fields(self) -> tuple[int, str]:
+        """Return (interval_minutes, last_new_human) for SseStatus events.
+
+        Raises on config/repo access failure — callers must wrap in try/except.
+        """
+        now = self._clock.now()
+        settings = self._config_source.current()
+        tz = ZoneInfo(settings.timezone)
+        now_local = now.astimezone(tz)
+        last_new = self._lot_repo.latest_new_first_seen()
+        last_new_human = (
+            "—" if last_new is None
+            else _format_local_time(last_new, tz, now_local)
+        )
+        interval = int(settings.interval_minutes)
+        return interval, last_new_human
+
+    def _publish_checking_status(self, *, cycle_id: int) -> None:
+        """Publish ``SseStatus(state="checking")`` at cycle start (bd zb3).
+
+        Best-effort — errors are logged and swallowed so a config/repo failure
+        does not prevent the cycle from running.
+
+        The checking event is evicted from the normal-replay slot immediately
+        after publication so SSE reconnects do not replay a transient "Опрашиваю
+        сайт…" state (bd zb3 MAJOR).  evict_normal_replay is an extension method
+        on ThreadEventBus (not in the EventBus Protocol); guarded by hasattr.
+        """
+        try:
+            interval, last_new_human = self._build_status_fields()
+            self._event_bus.publish(
+                SseStatus(
+                    timestamp=self._clock.now(),
+                    state="checking",
+                    interval_minutes=interval,
+                    last_new_human=last_new_human,
+                    expires_at_hhmm="",
+                )
+            )
+            if hasattr(self._event_bus, "evict_normal_replay"):
+                self._event_bus.evict_normal_replay("status")  # type: ignore[union-attr]
+        except Exception:
+            logger.warning(
+                "monitor_cycle.status.checking.publish_failed",
+                exc_info=True,
+                extra={"cycle_id": cycle_id},
+            )
+
     def _publish_status(self, result: CycleResult) -> None:
         """Publish ``SseStatus`` for the header-status widget (bd 47uh).
 
@@ -795,26 +875,18 @@ class MonitorCycleService:
         widget refresh is best-effort and must not break the consumer loop.
         """
         try:
-            now = self._clock.now()
-            settings = self._config_source.current()
-            tz = ZoneInfo(settings.timezone)
-            now_local = now.astimezone(tz)
-            last_new = self._lot_repo.latest_new_first_seen()
-            last_new_human = (
-                "—" if last_new is None
-                else _format_local_time(last_new, tz, now_local)
-            )
-            interval = int(settings.interval_minutes)
+            interval, last_new_human = self._build_status_fields()
             state: Literal["active", "error"] = "error" if result.status == "error" else "active"
             self._event_bus.publish(
                 SseStatus(
-                    timestamp=now,
+                    timestamp=self._clock.now(),
                     state=state,
                     interval_minutes=interval,
                     last_new_human=last_new_human,
                     expires_at_hhmm="",
                 )
             )
+            self._terminal_status_published = True
         except Exception:
             logger.warning(
                 "monitor_cycle.status.publish_failed",

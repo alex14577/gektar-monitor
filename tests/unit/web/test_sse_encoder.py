@@ -238,7 +238,7 @@ class TestSseStatusAwaitingBackfill:
         assert "awaiting_backfill" in payload, (
             "data-state='awaiting_backfill' must appear in rendered HTML"
         )
-        assert "ожидание первоначальной загрузки" in payload, (
+        assert "Заполняется реестр" in payload, (
             "Russian label must appear in rendered header-status for awaiting_backfill"
         )
 

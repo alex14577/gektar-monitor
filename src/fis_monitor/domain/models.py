@@ -1027,7 +1027,7 @@ class SseStatus(BaseModel):
 
     event: Literal["status"] = "status"
     timestamp: datetime
-    state: Literal["active", "warning", "error", "paused", "awaiting_backfill"]
+    state: Literal["active", "warning", "error", "paused", "awaiting_backfill", "checking"]
     interval_minutes: StrictInt
     last_new_human: str = "—"
     expires_at_hhmm: str = ""

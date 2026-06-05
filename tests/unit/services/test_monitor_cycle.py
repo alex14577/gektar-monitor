@@ -396,21 +396,24 @@ class TestRunCycleHappyPath:
         assert result.new_lots == 3
         assert result.lots_fetched == 3
 
-        # bd 47uh: SseStatus must be published after SseCycleDone so the
-        # header-status widget refreshes alongside the terminal cycle signal.
+        # bd 47uh / bd zb3: terminal SseStatus(active) must follow SseCycleDone.
+        # The checking status is published at cycle start; we look for the
+        # first terminal (non-checking) SseStatus after cycle.done.
         from fis_monitor.domain.models import SseStatus
 
         events = list(bus.published)
         cycle_done_indices = [
             i for i, e in enumerate(events) if isinstance(e, SseCycleDone)
         ]
-        status_indices = [i for i, e in enumerate(events) if isinstance(e, SseStatus)]
+        terminal_status_indices = [
+            i for i, e in enumerate(events)
+            if isinstance(e, SseStatus) and e.state != "checking"
+        ]
         assert cycle_done_indices, "SseCycleDone must be published"
-        assert status_indices, "SseStatus must be published"
-        assert status_indices[0] > cycle_done_indices[0], (
-            "SseStatus must follow SseCycleDone in publish order"
+        assert terminal_status_indices, "terminal SseStatus must be published"
+        assert terminal_status_indices[0] > cycle_done_indices[0], (
+            "terminal SseStatus must follow SseCycleDone in publish order"
         )
-
 
 class TestRunCycleExistingLot:
     """test_run_cycle_existing_lot_no_dispatch — was_new=False → no dispatch."""

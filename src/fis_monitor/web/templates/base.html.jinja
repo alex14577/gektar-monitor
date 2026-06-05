@@ -59,7 +59,12 @@
 
     {# Center zone: SSE-driven status widget #}
     {# SSE-driven status: server pushes <span hx-swap-oob> updates.
-       sse-connect lives on #sse-root above (bjw4). #}
+       sse-connect lives on #sse-root above (bjw4).
+       SYNC NOTE: the attributes below (id, hx-swap-oob, class, sse-swap, role,
+       aria-label) MUST match _feed_count_resync.html.jinja#header-status exactly.
+       sse-swap="status" is load-bearing — htmx uses it to re-subscribe the SSE
+       event listener after the OOB swap. See also:
+       _feed_count_resync.html.jinja — keep in sync. #}
     <div id="header-status" class="header__center"
          sse-swap="status"
          role="region" aria-label="Статус мониторинга">

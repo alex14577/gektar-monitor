@@ -1,4 +1,25 @@
 {# Feed count resync partial — rendered by GET /feed/count on SSE (re)connect.
-   Outputs the M span (#feed-lot-count) plus an OOB swap for #registry-count (X).
-   Requires lot_count (M) and active_lot_count (X) in context. #}
-{% include 'partials/_feed_lot_count.html.jinja' %}<span id="registry-count" hx-swap-oob="true" class="js-registry-count" data-count="{{ active_lot_count }}">{{ active_lot_count }}</span>
+   Outputs the M span (#feed-lot-count) plus OOB swaps for #registry-count (X)
+   and #header-status. Requires lot_count (M), active_lot_count (X), and
+   monitor (VM namespace) in context.
+   Note: monitor.state reflects the DB/session snapshot at reconnect time
+   (awaiting_backfill / active / warning / error). The transient "checking"
+   state lives only seconds and is not represented in the VM — a reconnect
+   during a check will briefly show "active" until the next SseStatus event.
+
+   SYNC NOTE: the #header-status div attributes below (id, hx-swap-oob, class,
+   sse-swap, role, aria-label) MUST match base.html.jinja#header-status exactly.
+   sse-swap="status" is load-bearing — htmx uses it to re-subscribe the SSE
+   event listener after the OOB swap. Any divergence breaks SSE status updates.
+   See also: base.html.jinja#header-status / _feed_count_resync.html.jinja — keep in sync. #}
+{% include 'partials/_feed_lot_count.html.jinja' %}
+<span id="registry-count"
+      hx-swap-oob="true"
+      class="js-registry-count"
+      data-count="{{ active_lot_count }}">{{ active_lot_count }}</span>
+<div id="header-status"
+     hx-swap-oob="true"
+     class="header__center"
+     sse-swap="status"
+     role="region"
+     aria-label="Статус мониторинга">{% include "partials/_header_status.html.jinja" %}</div>

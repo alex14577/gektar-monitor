@@ -7,20 +7,51 @@ Coverage (per test-strategy §Layer 4 — Web):
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
 
+from fis_monitor.domain.models import SessionStatus, Settings
 from fis_monitor.services.view_filters import ViewFilters, ViewFiltersService, serialize
 from fis_monitor.web.deps import (
+    get_backfill,
+    get_clock,
+    get_config_source,
+    get_login,
     get_lot_query,
     get_lot_repo,
+    get_session_probe,
     get_templates,
     get_view_filters_service,
 )
 from fis_monitor.web.routes.main import router
 from fis_monitor.web.templates import STATIC_DIR, build_templates
-from tests.unit.web.routes.conftest import FakeLotQueryService, FakeLotRepo
+from tests.unit.web.routes.conftest import FakeConfigSource, FakeLotQueryService, FakeLotRepo
+
+
+class _StubClock:
+    def now(self) -> datetime:
+        return datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+
+class _StubSessionProbe:
+    def check(self) -> SessionStatus:
+        return SessionStatus.ACTIVE
+
+
+class _StubLogin:
+    class _Status:
+        last_outcome = None
+
+    def status(self) -> _Status:
+        return self._Status()
+
+
+class _StubBackfill:
+    def is_done(self) -> bool:
+        return True
 
 
 def _make_app(lot_query: FakeLotQueryService, lot_repo: FakeLotRepo | None = None) -> FastAPI:
@@ -32,8 +63,12 @@ def _make_app(lot_query: FakeLotQueryService, lot_repo: FakeLotRepo | None = Non
     app.dependency_overrides[get_lot_repo] = lambda: _repo
     app.dependency_overrides[get_templates] = lambda: build_templates()
     app.dependency_overrides[get_view_filters_service] = lambda: ViewFiltersService()
+    app.dependency_overrides[get_config_source] = lambda: FakeConfigSource(Settings())
+    app.dependency_overrides[get_session_probe] = lambda: _StubSessionProbe()
+    app.dependency_overrides[get_login] = lambda: _StubLogin()
+    app.dependency_overrides[get_clock] = lambda: _StubClock()
+    app.dependency_overrides[get_backfill] = lambda: _StubBackfill()
     return app
-
 
 def test_feed_count_returns_span_with_correct_data_count() -> None:
     """GET /feed/count returns 200 with #feed-lot-count span and correct data-count."""

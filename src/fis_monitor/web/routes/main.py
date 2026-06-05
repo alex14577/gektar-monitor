@@ -26,6 +26,7 @@ MVP-stub, переезжающие в follow-up bd:
 from __future__ import annotations
 
 import importlib.metadata
+import logging
 from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -75,6 +76,7 @@ except importlib.metadata.PackageNotFoundError:  # пакет не устано�
     _APP_VERSION = "dev"
 
 router = APIRouter(prefix="", tags=["main"])
+logger = logging.getLogger(__name__)
 
 # Cookie key produced by ``ViewFiltersService.serialize()`` — kept in sync with
 # the constant used by the /filters/* routes.
@@ -366,15 +368,49 @@ def feed_count(
     lot_query: LotQueryService = Depends(get_lot_query),
     lot_repo: LotRepository = Depends(get_lot_repo),
     templates: Jinja2Templates = Depends(get_templates),
+    config_source: object = Depends(get_config_source),
+    session_probe: object = Depends(get_session_probe),
+    login: LoginService = Depends(get_login),
+    clock: Clock = Depends(get_clock),
+    backfill_svc: BackfillService = Depends(get_backfill),
 ) -> HTMLResponse:
-    """Return the M span (#feed-lot-count) + OOB #registry-count for SSE (re)connect resync.
+    """Return the M span (#feed-lot-count) + OOB resync fragments for SSE (re)connect.
 
-    Called by JS on htmx:sseOpen so both counters re-sync from the DB after a
-    reconnect gap (variant B1 of ADR-060 amendment 2026-06-01).
+    Called by JS on htmx:sseOpen so counters and the header-status widget
+    re-sync from the DB/session after a reconnect gap (bd zb3, ADR-060 B1).
 
-    Reads the same view_filters cookie and uses the same _view_filters_to_lot_filters
-    adapter as feed_page / feed_more — no filter logic duplicated here.
+    monitor.state reflects the DB/session snapshot at reconnect time
+    (awaiting_backfill / active / warning / error).  The transient "checking"
+    state is not represented in the VM — a reconnect during a check will show
+    "active" until the next SseStatus SSE event arrives.
     """
+    settings: Settings = config_source.current()  # type: ignore[attr-defined]
+    now = clock.now()
+    try:
+        raw_status: SessionStatus = session_probe.check()  # type: ignore[attr-defined]
+    except NotImplementedError:
+        last = login.status().last_outcome
+        raw_status = (
+            SessionStatus.ACTIVE
+            if last is not None and last.success
+            else SessionStatus.EXPIRED
+        )
+    except Exception:
+        logger.warning("feed_count.session_probe.failed", exc_info=True)
+        last = login.status().last_outcome
+        raw_status = (
+            SessionStatus.ACTIVE
+            if last is not None and last.success
+            else SessionStatus.EXPIRED
+        )
+    session_ctx = _build_session_context(raw_status)
+    monitor = build_monitor_vm(
+        settings=settings,
+        session=session_ctx,
+        lot_repo=lot_repo,
+        now=now,
+        awaiting_backfill=not backfill_svc.is_done(),
+    )
     cookie_value = request.cookies.get(_VIEW_FILTERS_COOKIE, "")
     parsed_filters = filters_svc.deserialize(cookie_value) or ViewFilters()
     lot_filters = _view_filters_to_lot_filters(parsed_filters)
@@ -383,5 +419,5 @@ def feed_count(
     return templates.TemplateResponse(
         request,
         "partials/_feed_count_resync.html.jinja",
-        {"lot_count": lot_count, "active_lot_count": active_lot_count},
+        {"lot_count": lot_count, "active_lot_count": active_lot_count, "monitor": monitor},
     )
