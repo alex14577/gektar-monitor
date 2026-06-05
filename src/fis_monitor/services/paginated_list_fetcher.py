@@ -179,6 +179,14 @@ class PaginatedListFetcher:
                     page,
                     exc_info=True,
                 )
+                logger.warning(
+                    "paginated_list_fetcher: ParseBugError response diagnostics:"
+                    " status=%s final_url=%s text_len=%d text_head=%r",
+                    response.status,
+                    response.final_url,
+                    len(response.text),
+                    response.text[:2000],
+                )
                 if raise_on_parse_error:
                     raise
                 return
