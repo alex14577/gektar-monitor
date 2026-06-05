@@ -104,11 +104,45 @@ the visual feedback for "a check is in progress" would be lost.  Rejected.
 - **Negative (none):** The SSE stream contract (ADR-025) is additive-only:
   `cycle.started` is a new event name, clients that do not handle it ignore it safely.
 
+## Amendment (2026-06-05, bd gektar-monitor-zb3): SseStatus(checking) supersedes JS pulse-dot
+
+### Что не было достроено из оригинального решения
+
+Pulse-dot (`.check-status`, `data-state idle/checking`) должен был управляться через `htmx:sseMessage`-обработчики `cycle.started` / `cycle.done` в `app.js`. Эти обработчики так и не были реализованы; UI-элемент `.check-status` удалён в задаче lw5s. `SseCycleStarted` остаётся в wire-формате (JSON-событие, `event: cycle.started`) без UI-консьюмера на клиенте.
+
+### Новый механизм: SseStatus(state="checking") + server-push HTML
+
+`SseStatus` расширен литералом `state="checking"`. Публикация двухточечная:
+
+- **Начало цикла** — `MonitorCycleService` публикует `SseStatus(state="checking")` до первого HTTP-запроса к донору.
+- **Конец цикла** — `_publish_cycle_done` → `_publish_status` публикует терминальный статус (`active` / `error`).
+
+Оба события кодируются как `event: status` — server-push HTML-фрагмент `_header_status.html.jinja` через единый статусный SSE-канал. Отдельный JS-обработчик `cycle.started` для переключения DOM не нужен.
+
+**Фразы состояний:**
+- `checking` → «Опрашиваю сайт…»
+- `awaiting_backfill` → «Заполняется реестр…» (заменила «ожидание первоначальной загрузки» из [[decisions/ADR-068-month-window-backfill-done-flag-gate|ADR-068]])
+
+### Надёжность: латентный guard и исключение из replay
+
+**`_terminal_status_published`** — булев флаг в `MonitorCycleService`. Если цикл завершается исключением без предшествующего терминального `_publish_status`, fallback-блок публикует `SseStatus(state="error")`. Это предотвращает зависание статусной строки в «Опрашиваю сайт…» при необработанном domain-исключении.
+
+**SSE replay-слот**: после публикации `SseStatus(state="checking")` вызывается `evict_normal_replay("status")` — transient-статус вытесняется из слота. При SSE-реконнекте клиент не получает устаревшее «Опрашиваю сайт…».
+
+### Ресинк при SSE-reconnect: GET /feed/count OOB
+
+`GET /feed/count` расширен: помимо M-счётчика и X-registry-count (см. [[decisions/ADR-060-backfill-sse-insertion-and-true-total-counter|ADR-060]] §z15/6jg) он возвращает OOB-фрагмент `#header-status` — снимок `build_monitor_vm` на момент запроса. Состояние `checking` в снимок намеренно не входит (transient; реконнект в подавляющем большинстве случаев застаёт цикл уже в терминальном состоянии).
+
+**SYNC NOTE**: атрибуты элемента `#header-status` (включая `sse-swap="status"`) дублируются между `base.html.jinja` и `_feed_count_resync.html.jinja`; оба файла должны обновляться синхронно.
+
 ## Links
 
 - [[decisions/ADR-048-header-countdown-absolute-next-fire-at|ADR-048]] — superseded by this decision
 - [[decisions/ADR-025-sse-single-endpoint|ADR-025]] — SSE single endpoint (replay-slot)
 - [[decisions/ADR-026-distribution-packaging-pyinstaller|ADR-026]] — bundle size budget (no babel)
-- [[web/ui-architecture]] — header/status-indicator section updated in hiq3
+- [[decisions/ADR-068-month-window-backfill-done-flag-gate|ADR-068]] — `awaiting_backfill` state, backfill gate
+- [[web/ui-architecture]] — header/status-indicator section updated in hiq3, amended in zb3
 - bd r82m — original countdown fix (ADR-048)
-- bd hiq3 — this refactor task
+- bd hiq3 — pulse-dot refactor
+- bd lw5s — pulse-dot UI removal
+- bd zb3 — SseStatus(checking) + server-push, this amendment

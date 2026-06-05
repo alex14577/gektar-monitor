@@ -149,25 +149,22 @@ Header разделён на три зоны через CSS flex:
 
 Иконки: 32×32, `title` + `aria-label` обязательны. Текст «Не беспокоить» удалён.
 
-### Status indicator — pulse-dot (ADR-050, supersedes ADR-048)
+### Status indicator (ADR-050, amended zb3)
 
-Вместо обратного отсчёта «Проверка через MM:SS» — pulse-dot:
+Pulse-dot (`.check-status`, `data-state`, задача hiq3) **удалён** в задаче lw5s и не является каноническим механизмом. JS-обработчики `cycle.started` / `cycle.done` в `app.js` не реализованы.
 
-```html
-<span class="check-status" data-state="idle|checking">
-  <span class="check-dot" aria-hidden="true"></span>
-  <span class="check-label">Жду | Проверяю</span>
-</span>
-```
+**Канонический механизм (zb3):** `SseStatus` с полем `state: Literal["active","checking","error","paused","awaiting_backfill",...]` кодируется в server-push HTML-фрагмент `_header_status.html.jinja` и доставляется через `event: status`. Клиент обновляет `#header-status` через htmx `sse-swap="status"` без JS.
 
-Состояния переключаются через SSE-события:
-- `cycle.started` → JS ставит `data-state="checking"` (анимация pulse запускается)
-- `cycle.done`    → JS ставит `data-state="idle"`
+Переходы состояний:
+- Начало цикла: `MonitorCycleService` → `SseStatus(state="checking")` → «Опрашиваю сайт…»
+- Конец цикла: `_publish_cycle_done` → `_publish_status` → `active` / `error`
+- Backfill gate: `SseStatus(state="awaiting_backfill")` → «Заполняется реестр…»
 
-Событие `SseCycleStarted(timestamp, cycle_id)` добавлено в `domain/models.py` симметрично `SseCycleDone`.
-Поля `next_cycle_mmss`, `next_fire_at`, `next_fire_at_iso` удалены из `SseStatus`.
+При SSE-реконнекте статус ресинкается через OOB-фрагмент `#header-status` в ответе `GET /feed/count`. Состояние `checking` из ресинка исключено (transient, evict_normal_replay).
 
-Подробности: [[decisions/ADR-050-status-indicator-supersedes-countdown|ADR-050]].
+Поля `next_cycle_mmss`, `next_fire_at`, `next_fire_at_iso` удалены из `SseStatus` ещё в hiq3.
+
+Подробности и история: [[decisions/ADR-050-status-indicator-supersedes-countdown|ADR-050]] (включая amendment 2026-06-05, zb3).
 
 ### Lot cards — двухколоночный грид
 
@@ -212,7 +209,7 @@ Header разделён на три зоны через CSS flex:
 
 **Cursor chain:** каждый ответ `_feed_more.html.jinja` содержит следующий `next_cursor` в атрибуте `hx-get`. Цепочка заканчивается когда `next_cursor is None` — тогда trigger не рендерится.
 
-**Сосуществование с SSE:** SSE добавляет карточки в начало `#feed` (`afterbegin`), load-more добавляет в конец через outerHTML на `#load-more-trigger`. Пересечений нет — keyset cursor `(date_create DESC, id DESC)` никогда не переиспускает лоты из следующей страницы.
+**Сосуществование с SSE:** SSE добавляет карточки в `section#feed-zone-list` (`sse-swap="lot.new"`, `afterbegin`), JS синхронно перемещает в позицию сортировки `(data-date-create DESC, data-lot-id DESC)`. Load-more добавляет в конец через outerHTML на `#load-more-trigger`. Пересечений нет — keyset cursor никогда не переиспускает лоты из следующей страницы. Backfill-карточки перемещаются в конец зоны (перед `#load-more-trigger`). Статус лота (`event: lot.status`) обрабатывается через отдельный `span#lot-status-listener` (`hx-swap="none"`). Подробности: [[decisions/ADR-060-backfill-sse-insertion-and-true-total-counter|ADR-060]] §gyn.
 
 **Что НЕ меняется:** `archive_count` остаётся в контексте (= 0, deprecated) для совместимости шаблонов; будет удалён в отдельном bd.
 

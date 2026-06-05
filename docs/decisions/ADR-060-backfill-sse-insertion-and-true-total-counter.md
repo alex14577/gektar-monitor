@@ -208,6 +208,29 @@ server-rendered before any EventSource opens, so the guard cannot falsely skip.
 target element exists only on some pages MUST verify the target's presence first —
 htmx's null-target fallback swaps into `document.body` and destroys the page.
 
+## Amendment (2026-06-05, bd gektar-monitor-gyn): SSE insertion target = section#feed-zone-list, сортировочное позиционирование
+
+### Прод-баг
+
+Оригинальное решение §2 делало `afterbegin` на `#feed`. Это вставляло карточку **вне `section.zone`** — заголовок «Список» терялся, порядок не соответствовал серверной сортировке `ORDER BY date_create DESC, id DESC`. F5 исправлял визуально.
+
+### Новый контракт вставки
+
+`sse-swap="lot.new"` перенесён с `#feed` на постоянно рендеримую `section#feed-zone-list` (`afterbegin`). JS-обработчик `htmx:sseMessage` синхронно перемещает вставленную карточку в корректную позицию сортировки:
+
+- Ключ сортировки: `data-date-create` (naive ISO 8601 из `isoformat()`) + `data-lot-id`. Сравнение лексикографическое; `date_create=None` → пустая строка → карточка уходит в конец.
+- **Backfill-карточки** (`data-backfill=1`) перемещаются в конец `section#feed-zone-list`, непосредственно перед `#load-more-trigger` — без изменения существующего поведения из §2.
+
+**Пустая зона**: заголовок скрывается CSS-правилом `#feed-zone-list:not(:has(article.lot)) .zone__head` — без JS-логики.
+
+### lot.status вынесен на отдельный listener
+
+`lot.status` (JSON-событие, ранее routing-путь был мёртв) вынесен на отдельный `span#lot-status-listener` с `hx-swap="none"`. JS диспатчит входящий payload в `onLotStatusChange`. Известный баг diff.region (bd gektar-monitor-dsz) сохраняется без изменений.
+
+### Pill «N новых»: дедупликация через MutationObserver
+
+Инкремент счётчика «N новых» срабатывает через `MutationObserver` с дедупликацией по батчу: `afterbegin` + последующий `relocate` порождают две записи на один узел; дедупликация гарантирует однократный инкремент на карточку.
+
 ## See also
 
 - [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] — per-connection view-filter

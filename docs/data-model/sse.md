@@ -44,37 +44,81 @@ keeps coupling low. See [[decisions/ADR-060-backfill-sse-insertion-and-true-tota
 
 ## SSE event payloads
 
+Кодирование: `event: status`, `event: cycle.done`, `event: lot.new` — **HTML-фрагменты**, обрабатываются htmx напрямую. Остальные (`event: cycle.started`, `event: lot.status` и пр.) — **JSON**, требуют JS-обработчика.
+
 ```python
-class SseLotNew(BaseModel):
-    event: Literal["lot.new"]
-    lot: LotPublicDTO
-    fragment_template: Literal["poster"]
-    is_backfill: bool = False
-    # True when published by BackfillService (historical catch-up).
-    # False (default) when published by BrowserSseNotifier (live monitor cycle).
-
-
-class SSELotStatus(BaseModel):
-    event: Literal["lot.status"]
-    lot_id: int
-    new_status: str
-    event_type: Literal["gone", "changed"]
-
-
-class SSEStatusUpdate(BaseModel):
+class SseStatus(BaseModel):
     event: Literal["status"]
-    session: Literal["active", "expiring", "expired"]
-    next_cycle_at: datetime | None
-    monitor_state: Literal["running", "paused", "dnd"]
+    state: Literal["active", "warning", "error", "paused", "awaiting_backfill", "checking"]
+    interval_minutes: int
+    last_new_human: str          # e.g. "5 мин назад"
+    expires_at_hhmm: str | None  # session expiry display, e.g. "23:15"
+    # Кодируется как HTML-фрагмент _header_status.html.jinja (event: status).
+    # state="checking" — transient; исключён из SSE replay-слота (evict_normal_replay).
+    # Ресинк при реконнекте: OOB-фрагмент #header-status в GET /feed/count.
+    # История решений: [[decisions/ADR-050-status-indicator-supersedes-countdown|ADR-050]]
+
+
+class SseCycleStarted(BaseModel):
+    event: Literal["cycle.started"]
+    timestamp: datetime
+    cycle_id: int
+    # JSON-событие. UI-консьюмер не реализован; на проводе присутствует.
+
+
+class SseCycleDone(BaseModel):
+    event: Literal["cycle.done"]
+    timestamp: datetime
+    cycle_id: int
+    new_lot_count: int
+    # Кодируется как HTML-фрагмент (event: cycle.done).
+
+
+class SseCycleError(BaseModel):
+    priority: ClassVar[Literal["critical"]] = "critical"
+    timestamp: datetime
+    cycle_id: int
+    error_category: ErrorCategory
+    # JSON-событие, critical-circuit. ЯВНО БЕЗ: stacktrace, exception_repr — PII-vector.
+
+
+class SseSmtpFailed(BaseModel):
+    priority: ClassVar[Literal["critical"]] = "critical"
+    timestamp: datetime
+    channel_id: str          # e.g. "email"
+    error_category: ErrorCategory
+    attempt_no: int
+    # JSON-событие, critical-circuit. ЯВНО БЕЗ: recipient, smtp_response, exception_repr.
 
 
 class SseSessionExpired(BaseModel):
     priority: ClassVar[Literal["critical"]] = "critical"
     timestamp: datetime
     event: Literal["expired"] = "expired"
-    # ЯВНО БЕЗ: redirect_url, stacktrace, exception_repr — PII/token-leak
-    # vectors. `redirect_url` исключён из SsePayloadSchema.SESSION_EXPIRED
-    # (URL после expire может нести return-токены / CSRF-нонсы).
+    # JSON-событие, critical-circuit.
+    # ЯВНО БЕЗ: redirect_url, stacktrace, exception_repr — PII/token-leak vectors.
+    # redirect_url исключён из SsePayloadSchema.SESSION_EXPIRED.
+
+
+class SseLotNew(BaseModel):
+    event: Literal["lot.new"]
+    lot: LotPublicDTO
+    fragment_template: Literal["poster"]
+    is_backfill: bool = False
+    # Кодируется как HTML-фрагмент (event: lot.new).
+    # True when published by BackfillService (historical catch-up).
+    # False (default) when published by BrowserSseNotifier (live monitor cycle).
+    # Insertion target: section#feed-zone-list (afterbegin); JS relocates to sort position.
+    # Backfill cards relocated to end (before #load-more-trigger). См. ADR-060 amendment gyn.
+
+
+class SseLotStatus(BaseModel):
+    event: Literal["lot.status"]
+    lot_id: int
+    new_status: str
+    event_type: Literal["gone", "changed"]
+    # JSON-событие. Диспатчится JS через span#lot-status-listener → onLotStatusChange.
+    # Известный баг diff.region: bd gektar-monitor-dsz.
 ```
 
 ## SsePayloadSchema (R3-C5, [[decisions/ADR-008-eventbus-dual-circuit-no-db-persistence|ADR-008]] ext)
