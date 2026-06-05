@@ -16,6 +16,8 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+import pytest
+
 from fis_monitor.domain.errors import ParseBugError, SessionExpiredError, UpstreamError
 from fis_monitor.domain.models import HttpResponse, ParsedListPage, ParsedListRow
 from fis_monitor.infra.http.url_builder import TorgiUrlBuilder
@@ -60,7 +62,7 @@ def _make_row(lot_id: int) -> ParsedListRow:
 class FakeHttpClient:
     """Returns pre-configured responses keyed by call index."""
 
-    def __init__(self, responses: list[str | Exception]) -> None:
+    def __init__(self, responses: list[str | HttpResponse | Exception]) -> None:
         self._responses = responses
         self.calls: list[str] = []
         self._idx = 0
@@ -81,6 +83,8 @@ class FakeHttpClient:
         self._idx += 1
         if isinstance(resp, Exception):
             raise resp
+        if isinstance(resp, HttpResponse):
+            return resp
         return HttpResponse(status=200, text=resp, headers={}, final_url=url)
 
 
@@ -449,7 +453,6 @@ class TestSessionExpiredError:
         stop = threading.Event()
 
         collected: list[int] = []
-        import pytest
         with pytest.raises(SessionExpiredError):
             for row in fetcher.iterate(_REGION, stop, sleep_between_pages=0.0):
                 collected.append(row.id)
@@ -457,3 +460,50 @@ class TestSessionExpiredError:
         # Page 1 rows were already yielded before the error on page 2
         assert collected == [1, 2]
         assert len(http.calls) == 2  # page 1 and page 2 fetched
+
+
+# ---------------------------------------------------------------------------
+# Test 11: HTTP 302 redirect response → SessionExpiredError (not ParseBugError)
+# ---------------------------------------------------------------------------
+
+class TestRedirectResponseRaisesSessionExpired:
+    def test_302_empty_body_raises_session_expired_not_parse_bug(self) -> None:
+        """HTTP 302 with empty body must raise SessionExpiredError, not ParseBugError.
+
+        Regression: donor returns 302 with empty text on unauth lot-list request;
+        empty text fed to parser → ложный ParseBugError instead of SessionExpiredError.
+        """
+        redirect_resp = HttpResponse(
+            status=302,
+            text="",
+            headers={"Location": "https://example.com/login?token=abc"},
+            final_url="https://example.com/login?token=abc",
+        )
+        http = FakeHttpClient([redirect_resp])
+        parser = FakeListParser([[_make_row(1)]])  # parser should never be called
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        with pytest.raises(SessionExpiredError):
+            list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0))
+
+        # Parser must NOT have been called — redirect detected before parse
+        assert parser.calls == []
+
+    def test_301_raises_session_expired(self) -> None:
+        """Any 3xx status raises SessionExpiredError before parse."""
+        redirect_resp = HttpResponse(
+            status=301,
+            text="<html>moved</html>",
+            headers={"Location": "https://example.com/new"},
+            final_url="https://example.com/new",
+        )
+        http = FakeHttpClient([redirect_resp])
+        parser = FakeListParser([])
+
+        fetcher = _make_fetcher(http, parser)
+        stop = threading.Event()
+
+        with pytest.raises(SessionExpiredError):
+            list(fetcher.iterate(_REGION, stop, sleep_between_pages=0.0))

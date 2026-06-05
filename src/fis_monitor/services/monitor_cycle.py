@@ -506,6 +506,17 @@ class MonitorCycleService:
 
         # ---------- Step 2b: parse list ------------------------------------
         try:
+            if 300 <= response.status < 400:
+                logger.warning(
+                    "monitor_cycle: redirect for region=%s — treating as session_expired",
+                    region,
+                    extra={
+                        "region_id": region,
+                        "http_status": response.status,
+                        "final_url": response.final_url,
+                    },
+                )
+                raise SessionExpiredError(f"redirect status={response.status}")
             parsed_page = self._list_parser.parse(response.text)
             parsed_rows = parsed_page.rows
         except UpstreamError as exc:

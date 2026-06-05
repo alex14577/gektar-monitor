@@ -159,6 +159,21 @@ class PaginatedListFetcher:
                     raise
                 return
 
+            if 300 <= response.status < 400:
+                logger.warning(
+                    "paginated_list_fetcher: redirect on region=%s page=%d"
+                    " — raising SessionExpiredError",
+                    region,
+                    page,
+                    extra={
+                        "region_id": region,
+                        "page": page,
+                        "http_status": response.status,
+                        "final_url": response.final_url,
+                    },
+                )
+                raise SessionExpiredError(f"redirect status={response.status}")
+
             try:
                 parsed_page = self._list_parser.parse(response.text)
                 rows = parsed_page.rows

@@ -208,3 +208,36 @@ class TestCycleDoneFinishedAtHhmm:
         assert done[0].finished_at_hhmm == "15:00", (
             "UTC 12:00 in Europe/Moscow (UTC+3) must render as '15:00'"
         )
+
+
+# ---------------------------------------------------------------------------
+# HTTP 302 redirect response → session_expired cycle (not parse_bug)
+# ---------------------------------------------------------------------------
+
+
+class TestCycleDoneOnRedirectResponse:
+    """HTTP 3xx response before parse → SessionExpired path, not ParseBugError.
+
+    Regression: donor returns 302 with empty body on unauth lot-list request;
+    without the redirect-detect guard the empty text would reach the parser
+    and produce a ParseBugError cycle instead of a session_expired cycle.
+    """
+
+    def test_302_empty_body_produces_session_expired_cycle(self) -> None:
+        svc, _, _, _, _, _, _, bus, _ = _make_service(
+            http=FakeHttpClient(response_text="", response_status=302),
+        )
+
+        result = svc.run_cycle(_REGION)
+
+        assert result.status == "error"
+        assert result.error == "session_expired"
+        assert result.lots_fetched == 0
+
+        kinds = [type(e).__name__ for e in bus.published]
+        assert "SseSessionExpired" in kinds
+        assert "SseCycleDone" in kinds
+        # SseSessionExpired before SseCycleDone
+        assert kinds.index("SseSessionExpired") < kinds.index("SseCycleDone")
+        # No ParseBugError / SseCycleError published
+        assert "SseCycleError" not in kinds

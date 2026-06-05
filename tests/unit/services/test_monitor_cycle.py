@@ -92,11 +92,17 @@ def _make_lot(lot_id: int) -> Lot:
 class FakeHttpClient:
     """Configurable HttpClient fake."""
 
-    def __init__(self, response_text: str = "<html/>", raises: Exception | None = None) -> None:
+    def __init__(
+        self,
+        response_text: str = "<html/>",
+        raises: Exception | None = None,
+        response_status: int = 200,
+    ) -> None:
         self.calls: list[str] = []
         self.headers_by_call: list[dict[str, str] | None] = []
         self._response_text = response_text
         self._raises = raises
+        self._response_status = response_status
 
     def get(
         self,
@@ -111,7 +117,7 @@ class FakeHttpClient:
         if self._raises is not None:
             raise self._raises
         return HttpResponse(
-            status=200,
+            status=self._response_status,
             text=self._response_text,
             headers={},
             final_url=url,
