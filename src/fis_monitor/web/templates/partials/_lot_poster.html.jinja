@@ -14,6 +14,7 @@
          data-status="{{ lot.status | default('active') }}"
          data-title="{{ lot.region }}{% if lot.district %}, {{ lot.district }}{% endif %}"
          data-area="{{ lot.area_ha }}"
+         data-date-create="{{ lot.date_create.isoformat() if lot.date_create else '' }}"
          {% if lot.event == 'gone' %}data-event="gone"{% endif %}
          {% if lot.is_backfill %}data-backfill="1"{% endif %}
          tabindex="0"

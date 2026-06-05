@@ -21,7 +21,8 @@
    default; the user is actively browsing so the session is considered active).
    Matches the stub used by POST /filters/view so gating logic is consistent.
 
-   SSE coexistence: SSE swaps arrive on #feed with afterbegin (prepend at top);
+   SSE coexistence: SSE swaps arrive on section#feed-zone-list with afterbegin
+   (lot.new) and on span#lot-status-listener with hx-swap="none" (lot.status);
    load-more fragments are appended here at the bottom via outerHTML on
    #load-more-trigger.  The two operations target disjoint DOM regions and never
    collide.

@@ -367,7 +367,7 @@
   // for every incoming SSE event AFTER performing its own sse-swap.
   // We intercept "lot.new" to drive:
   //   - Live lots: sound + browser notification + aria-live + escalation.
-  //   - Backfill lots: silent reposition to bottom of feed (no sound/notification).
+  //   - Backfill lots: silent reposition to bottom of section (no sound/notification).
   //   - Both: increment all .js-lot-count counters.
   //
   // Contract — e.detail.type invariant (vendored htmx-sse extension, line 154-155):
@@ -375,19 +375,50 @@
   //   `event` is the native MessageEvent; its `.type` is the SSE event name
   //   (e.g. "lot.new"). Do NOT rely on e.detail.data for structured data —
   //   parse data-* attributes from the already-swapped DOM element instead.
+  //
+  // sse-swap now lives on section#feed-zone-list (afterbegin), so htmx inserts
+  // the card as the first child of that section (BEFORE the <header>); JS immediately
+  // repositions it to maintain server-side sort order (date_create DESC,
+  // id DESC) so that F5 and live-view are consistent.
+
+  // Find the correct insertion point in section#feed-zone-list for a new card,
+  // maintaining ORDER BY date_create DESC, id DESC (mirrors server-side sort).
+  // Returns the node BEFORE which the card should be inserted (null = card is
+  // the oldest — caller must append before #load-more-trigger or zone.appendChild).
+  //
+  // Note: assumes naive ISO 8601 from Python isoformat(), no timezone suffix;
+  // empty string (date_create=None) sorts oldest (lexicographic '' < any date).
+  function _findInsertBefore(section, card) {
+    if (!section) return null;
+    const cardDate = card.dataset.dateCreate || '';
+    const cardId = parseInt(card.dataset.lotId || '0', 10);
+    // Exclude card itself — htmx already inserted it at afterbegin, so it is
+    // the first article in the section; keeping it in candidates would always
+    // match itself (same date/id) and produce a self-insertBefore no-op, leaving
+    // the card before the <header> on an empty zone (first SSE card).
+    const candidates = Array.from(section.querySelectorAll('article.lot')).filter(n => n !== card);
+    for (const existing of candidates) {
+      const existDate = existing.dataset.dateCreate || '';
+      const existId = parseInt(existing.dataset.lotId || '0', 10);
+      // Insert before the first existing card that is older (smaller date or equal date + smaller id).
+      if (cardDate > existDate) return existing;
+      if (cardDate === existDate && cardId > existId) return existing;
+    }
+    return null; // card is oldest — caller appends before load-more-trigger or at zone end
+  }
+
   document.body.addEventListener('htmx:sseMessage', (e) => {
     const type = e.detail && e.detail.type;
     if (type === 'lot.new') {
       // Locate the article that htmx just inserted (it is the first child of
-      // #feed because sse-swap prepends to the feed container with afterbegin).
-      const feed = document.getElementById('feed');
-      const node = feed ? feed.firstElementChild : null;
+      // section#feed-zone-list because sse-swap uses afterbegin on that section).
+      const zone = document.getElementById('feed-zone-list');
+      const node = zone ? zone.firstElementChild : null;
 
       if (node && node.dataset.backfill === '1') {
-        // --- Backfill lot: reposition to BOTTOM of feed, silently. ---
-        // htmx already inserted the card at the top (afterbegin).  We move it
-        // to just before #load-more-trigger (if present) or to the end of the
-        // section zone, so it appears at the bottom of the visible list.
+        // --- Backfill lot: reposition to BOTTOM of section, silently. ---
+        // htmx already inserted the card at afterbegin.  We move it to just
+        // before #load-more-trigger (if present) or to the end of the section.
         // No sound, no browser notification, no escalation.
         // Counter incremented here: card is real and in DOM.
         incrementLotCounters();
@@ -396,21 +427,43 @@
         if (loadMoreTrigger && loadMoreTrigger.parentNode) {
           loadMoreTrigger.parentNode.insertBefore(node, loadMoreTrigger);
         } else {
-          // No load-more trigger: append to section.zone or fall back to #feed.
-          const zone = feed.querySelector('section.zone');
-          (zone || feed).appendChild(node);
+          zone.appendChild(node);
         }
       } else if (node && node.classList.contains('lot')) {
-        // --- Live lot: standard notification path. ---
+        // --- Live lot: reposition by date_create DESC, id DESC, then notify. ---
         // Counter incremented here: card is real and in DOM.
         incrementLotCounters();
         updateShownCount();
+        const insertBefore = _findInsertBefore(zone, node);
+        if (insertBefore) {
+          zone.insertBefore(node, insertBefore);
+        } else {
+          // Oldest card (or empty zone): append to end of section, before
+          // #load-more-trigger if present, otherwise zone.appendChild.
+          // This guarantees the card lands AFTER the <header class="zone__head">
+          // regardless of whether the zone was empty when the first SSE card arrived.
+          const loadMoreTrigger = document.getElementById('load-more-trigger');
+          if (loadMoreTrigger && loadMoreTrigger.parentNode === zone) {
+            zone.insertBefore(node, loadMoreTrigger);
+          } else {
+            zone.appendChild(node);
+          }
+        }
         onLotNew(node);
       } else {
-        // Fallback: node not found or #feed absent — do NOT increment counter
+        // Fallback: node not found or section absent — do NOT increment counter
         // (no real card in DOM, incrementing would be a phantom count).
-        if (!feed) console.warn('[sseMessage] #feed not found — DOM structure may have changed');
+        if (!zone) console.warn('[sseMessage] #feed-zone-list not found — DOM structure may have changed');
         onLotNew(null);
+      }
+    } else if (type === 'lot.status') {
+      // lot.status is encoded as JSON and swapped with hx-swap="none" on
+      // span#lot-status-listener, so no DOM mutation happens.
+      // htmx-sse still fires htmx:sseMessage — handle here for sound/announce.
+      try {
+        onLotStatusChange(JSON.parse(e.detail.data));
+      } catch (err) {
+        console.warn('[sseMessage] lot.status parse error', err);
       }
     }
   });
@@ -621,27 +674,34 @@
     }
     pill.addEventListener('click', clearAndScroll);
 
-    // Hook 1: htmx prepended a new fragment via SSE
-    feed.addEventListener('htmx:afterSwap', (e) => {
-      // only when actually added to top
-      if (e.detail && e.detail.target === feed) {
-        if (window.scrollY > 200) { pending += 1; show(); }
-      }
-    });
+    // Hook 1 (htmx:afterSwap on feed-zone-list) removed: pill increment lives
+    // exclusively in Hook 2 (MutationObserver below) to avoid double-counting.
+    // htmx afterbegin insert triggers both an afterSwap event AND a DOM childList
+    // mutation — incrementing in both would count each SSE card twice.
 
-    // Hook 2: vanilla DOM prepend (Monitor.onLotNew path)
+    // Hook 2: MutationObserver — single source of truth for pill increment.
+    // Fires for EVERY article.lot added to #feed subtree (both htmx SSE insert
+    // and JS repositions). Pill is incremented here and ONLY here — Hook 1 does
+    // not increment, preventing double-count when htmx triggers both afterSwap
+    // and a childList mutation for the same card.
     const mo = new MutationObserver(muts => {
-      muts.forEach(m => {
-        m.addedNodes.forEach(n => {
-          if (n.nodeType !== 1) return;
-          if (n.classList && n.classList.contains('lot')) {
-            // 4. Freshness flash (Tier 3, #4)
-            n.dataset.fresh = 'true';
-            setTimeout(() => { delete n.dataset.fresh; }, 2400);
-            if (window.scrollY > 200) { pending += 1; show(); }
-          }
-        });
-      });
+      // Dedup: htmx afterbegin insert + our insertBefore/appendChild (remove+add)
+      // land in the SAME synchronous tick → same MutationObserver callback batch.
+      // Without dedup, each node appears in two MutationRecords (insert + reinsert)
+      // → pill double-counts and data-fresh timer restarts.
+      const seen = new Set();
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          if (!n.classList || !n.classList.contains('lot')) continue;
+          if (seen.has(n)) continue;
+          seen.add(n);
+          // 4. Freshness flash (Tier 3, #4)
+          n.dataset.fresh = 'true';
+          setTimeout(() => { delete n.dataset.fresh; }, 2400);
+          if (window.scrollY > 200) { pending += 1; show(); }
+        }
+      }
     });
     mo.observe(feed, { childList: true, subtree: true });
 

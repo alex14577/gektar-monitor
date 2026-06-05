@@ -9,7 +9,7 @@
    The partial contains filter-bar + backfill-progress + #feed (lots list).
    htmx outerHTML на #feed дублировал бы filter-bar (response > 1 element), —
    поэтому swap-target = #feed-wrapper (вся обёртка целиком), а SSE-swap
-   остаётся на внутреннем #feed (htmx-sse MutationObserver re-wires).
+   живёт на section#feed-zone-list и span#lot-status-listener (htmx-sse re-wires).
 #}
 
 
@@ -32,9 +32,6 @@
 </div>
 
 <div id="feed"
-     sse-swap="lot.new,lot.status"
-     hx-target="this"
-     hx-swap="afterbegin"
      aria-live="polite"
      aria-relevant="additions text">
   {# bd bjw4: sse-connect lives on #sse-root in base.html.jinja. htmx-sse's
@@ -42,39 +39,64 @@
      hx-target=#feed (POST /filters/view), so removing the local
      sse-connect does not break live updates. #}
 
-  {# LIST — all filtered lots regardless of age #}
-  {% if zones.today %}
-    <section class="zone" aria-label="Список лотов">
-      <header class="zone__head">
-        <h2 class="zone__title">Список</h2>
-      </header>
-      {% for lot in zones.today %}
-        {% include "partials/_lot_poster.html.jinja" %}
-      {% endfor %}
+  {# LIST — all filtered lots regardless of age.
+     section#feed-zone-list is ALWAYS rendered (even when zones.today is empty)
+     so that htmx-sse can re-wire sse-swap after a filter swap, and the JS
+     handler can always find the target section on the first SSE lot.new.
 
-      {# Load-more trigger — INSIDE <section class="zone"> so appended cards land
-         inside the same section.  outerHTML swap on #load-more-trigger replaces it
-         with (new cards + fresh trigger) — all siblings of the existing cards,
-         thus remaining inside the zone section. #}
-      {# SSE coexistence: SSE prepends at afterbegin (top of #feed), load-more sits
-         at the bottom of the zone section — the two DOM regions never collide. #}
-      {% if next_cursor %}
-      <div id="load-more-trigger"
-           hx-get="/feed/more?cursor={{ next_cursor | urlencode }}&amp;shown={{ zones.today | length }}"
-           hx-target="#load-more-trigger"
-           hx-swap="outerHTML"
-           hx-trigger="click from:#load-more-btn">
-        <button id="load-more-btn" class="btn btn--ghost btn--full" type="button"
-                style="justify-content: center; padding: 12px 16px;">
-          <span style="display:inline-flex; gap:8px; align-items:center;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-            Показать ещё
-          </span>
-        </button>
-      </div>
-      {% endif %}
-    </section>
-  {% endif %}
+     lot.status handling: SseLotStatus is encoded as JSON (not HTML) by sse_encoder.py
+     — it does NOT produce an HTML fragment and must NOT be swapped via afterbegin into
+     this section (that would inject raw JSON as DOM nodes, corrupting the feed).
+     lot.status is therefore listed on the separate #lot-status-listener below with
+     hx-swap="none", so htmx-sse can dispatch a "htmx:sseMessage" event for JS to
+     handle without touching the DOM. This preserves pre-fix lot.status behaviour. #}
+  <section id="feed-zone-list"
+           class="zone"
+           aria-label="Список лотов"
+           sse-swap="lot.new"
+           hx-target="this"
+           hx-swap="afterbegin">
+    <header class="zone__head">
+      <h2 class="zone__title">Список</h2>
+    </header>
+    {% for lot in zones.today %}
+      {% include "partials/_lot_poster.html.jinja" %}
+    {% endfor %}
+
+    {# Load-more trigger — INSIDE section#feed-zone-list so appended cards land
+       inside the same section.  outerHTML swap on #load-more-trigger replaces it
+       with (new cards + fresh trigger) — all siblings of the existing cards,
+       thus remaining inside the zone section. #}
+    {# SSE coexistence: SSE inserts afterbegin in section#feed-zone-list (as the first
+       child — temporarily BEFORE the <header>); JS immediately repositions the card by
+       data-date-create DESC so that server sort order is preserved.
+       load-more sits at the bottom of the section — the two DOM regions never
+       collide because load-more is always the last child. #}
+    {% if next_cursor %}
+    <div id="load-more-trigger"
+         hx-get="/feed/more?cursor={{ next_cursor | urlencode }}&amp;shown={{ zones.today | length }}"
+         hx-target="#load-more-trigger"
+         hx-swap="outerHTML"
+         hx-trigger="click from:#load-more-btn">
+      <button id="load-more-btn" class="btn btn--ghost btn--full" type="button"
+              style="justify-content: center; padding: 12px 16px;">
+        <span style="display:inline-flex; gap:8px; align-items:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          Показать ещё
+        </span>
+      </button>
+    </div>
+    {% endif %}
+  </section>
+
+  {# lot.status listener: hx-swap="none" so htmx-sse fires htmx:sseMessage for JS
+     without inserting anything into the DOM. The JSON payload is handled by JS.
+     Kept separate from section#feed-zone-list (which uses afterbegin for HTML cards). #}
+  <span id="lot-status-listener"
+        sse-swap="lot.status"
+        hx-target="this"
+        hx-swap="none"
+        style="display:none"></span>
 
   {# Loading state: в БД ещё нет лотов и нет активных фильтров — сервис ещё качает первую партию. #}
   {# Скрывается через CSS как только в #feed появляется первый ребёнок-лот (через :has). #}

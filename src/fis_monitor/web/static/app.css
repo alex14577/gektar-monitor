@@ -787,9 +787,17 @@ body[data-density="poster"] .lot--list .lot__meta  { white-space: normal; }
   margin: 4px 2px;
 }
 
-/* Feed loading state — скрыть когда в #feed появилась хотя бы одна .zone с лотами. */
-#feed:has(.zone:not(.zone--archive):not(#feed-loading)) #feed-loading,
+/* Feed loading state — скрыть когда в #feed появился хотя бы один article.lot.
+   #feed-zone-list (section.zone) всегда отрисован, поэтому :has(.zone) не подходит —
+   используем только наличие карточки. */
 #feed:has(article.lot) #feed-loading {
+  display: none;
+}
+
+/* Скрыть заголовок «Список» когда зона пустая (нет ни одной карточки).
+   section#feed-zone-list всегда отрисован для SSE-rewiring, но header
+   не должен висеть одиноко над empty-state / #feed-loading. */
+#feed-zone-list:not(:has(article.lot)) .zone__head {
   display: none;
 }
 
