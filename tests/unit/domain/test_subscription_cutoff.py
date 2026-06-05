@@ -3,8 +3,12 @@
 Tests the pure predicate per ADR-039 day-precision rule:
 - same-day → pass (True); historical (day before) → suppress (False)
 - day after subscribed_at → pass
-- subscribed_at None → pass (fail-open)
-- region_id None → pass (fail-open)
+- subscribed_at None → pass (fail-open, for SQL LEFT-JOIN equivalence)
+- region_id None → pass (fail-open, ADR-035 I2: unrecognised subject)
+
+Note: the email-channel stricter path (suppress when region known but no subscription
+record) lives in ``SubscribedAtFilteredNotifier.should_suppress``, which short-circuits
+before calling this predicate. See ``test_notifier_dispatcher.py``.
 """
 
 from __future__ import annotations
@@ -45,7 +49,13 @@ def test_day_after_subscription_passes() -> None:
 
 
 def test_subscribed_at_none_passes() -> None:
-    """No subscription record for the region → fail-open (always True)."""
+    """No subscription record supplied → fail-open (always True).
+
+    This predicate is fail-open for subscribed_at=None to mirror the SQL
+    LEFT-JOIN expression (``WHERE rs.subscribed_at IS NULL OR ...``).
+    The email-channel strictness (suppress when region known, no record)
+    is enforced in ``SubscribedAtFilteredNotifier.should_suppress``.
+    """
     result = passes_subscription_cutoff(_DAY_BEFORE, None, region_id=1)
     assert result is True
 

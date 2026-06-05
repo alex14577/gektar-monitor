@@ -1380,17 +1380,26 @@ def test_filtered_notifier_handles_midnight_lot_same_day_onboarding():
     assert len(inner.send_calls) == 1, "same-day lot must not be suppressed (gn89)"
 
 
-def test_filtered_notifier_passes_no_subscribed_at():
-    """get_subscribed_at returns None (no record) → send() passes through (graceful)."""
+def test_filtered_notifier_suppresses_no_subscribed_at(caplog):
+    """get_subscribed_at returns None (known region, no record) → suppressed.
+
+    Regression for prod-incident: lots from regions outside the subscription
+    (subscribed_at=None for a known region_id) must NOT be delivered.
+    Only lots with region_id=None (unrecognised subject) remain fail-open.
+    """
     inner = FakeNotifier(channel_id="email")
     repo = FakeRegionSubscriptionRepository()
     wrapper = SubscribedAtFilteredNotifier(inner=inner, region_sub_repo=repo)
 
     lot = _make_lot_public(region_id=_MACRO_REGION_DFO)
 
-    wrapper.send(lot, "test@example.com")
+    with caplog.at_level(logging.DEBUG, logger="fis_monitor.services.notifier_dispatcher"):
+        result = wrapper.send(lot, "test@example.com")
 
-    assert len(inner.send_calls) == 1
+    assert result.ok is True
+    assert "suppressed" in (result.detail or "")
+    assert len(inner.send_calls) == 0
+    assert "notification.subscribed_at_dropped" in caplog.text
 
 
 def test_filtered_notifier_passes_region_id_none():

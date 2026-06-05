@@ -119,19 +119,33 @@ class SubscribedAtFilteredNotifier:
     def should_suppress(self, lot: LotPublicDTO) -> bool:
         """Pre-reserve suppression check (ADR-039).
 
-        Returns True iff the lot's calendar publication date precedes the
-        region's subscription calendar date. Lots with no region or no
-        ``subscribed_at`` record pass through unfiltered.
+        Returns True iff the lot should be suppressed:
+        - ``lot.region_id is None``: lot has no region → fail-open, passes through
+          (ADR-035 invariant I2; subject unrecognised, no subscription to consult).
+        - ``lot.region_id`` is known but no ``subscribed_at`` record exists for it
+          → suppress (region outside the user's subscription, not a fail-open case).
+        - ``lot.region_id`` is known and ``subscribed_at`` exists but
+          ``lot.date_create.date() < subscribed_at.date()`` → suppress (historical lot).
 
         Emits ``notification.subscribed_at_dropped`` at DEBUG for traceability;
         log level is intentional — onboarding-time suppression can be high
         volume during backfill and must not flood INFO/WARNING streams.
         """
-        subscribed_at = (
-            self._region_sub_repo.get_subscribed_at(lot.region_id)
-            if lot.region_id is not None
-            else None
-        )
+        if lot.region_id is None:
+            return False
+        subscribed_at = self._region_sub_repo.get_subscribed_at(lot.region_id)
+        if subscribed_at is None:
+            logger.debug(
+                "notification.subscribed_at_dropped",
+                extra={
+                    "region_id": lot.region_id,
+                    "lot_id": lot.id,
+                    "lot_date_create": lot.date_create.isoformat(),
+                    "subscribed_at": None,
+                    "decision": "dropped_subscribed_at",
+                },
+            )
+            return True
         if passes_subscription_cutoff(lot.date_create, subscribed_at, region_id=lot.region_id):
             return False
         logger.debug(
@@ -140,10 +154,7 @@ class SubscribedAtFilteredNotifier:
                 "region_id": lot.region_id,
                 "lot_id": lot.id,
                 "lot_date_create": lot.date_create.isoformat(),
-                # Reaching here means passes_subscription_cutoff returned False,
-                # which is only possible when subscribed_at is not None; the guard
-                # keeps mypy happy without changing behaviour.
-                "subscribed_at": subscribed_at.isoformat() if subscribed_at else None,
+                "subscribed_at": subscribed_at.isoformat(),
                 "decision": "dropped_subscribed_at",
             },
         )

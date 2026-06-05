@@ -35,7 +35,7 @@ def passes_subscription_cutoff(
     *,
     region_id: int | None = None,
 ) -> bool:
-    """Return True when a lot should appear / be delivered given the subscription cutoff.
+    """Return True when a lot passes the subscription date cutoff.
 
     Suppression rule (ADR-039, day-precision, amendment gn89):
     - A lot is **suppressed** (returns False) when its calendar publication date
@@ -44,8 +44,16 @@ def passes_subscription_cutoff(
     - Same-day lots pass (``>=``).
 
     Fail-open cases — always returns True:
-    - ``region_id is None``: lot has no region; no subscription to consult.
-    - ``subscribed_at is None``: no subscription record for this region.
+    - ``region_id is None``: lot has no region; no subscription to consult
+      (ADR-035 invariant I2: unrecognised subject → pass).
+    - ``subscribed_at is None``: caller supplies no subscription record.
+      NOTE: this predicate is intentionally fail-open for ``subscribed_at is None``
+      to mirror the SQL LEFT-JOIN expression used by ``LotQueryService``
+      (``WHERE rs.subscribed_at IS NULL OR ...``).
+      **Email-channel suppression** uses the stricter path in
+      ``SubscribedAtFilteredNotifier.should_suppress``, which short-circuits
+      before calling this predicate when ``region_id`` is known but no subscription
+      record exists (suppress, not fail-open).
 
     Args:
         date_create:   Lot publication datetime (tz-aware UTC, day precision).
