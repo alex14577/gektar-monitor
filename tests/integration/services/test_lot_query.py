@@ -205,7 +205,9 @@ class FakeUserStateRepository:
 class FakeLotRepository:
     """Satisfies LotRepository Protocol structurally."""
 
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
+    def upsert(
+        self, lot: Lot, *, tracked: Sequence[TrackedField], is_backfill: bool = False
+    ) -> LotUpsertResult:
         return LotUpsertResult(was_new=True, changes=[])
 
     def get(self, lot_id: int) -> Lot | None:

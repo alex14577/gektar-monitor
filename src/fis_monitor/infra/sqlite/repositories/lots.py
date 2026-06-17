@@ -257,6 +257,7 @@ class SqliteLotRepository:
         lot: Lot,
         *,
         tracked: Sequence[TrackedField],
+        is_backfill: bool = False,
     ) -> LotUpsertResult:
         """Insert-or-update ``lot`` atomically.
 
@@ -305,10 +306,10 @@ class SqliteLotRepository:
                     "  detail_fetched_at, enrichment_status, enrichment_retries,"
                     "  last_seen_at, last_status, last_status_at,"
                     "  is_active, inactive_reason, inactive_since, inactive_confirmed_at,"
-                    "  region_id"
+                    "  region_id, is_backfill"
                     ") VALUES ("
                     "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                    "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                    "  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
                     ")",
                     (
                         lot.id,
@@ -341,6 +342,7 @@ class SqliteLotRepository:
                         _iso(lot.inactive_since),
                         _iso(lot.inactive_confirmed_at),
                         lot.region_id,
+                        1 if is_backfill else 0,
                     ),
                 )
                 was_new = True
@@ -552,13 +554,19 @@ class SqliteLotRepository:
     # ------------------------------------------------------------------
 
     def latest_new_first_seen(self) -> datetime | None:
-        """Return MAX(first_seen) across all lots, UTC-aware; None if empty.
+        """Return MAX(first_seen) across LIVE lots, UTC-aware; None if empty.
 
         bd 47uh — backs the "Последний новый" chip in the header status widget.
+        bd 31g — filters ``WHERE is_backfill = 0`` so the chip reflects the last
+        lot discovered by the live monitor cycle, not the wallclock at which the
+        backfill catch-up rows were written (which would show a misleadingly
+        recent time for a historical auction). Extends ADR-060.
         Single read-only SELECT, no transaction needed.
         """
         conn = self._conn_provider.get()
-        cur = conn.execute("SELECT MAX(first_seen) FROM lots")
+        # WHERE is_backfill = 0 — exclude backfill catch-up rows so the chip
+        # reflects the last LIVE new lot, not the backfill wallclock (bd 31g).
+        cur = conn.execute("SELECT MAX(first_seen) FROM lots WHERE is_backfill = 0")
         row = cur.fetchone()
         cur.close()
         if row is None or row[0] is None:

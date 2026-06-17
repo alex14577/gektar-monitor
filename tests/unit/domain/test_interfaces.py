@@ -257,7 +257,7 @@ def test_event_bus_structural() -> None:
 
 
 class _FakeLotRepository:
-    def upsert(self, lot: Lot, *, tracked: Any) -> LotUpsertResult:
+    def upsert(self, lot: Lot, *, tracked: Any, is_backfill: bool = False) -> LotUpsertResult:
         return LotUpsertResult(was_new=True, changes=[])
 
     def get(self, lot_id: int) -> Lot | None:

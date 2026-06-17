@@ -57,7 +57,7 @@ class Lot(BaseModel):
     parser_version: int = 1
 
     # Жизненный цикл
-    first_seen: datetime    # время первого обнаружения лота; set on INSERT, IMMUTABLE — не перезаписывается при повторном наблюдении. MAX(first_seen) = "Последний новый" chip.
+    first_seen: datetime    # время первого обнаружения лота; set on INSERT, IMMUTABLE — не перезаписывается при повторном наблюдении. MAX(first_seen) WHERE is_backfill=0 = "Последний новый" chip (bd 31g).
     last_seen: datetime     # время последнего наблюдения; updated every cycle on UPDATE
     detail_fetched_at: datetime | None
     enrichment_status: Literal["pending", "done", "failed", "permanent_fail"] | None
@@ -69,6 +69,8 @@ class Lot(BaseModel):
     inactive_since: datetime | None = None
     inactive_confirmed_at: datetime | None = None
 ```
+
+> **Persistence-only колонка `lots.is_backfill`** (`INTEGER NOT NULL DEFAULT 0 CHECK (is_backfill IN (0,1))`, schema v11, bd 31g) — НЕ поле домен-модели `Lot`. Provenance-маркер: `0` = лот впервые вставлен живым монитор-циклом, `1` = backfill'ом. Ставится **только на INSERT** (`upsert(is_backfill=...)`), UPDATE не трогает (стабилен на весь жизненный цикл строки). Назначение: `latest_new_first_seen()` фильтрует `WHERE is_backfill = 0`, чтобы чип «Последний новый» отражал последний ЖИВОЙ новый лот, а не wallclock дозагрузки исторического каталога (расширение «backfill молчит» из [[decisions/ADR-060-backfill-sse-insertion-and-true-total-counter|ADR-060]]). Legacy-строки до миграции = `0` (самоисцеляется со следующим live-лотом).
 
 ## LotPublicDTO / LotUserDTO — разделение публичной и user-state части
 

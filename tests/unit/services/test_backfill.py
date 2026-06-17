@@ -109,7 +109,7 @@ class FakeLotRepository:
     def __init__(self) -> None:
         self.upsert_calls: list[dict] = []
 
-    def upsert(self, lot: Any, *, tracked: Any) -> LotUpsertResult:
+    def upsert(self, lot: Any, *, tracked: Any, is_backfill: bool = False) -> LotUpsertResult:
         self.upsert_calls.append({"lot_id": lot.id})
         return LotUpsertResult(was_new=True, changes=[])
 

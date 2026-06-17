@@ -78,7 +78,7 @@ class _FakePaginatedListFetcher:
 
 
 class _FakeLotRepository:
-    def upsert(self, lot: Any, *, tracked: Any) -> LotUpsertResult:
+    def upsert(self, lot: Any, *, tracked: Any, is_backfill: bool = False) -> LotUpsertResult:
         return LotUpsertResult(was_new=True, changes=[])
 
     def get(self, lot_id: int) -> None:

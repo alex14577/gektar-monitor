@@ -72,7 +72,7 @@ class _FakeLotRepo:
     def mark_inactive(self, lot_id: int, reason: str, at: datetime) -> None:
         self.marked_inactive.append((lot_id, reason))
 
-    def upsert(self, lot: Any, *, tracked: Any) -> Any:
+    def upsert(self, lot: Any, *, tracked: Any, is_backfill: bool = False) -> Any:
         raise NotImplementedError
 
     def get(self, lot_id: int) -> None:

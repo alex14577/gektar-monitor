@@ -359,7 +359,9 @@ class FakeLotRepository:
         self._calls.append(f"get:{lot_id}")
         return self._lots.get(lot_id)
 
-    def upsert(self, lot: Any, *, tracked: Sequence[Any]) -> LotUpsertResult:
+    def upsert(
+        self, lot: Any, *, tracked: Sequence[Any], is_backfill: bool = False
+    ) -> LotUpsertResult:
         self._calls.append("upsert")
         self._lots[lot.id] = lot
         return LotUpsertResult(was_new=True, changes=[])

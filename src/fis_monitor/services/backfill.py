@@ -643,7 +643,9 @@ class BackfillService:
                     continue
 
                 try:
-                    upsert_result = self._lot_repo.upsert(lot, tracked=DEFAULT_TRACKED_FIELDS)
+                    upsert_result = self._lot_repo.upsert(
+                        lot, tracked=DEFAULT_TRACKED_FIELDS, is_backfill=True
+                    )
                     lots_upserted_per_page[current_page_num] = (
                         lots_upserted_per_page.get(current_page_num, 0) + 1
                     )

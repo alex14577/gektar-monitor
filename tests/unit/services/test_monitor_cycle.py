@@ -173,7 +173,9 @@ class FakeLotRepository:
         self._was_new_for: set[int] = was_new_for if was_new_for is not None else set()
         self.upsert_calls: list[tuple[Lot, tuple[TrackedField, ...]]] = []
 
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
+    def upsert(
+        self, lot: Lot, *, tracked: Sequence[TrackedField], is_backfill: bool = False
+    ) -> LotUpsertResult:
         self.upsert_calls.append((lot, tuple(tracked)))
         was_new = lot.id in self._was_new_for
         return LotUpsertResult(was_new=was_new, changes=[])

@@ -168,6 +168,7 @@ from fis_monitor.infra.sqlite.migrations_v6_to_v7 import v6_to_v7  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v7_to_v8 import v7_to_v8  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v8_to_v9 import v8_to_v9  # noqa: E402
 from fis_monitor.infra.sqlite.migrations_v9_to_v10 import v9_to_v10  # noqa: E402
+from fis_monitor.infra.sqlite.migrations_v10_to_v11 import v10_to_v11  # noqa: E402
 
 MIGRATION_V1_TO_V2 = Migration(from_version=1, to_version=2, apply=v1_to_v2)
 MIGRATION_V2_TO_V3 = Migration(from_version=2, to_version=3, apply=v2_to_v3)
@@ -178,17 +179,18 @@ MIGRATION_V6_TO_V7 = Migration(from_version=6, to_version=7, apply=v6_to_v7)
 MIGRATION_V7_TO_V8 = Migration(from_version=7, to_version=8, apply=v7_to_v8)
 MIGRATION_V8_TO_V9 = Migration(from_version=8, to_version=9, apply=v8_to_v9)
 MIGRATION_V9_TO_V10 = Migration(from_version=9, to_version=10, apply=v9_to_v10)
+MIGRATION_V10_TO_V11 = Migration(from_version=10, to_version=11, apply=v10_to_v11)
 
 
 def default_migration_runner() -> SqliteMigrationRunner:
-    """Factory: runner with registered v1→v2 … v9→v10 migration chains.
+    """Factory: runner with registered v1→v2 … v10→v11 migration chains.
 
     Usage (composition root / init_db):
         runner = default_migration_runner()
         init_db(provider, schema_sql=schema, migration_runner=runner)
 
     Returns:
-        SqliteMigrationRunner with MIGRATION_V1_TO_V2 … MIGRATION_V9_TO_V10 registered.
+        SqliteMigrationRunner with MIGRATION_V1_TO_V2 … MIGRATION_V10_TO_V11 registered.
     """
     return SqliteMigrationRunner(
         migrations=[
@@ -201,5 +203,6 @@ def default_migration_runner() -> SqliteMigrationRunner:
             MIGRATION_V7_TO_V8,
             MIGRATION_V8_TO_V9,
             MIGRATION_V9_TO_V10,
+            MIGRATION_V10_TO_V11,
         ]
     )

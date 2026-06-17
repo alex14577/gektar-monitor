@@ -309,6 +309,7 @@ class LotRepository(Protocol):
         lot: Lot,
         *,
         tracked: Sequence[TrackedField],
+        is_backfill: bool = False,
     ) -> LotUpsertResult:
         """Atomically insert-or-update ``lot`` and record field-level history.
 
@@ -352,7 +353,7 @@ class LotRepository(Protocol):
         ...
 
     def latest_new_first_seen(self) -> datetime | None:
-        """Return the most-recent ``first_seen`` across all lots, or ``None``
+        """Return the most-recent ``first_seen`` across LIVE lots, or ``None``
         when the table is empty (bd 47uh).
 
         Used by the header-status widget to render the

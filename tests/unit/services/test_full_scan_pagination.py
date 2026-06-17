@@ -144,7 +144,7 @@ class FakeLotRepository:
         self.mark_seen_calls: list[tuple] = []
         self.mark_inactive_calls: list[tuple] = []
 
-    def upsert(self, lot: Any, *, tracked: Any) -> Any:
+    def upsert(self, lot: Any, *, tracked: Any, is_backfill: bool = False) -> Any:
         raise NotImplementedError
 
     def get(self, lot_id: int) -> None:

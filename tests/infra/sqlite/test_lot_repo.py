@@ -264,6 +264,69 @@ def test_upsert_preserves_first_seen_on_re_observation(
     assert stored.last_seen == t2, "last_seen must be updated to the re-observation time"
 
 
+def test_latest_new_first_seen_excludes_backfill(tmp_db: ConnectionProvider) -> None:
+    """latest_new_first_seen() ignores backfill-discovered lots (bd 31g).
+
+    The chip "Последний новый" must reflect the last LIVE new lot. A backfill
+    lot ingested LATER (greater first_seen wallclock) must NOT win, because it
+    represents a historical auction, not a real-time discovery.
+    """
+    t_live = _BASE_TIME
+    t_backfill = _BASE_TIME + timedelta(hours=5)  # ingested later, but historical
+
+    repo = _make_repo(tmp_db)
+    repo.upsert(make_lot(id=1, first_seen=t_live, last_seen=t_live), tracked=["status"])
+    repo.upsert(
+        make_lot(id=2, first_seen=t_backfill, last_seen=t_backfill),
+        tracked=["status"],
+        is_backfill=True,
+    )
+
+    assert repo.latest_new_first_seen() == t_live, (
+        "backfill lot (later first_seen) must not override the live discovery time"
+    )
+
+
+def test_latest_new_first_seen_none_when_only_backfill(
+    tmp_db: ConnectionProvider,
+) -> None:
+    """A DB containing only backfill lots has no LIVE new lot → None (bd 31g)."""
+    repo = _make_repo(tmp_db)
+    repo.upsert(
+        make_lot(id=3, first_seen=_BASE_TIME, last_seen=_BASE_TIME),
+        tracked=["status"],
+        is_backfill=True,
+    )
+
+    assert repo.latest_new_first_seen() is None
+
+
+def test_upsert_is_backfill_immutable_on_re_observation(
+    tmp_db: ConnectionProvider,
+) -> None:
+    """is_backfill is provenance: set on INSERT, never flipped by UPDATE (bd 31g).
+
+    A lot first inserted by backfill must stay excluded from "Последний новый"
+    even when the live cycle later re-observes it (upsert with is_backfill=False
+    on the UPDATE path must not clear the flag).
+    """
+    repo = _make_repo(tmp_db)
+    repo.upsert(
+        make_lot(id=5, first_seen=_BASE_TIME, last_seen=_BASE_TIME),
+        tracked=["status"],
+        is_backfill=True,
+    )
+    # Live cycle re-observes the same lot later (default is_backfill=False).
+    repo.upsert(
+        make_lot(id=5, first_seen=_BASE_TIME, last_seen=_BASE_TIME + timedelta(hours=1)),
+        tracked=["status"],
+    )
+
+    assert repo.latest_new_first_seen() is None, (
+        "backfill-discovered lot must stay excluded after a live re-observation"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests: get / list_active
 # ---------------------------------------------------------------------------

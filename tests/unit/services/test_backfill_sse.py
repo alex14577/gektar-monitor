@@ -96,7 +96,7 @@ class FakeLotRepository:
         # явный словарь, чтобы эмулировать «лот уже есть в БД».
         self._was_new = was_new_per_lot or {}
 
-    def upsert(self, lot: Any, *, tracked: Any) -> LotUpsertResult:
+    def upsert(self, lot: Any, *, tracked: Any, is_backfill: bool = False) -> LotUpsertResult:
         self.upsert_calls.append(lot.id)
         was_new = self._was_new.get(lot.id, True)
         return LotUpsertResult(was_new=was_new, changes=[])

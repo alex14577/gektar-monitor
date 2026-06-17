@@ -152,7 +152,7 @@ class FakeLotRepository:
         self.mark_seen_calls: list[tuple[list[int], datetime]] = []
         self.mark_inactive_calls: list[tuple[int, str, datetime]] = []
 
-    def upsert(self, lot: Lot, *, tracked: Any) -> Any:
+    def upsert(self, lot: Lot, *, tracked: Any, is_backfill: bool = False) -> Any:
         raise NotImplementedError("not used in full_scan tests")
 
     def get(self, lot_id: int) -> Lot | None:

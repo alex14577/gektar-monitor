@@ -17,9 +17,19 @@ class FakeLotRepository:
         self._count_active_value = count_active_value
         self.count_active_calls: list[tuple[int, ...]] = []
         self._lots: dict[int, Lot] = {}
+        self._backfill_ids: set[int] = set()
         self._last_known_ids: dict[int, int] = {}
 
-    def upsert(self, lot: Lot, *, tracked: Sequence[TrackedField]) -> LotUpsertResult:
+    def upsert(
+        self,
+        lot: Lot,
+        *,
+        tracked: Sequence[TrackedField],
+        is_backfill: bool = False,
+    ) -> LotUpsertResult:
+        # Mirror real repo: provenance flag is set on first insert only.
+        if lot.id not in self._lots and is_backfill:
+            self._backfill_ids.add(lot.id)
         self._lots[lot.id] = lot
         return LotUpsertResult(was_new=False, changes=[])
 
@@ -49,10 +59,16 @@ class FakeLotRepository:
         return self._count_active_value
 
     def latest_new_first_seen(self) -> datetime | None:
-        """Return the largest ``first_seen`` across stored lots, or ``None``.
+        """Return the largest ``first_seen`` across LIVE lots, or ``None``.
 
-        bd 47uh — mirrors the real repo's MAX(first_seen) query.
+        bd 47uh / 31g — mirrors the real repo: excludes backfill-discovered
+        lots (MAX(first_seen) WHERE is_backfill = 0).
         """
-        if not self._lots:
+        live = [
+            lot.first_seen
+            for lot in self._lots.values()
+            if lot.id not in self._backfill_ids
+        ]
+        if not live:
             return None
-        return max(lot.first_seen for lot in self._lots.values())
+        return max(live)

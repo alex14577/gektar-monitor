@@ -248,6 +248,18 @@ X всегда берётся абсолютом из БД (`active_lot_count`),
 
 Инкремент счётчика «N новых» срабатывает через `MutationObserver` с дедупликацией по батчу: `afterbegin` + последующий `relocate` порождают две записи на один узел; дедупликация гарантирует однократный инкремент на карточку.
 
+## Amendment (2026-06-17, bd gektar-monitor-31g) — «backfill молчит» распространено на чип «Последний новый»
+
+**Прод-баг.** Чип «Последний новый» (`partials/_header_status.html.jinja`) показывал неверное, обманчиво-свежее время. Источник — `SqliteLotRepository.latest_new_first_seen()` = `SELECT MAX(first_seen) FROM lots` без фильтра. `first_seen` стампится wallclock'ом ингеста (`clock.now()`) для **всех** лотов, включая backfill (`backfill.py` → `_parsed_row_to_lot(now)`). Backfill дозагружает исторические аукционы (созданные месяцы назад) «прямо сейчас», поэтому `MAX(first_seen)` ловил время записи backfill-строк, а не момент появления реально нового ЖИВОГО лота. Это та же оригинальная мысль Decision'а («backfill — историческая догрузка, не real-time alert, не должен звучать/уведомлять»), но не распространённая на header-чип.
+
+**Resolution.** Добавлена persistence-only колонка `lots.is_backfill` (миграция v10→v11, `INTEGER NOT NULL DEFAULT 0 CHECK (is_backfill IN (0,1))`; та же колонка в `schema.sql`, `user_version=11`). `LotRepository.upsert` получил kwarg `is_backfill: bool = False`; колонка пишется **только в INSERT-ветке** (`1 if is_backfill else 0`), UPDATE не трогает — флаг фиксирует, как строка впервые попала в БД, и стабилен на весь её жизненный цикл. `BackfillService` передаёт `is_backfill=True`; живой `MonitorCycleService` использует default `False`. `latest_new_first_seen()` → `SELECT MAX(first_seen) FROM lots WHERE is_backfill = 0`. Три read-call-site (`monitor_cycle._build_status_fields`, `monitor_vm`, `composition` login-callback) **не менялись** — семантика локализована в репозитории (high cohesion).
+
+**Почему колонка, а не state-key / эвристика по времени.** Колонка идиоматична (домен уже знает концепт `is_backfill` на `SseLotNew`), держит ответ «какой последний ЖИВОЙ новый лот» целиком в data-слое (3 читателя не трогаются → low coupling), стабильна на restart и доступна на page-load. State-key потребовал бы инжекта state-store в `MonitorCycleService` + правки всех читателей (включая web-VM слой) → выше связность.
+
+**Known limitation (принято).** Legacy-строки после миграции = `is_backfill=0` (нельзя задним числом узнать провенанс) → `MAX` самоисцеляется со следующим live-лотом. Лот, впервые увиденный backfill'ом, навсегда исключён из «последнего нового», даже если позже виден живым циклом — корректно по семантике «последний ЖИВОЙ новый».
+
+**Test scope (per [[architecture/09-test-strategy]]):** Layer-3 — миграция (`test_migrations_v10_to_v11.py`: колонка добавлена, DEFAULT 0, идемпотентность, `user_version=11`) + репо (`test_lot_repo.py`: `latest_new_first_seen` исключает backfill; backfill-only → `None`; флаг immutable при live re-observation).
+
 ## See also
 
 - [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] — per-connection view-filter

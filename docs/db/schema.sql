@@ -32,7 +32,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA auto_vacuum  = INCREMENTAL;
 PRAGMA wal_autocheckpoint = 1000;
-PRAGMA user_version = 10;
+PRAGMA user_version = 11;
 -- user_version bumped 1→2 (R4-M8): добавлены колонки notifications
 --   (status, attempt_no, last_attempt_at) + расширение smtp_credentials
 --   (smtp_host, smtp_port). См. ADR-019, ADR-020 и MigrationRunner v1→v2.
@@ -64,6 +64,10 @@ PRAGMA user_version = 10;
 --   still held macro-ids → 0 JOIN matches → broken cutoff-filter, suppression,
 --   delta-trigger. Shared subjects 87/96 get MIN(subscribed_at). ADR-062 Phase 1.
 --   MigrationRunner v9→v10.
+-- user_version bumped 10→11 (31g): added lots.is_backfill (0=live cycle, 1=backfill).
+--   latest_new_first_seen() filters WHERE is_backfill=0 so the "Последний новый"
+--   chip reflects the last LIVE new lot, not the backfill catch-up wallclock.
+--   Extends ADR-060 (backfill is silent) to the header chip. MigrationRunner v10→v11.
 -- ВНИМАНИЕ: per-connection PRAGMA wal_autocheckpoint=1000 ДУБЛИРУЕТСЯ в
 -- ThreadLocalConnectionProvider._configure() (R4-minor) — persistent-значение
 -- срабатывает только если БД создавалась через этот файл; на чужих БД
@@ -116,7 +120,8 @@ CREATE TABLE IF NOT EXISTS lots (
     is_active            INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     inactive_reason      TEXT,                       -- 'status_changed'|'hard_removed'|'list_absent'
     inactive_since       TIMESTAMP,
-    inactive_confirmed_at TIMESTAMP
+    inactive_confirmed_at TIMESTAMP,
+    is_backfill          INTEGER NOT NULL DEFAULT 0 CHECK (is_backfill IN (0, 1))  -- ingest provenance: 0=live cycle, 1=backfill; bd 31g
 );
 
 CREATE INDEX IF NOT EXISTS idx_lots_cadastral_no ON lots(cadastral_no);
