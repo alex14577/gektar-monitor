@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fis-monitor"
-version = "1.1.9"
+version = "1.1.10"
 description = "Мониторинг свободных гектаров на сайте Дальневосточного гектара"
 readme = "README.md"
 requires-python = ">=3.12"
