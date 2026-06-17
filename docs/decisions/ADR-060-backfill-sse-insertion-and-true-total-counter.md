@@ -260,6 +260,22 @@ X всегда берётся абсолютом из БД (`active_lot_count`),
 
 **Test scope (per [[architecture/09-test-strategy]]):** Layer-3 — миграция (`test_migrations_v10_to_v11.py`: колонка добавлена, DEFAULT 0, идемпотентность, `user_version=11`) + репо (`test_lot_repo.py`: `latest_new_first_seen` исключает backfill; backfill-only → `None`; флаг immutable при live re-observation).
 
+## Amendment (2026-06-17, bd gektar-monitor-8s5) — идемпотентная клиентская доставка `lot.new` (против replay-инфляции счётчика)
+
+**Прод-баг.** Счётчик фида (`#feed-lot-count` M «из N» + пилюля «N новых») монотонно уползал вверх со временем (наблюдение: ~20→48 за сутки, →60 за 3-4 суток) при единицах реально новых лотов. БД чистая (upsert дедуплицирует по `id`, дублей строк нет) → инфляция чисто на стороне доставки/отображения.
+
+**Root cause (две параллельные investigations).** Шина `ThreadEventBus` (`infra/sse/bus.py`, bd 0a9r) держит **последний** `lot.new` в replay-слоте `_last_normal["lot.new"]` ещё `_REPLAY_TTL_SECONDS=30` после публикации, чтобы закрыть гонку publish↔attach (lot.new, опубликованный в зазоре между рендером страницы и подключением EventSource, иначе терялся). `evict_normal_replay` вызывается для `"status"` и `"login.succeeded"`, но **никогда для `"lot.new"`**. htmx-sse автопереподключается (ping 2с; сетевые блипы, сон ноута, idle-таймаут прокси) — и **каждый reconnect в пределах 30с от lot.new** заново получает слот через `subscribe()` → htmx переинсертит **дубль-карточку** → `incrementLotCounters()` +1, пилюля +1, shown-N +1, а для LIVE-лота ещё и **дубль звука/уведомления** (`onLotNew`). Backfill-reemission и deactivation-churn исключены (оба гейтятся `was_new`); M-ресинк (`GET /feed/count`) случается только на `htmx:sseOpen`, в steady state дрейф не лечит.
+
+**Decision — идемпотентность на КЛИЕНТЕ, server-replay сохранён.** Серверный replay-слот НЕ трогаем: это race-fix 0a9r; его удаление вернуло бы баг «карточка пропала на первом коннекте». Вместо этого `lot.new` делается идемпотентным по `data-lot-id` в потребителе (`app.js`):
+1. **`htmx:sseMessage` (ветка lot.new):** сразу после `node = zone.firstElementChild` — если в `section#feed-zone-list` уже есть `article.lot` с тем же `data-lot-id` (`querySelectorAll(...).length > 1`), это re-доставка реплея → `node.remove(); return;` — без `incrementLotCounters`/`onLotNew`/`updateShownCount`/relocate. Снимает инфляцию M, дубль-карточку и дубль звука/уведомления.
+2. **MutationObserver пилюли:** `if (!n.isConnected) continue;` — дубль удаляется синхронно в хендлере (тот же task) ДО микротаск-чекпоинта обсервера, поэтому удалённый узел читается `isConnected=false` и пилюлю не инкрементит. Легит-карточки (relocate live / move-to-bottom backfill) остаются `isConnected=true` → считаются как прежде (совместно с пакетным `seen`-дедупом).
+
+**Почему клиент — правильный слой.** Только клиент знает, какие карточки уже держит; шина не отличает first-connect (нужен replay 0a9r) от reconnect (replay вреден). DOM-presence dedup корректен: дубли возникают исключительно от реплея уже вставленной карточки; реально новый лот (`was_new`, свежий id) даёт `length==1` и проходит.
+
+**Известное (принято).** Серверный replay по-прежнему тратит лишний round-trip на reconnect (карточка вставляется и тут же удаляется в одном task — без перерисовки/мерцания, paint после микротасков). Перевод `lot.new` на per-lot-id слоты / Last-Event-ID — большая отдельная задача, вне scope багфикса.
+
+**Test scope (per [[architecture/09-test-strategy]]).** `app.js`/SSE-fan-out — **smoke-only** (Playwright исключён из автотестов; прецедент §6jg). Автотеста нет; py-suite зелёный. Manual smoke: открыть фид → форснуть reconnect EventSource в пределах 30с от lot.new → счётчик/пилюля не растут, дубль-карточки и дубль-звука нет; первый коннект с lot.new-в-зазоре по-прежнему показывает карточку (0a9r не сломан).
+
 ## See also
 
 - [[decisions/ADR-052-sse-view-filter-propagation|ADR-052]] — per-connection view-filter

@@ -415,6 +415,24 @@
       const zone = document.getElementById('feed-zone-list');
       const node = zone ? zone.firstElementChild : null;
 
+      // Idempotent delivery (bd 8s5): the event bus replays the most-recent
+      // lot.new for _REPLAY_TTL_SECONDS (bus.py, 0a9r), so every htmx-sse
+      // reconnect within that window re-delivers it and htmx re-inserts a
+      // duplicate card. Without this guard each replay re-increments the
+      // counters, re-fires the live sound/notification, and leaves a duplicate
+      // article in the feed. If a card for this lot id already exists, drop the
+      // just-inserted duplicate and skip all side-effects (the pill observer
+      // skips it too via its isConnected check).
+      if (node && node.classList && node.classList.contains('lot') && node.dataset.lotId) {
+        const sameId = zone.querySelectorAll(
+          'article.lot[data-lot-id="' + CSS.escape(node.dataset.lotId) + '"]'
+        );
+        if (sameId.length > 1) {
+          node.remove();
+          return;
+        }
+      }
+
       if (node && node.dataset.backfill === '1') {
         // --- Backfill lot: reposition to BOTTOM of section, silently. ---
         // htmx already inserted the card at afterbegin.  We move it to just
@@ -694,6 +712,11 @@
         for (const n of m.addedNodes) {
           if (n.nodeType !== 1) continue;
           if (!n.classList || !n.classList.contains('lot')) continue;
+          // bd 8s5: a duplicate card from SSE replay is removed synchronously in
+          // the htmx:sseMessage handler (same task); this MutationObserver callback
+          // runs later at the microtask checkpoint, so the removed duplicate reads
+          // isConnected=false here — skip it so the pill does not count replays.
+          if (!n.isConnected) continue;
           if (seen.has(n)) continue;
           seen.add(n);
           // 4. Freshness flash (Tier 3, #4)

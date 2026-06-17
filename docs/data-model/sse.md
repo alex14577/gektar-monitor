@@ -110,6 +110,10 @@ class SseLotNew(BaseModel):
     # False (default) when published by BrowserSseNotifier (live monitor cycle).
     # Insertion target: section#feed-zone-list (afterbegin); JS relocates to sort position.
     # Backfill cards relocated to end (before #load-more-trigger). См. ADR-060 amendment gyn.
+    # lot.new НЕ исключается из replay-слота (_last_normal, 0a9r) — реплеится на каждый
+    # reconnect в пределах 30с. Идемпотентность доставки обеспечивает КЛИЕНТ: app.js
+    # дедуплицирует по data-lot-id (дубль-карточку удаляет, счётчики/звук не трогает).
+    # См. [[decisions/ADR-060-backfill-sse-insertion-and-true-total-counter|ADR-060]] amendment 8s5.
 
 
 class SseLotStatus(BaseModel):
